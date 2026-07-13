@@ -26,7 +26,7 @@ const AppShell: React.FC = () => {
                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
             <div className="p-3 text-xs font-semibold uppercase tracking-wide"
                  style={{ color: 'var(--color-text-muted)' }}>
-              Files
+              文件
             </div>
             <FileTree onSelectFile={setSelectedFile} />
           </div>

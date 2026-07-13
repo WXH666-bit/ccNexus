@@ -30,7 +30,7 @@ const GitBranchBar: React.FC<Props> = ({ currentBranch }) => {
 
   const handleCheckout = async (branch: string) => {
     if (branch === currentBranch) return
-    if (confirm(`Switch to branch "${branch}"?`)) {
+    if (confirm(`切换到分支 "${branch}"？`)) {
       try {
         await window.electronAPI.git.checkout(branch)
         // Reload after switching
@@ -43,7 +43,7 @@ const GitBranchBar: React.FC<Props> = ({ currentBranch }) => {
   }
 
   if (loading) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--color-text-muted)' }}>Loading branches...</div>
+    return <div className="p-4 text-xs" style={{ color: 'var(--color-text-muted)' }}>加载分支列表...</div>
   }
 
   return (

@@ -34,49 +34,35 @@ const GitPanel: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-    loadStatus()
-  }, [])
+  useEffect(() => { loadStatus() }, [])
 
   const handleStage = async (files: string[]) => {
     await window.electronAPI.git.stage(files)
     loadStatus()
   }
-
   const handleUnstage = async (files: string[]) => {
     await window.electronAPI.git.unstage(files)
     loadStatus()
   }
-
   const handleCommit = async () => {
     if (!commitMsg.trim()) return
     await window.electronAPI.git.commit(commitMsg.trim())
     setCommitMsg('')
     loadStatus()
   }
-
   const handlePush = async () => {
-    try {
-      await window.electronAPI.git.push()
-      loadStatus()
-    } catch (e: any) {
-      setError(e.message)
-    }
+    try { await window.electronAPI.git.push(); loadStatus() }
+    catch (e: any) { setError(e.message) }
   }
-
   const handlePull = async () => {
-    try {
-      await window.electronAPI.git.pull()
-      loadStatus()
-    } catch (e: any) {
-      setError(e.message)
-    }
+    try { await window.electronAPI.git.pull(); loadStatus() }
+    catch (e: any) { setError(e.message) }
   }
 
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        Loading git status...
+        加载 Git 状态...
       </div>
     )
   }
@@ -84,7 +70,7 @@ const GitPanel: React.FC = () => {
   if (!status) {
     return (
       <div className="h-full flex items-center justify-center text-xs" style={{ color: '#e06c75' }}>
-        {error || 'Failed to load git status'}
+        {error || '无法加载 Git 状态'}
       </div>
     )
   }
@@ -96,7 +82,6 @@ const GitPanel: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b flex-shrink-0"
            style={{ borderColor: 'var(--color-border)' }}>
         <GitBranch size={14} style={{ color: 'var(--color-accent)' }} />
@@ -112,74 +97,50 @@ const GitPanel: React.FC = () => {
           </span>
         )}
         <span className="text-[10px] px-1 rounded" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}>
-          {totalChanges} changes
+          {totalChanges} 个变更
         </span>
-
         <div className="flex-1" />
-
-        {/* Tabs */}
-        <button
-          onClick={() => setActiveTab('status')}
-          className={`text-[10px] px-2 py-0.5 rounded ${activeTab === 'status' ? '' : 'opacity-50'}`}
-          style={activeTab === 'status' ? { backgroundColor: 'var(--color-bg)' } : {}}
-        >
-          Status
+        <button onClick={() => setActiveTab('status')}
+                className={`text-[10px] px-2 py-0.5 rounded ${activeTab === 'status' ? '' : 'opacity-50'}`}
+                style={activeTab === 'status' ? { backgroundColor: 'var(--color-bg)' } : {}}>
+          状态
         </button>
-        <button
-          onClick={() => setActiveTab('branches')}
-          className={`text-[10px] px-2 py-0.5 rounded ${activeTab === 'branches' ? '' : 'opacity-50'}`}
-          style={activeTab === 'branches' ? { backgroundColor: 'var(--color-bg)' } : {}}
-        >
-          Branches
+        <button onClick={() => setActiveTab('branches')}
+                className={`text-[10px] px-2 py-0.5 rounded ${activeTab === 'branches' ? '' : 'opacity-50'}`}
+                style={activeTab === 'branches' ? { backgroundColor: 'var(--color-bg)' } : {}}>
+          分支
         </button>
-
         <button onClick={loadStatus} className="p-1 rounded hover:opacity-70"
                 style={{ color: 'var(--color-text-muted)' }}>
           <RefreshCw size={12} />
         </button>
       </div>
 
-      {/* Content */}
       {activeTab === 'status' ? (
         <>
           <div className="flex-1 overflow-y-auto">
             {totalChanges === 0 ? (
               <div className="p-4 text-center text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 <Check size={20} className="mx-auto mb-1" style={{ color: '#98c379' }} />
-                Working tree clean
+                工作区干净
               </div>
             ) : (
-              <GitStatusList
-                status={status}
-                onStage={handleStage}
-                onUnstage={handleUnstage}
-              />
+              <GitStatusList status={status} onStage={handleStage} onUnstage={handleUnstage} />
             )}
           </div>
-
           {stagedCount > 0 && (
-            <GitCommitForm
-              value={commitMsg}
-              onChange={setCommitMsg}
-              onCommit={handleCommit}
-            />
+            <GitCommitForm value={commitMsg} onChange={setCommitMsg} onCommit={handleCommit} />
           )}
-
-          {/* Actions */}
           <div className="flex gap-2 p-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-            <button
-              onClick={handlePush}
-              className="flex-1 text-xs py-1.5 rounded flex items-center justify-center gap-1"
-              style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
-            >
-              <ArrowUp size={12} /> Push
+            <button onClick={handlePush}
+                    className="flex-1 text-xs py-1.5 rounded flex items-center justify-center gap-1"
+                    style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
+              <ArrowUp size={12} /> 推送
             </button>
-            <button
-              onClick={handlePull}
-              className="flex-1 text-xs py-1.5 rounded flex items-center justify-center gap-1"
-              style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
-            >
-              <ArrowDown size={12} /> Pull
+            <button onClick={handlePull}
+                    className="flex-1 text-xs py-1.5 rounded flex items-center justify-center gap-1"
+                    style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
+              <ArrowDown size={12} /> 拉取
             </button>
           </div>
         </>

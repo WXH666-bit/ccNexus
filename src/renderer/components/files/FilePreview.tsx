@@ -96,13 +96,13 @@ const FilePreview: React.FC<FilePreviewProps> = ({ filePath, onClose }) => {
               src={`file://${filePath}`}
               alt={fileName}
               className="max-w-full max-h-full object-contain"
-              onError={() => setError('Cannot preview this image')}
+              onError={() => setError('无法预览该图片')}
             />
           </div>
         ) : isLargeFile ? (
           <div className="p-4">
             <p className="text-xs mb-2" style={{ color: '#e5c07b' }}>
-              Large file ({Math.round(content!.length / 1024)}KB) — showing first part:
+              大文件 ({Math.round(content!.length / 1024)}KB) — 仅显示前段:
             </p>
             <pre className="text-xs font-mono p-3 rounded" style={{
               backgroundColor: 'var(--color-bg)',

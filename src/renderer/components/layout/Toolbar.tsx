@@ -28,7 +28,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         onClick={onToggleSidebar}
         className={`p-1.5 rounded transition-colors ${sidebarOpen ? 'opacity-100' : 'opacity-50'}`}
         style={{ color: 'var(--color-text-muted)' }}
-        title="Toggle File Tree"
+        title="文件树"
       >
         <FolderTree size={16} />
       </button>

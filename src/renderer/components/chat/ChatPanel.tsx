@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Send, Loader2, Square, Play } from 'lucide-react'
+import { Send, Square, Play } from 'lucide-react'
 
 interface Message {
   id: string
@@ -13,25 +13,22 @@ const ChatPanel: React.FC = () => {
     {
       id: 'init',
       role: 'system',
-      text: 'ccNexus ready. Click ▶ to start Claude Code session.',
+      text: 'ccNexus 就绪，点击 ▶ 启动 Claude Code 会话',
       timestamp: Date.now()
     }
   ])
   const [input, setInput] = useState('')
   const [sessionActive, setSessionActive] = useState(false)
-  const [sessionStatus, setSessionStatus] = useState('idle') // idle | running | stopped | error
+  const [sessionStatus, setSessionStatus] = useState('idle')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Listen for Claude output
   useEffect(() => {
     const unsubOutput = window.electronAPI.claude.onOutput((data: string) => {
       setMessages(prev => {
-        // Append to last assistant message if it exists and is recent (< 1s old)
         const last = prev[prev.length - 1]
         if (last && last.role === 'assistant' && Date.now() - last.timestamp < 5000) {
           return [
@@ -39,7 +36,6 @@ const ChatPanel: React.FC = () => {
             { ...last, text: last.text + data, timestamp: Date.now() }
           ]
         }
-        // New assistant message
         return [...prev, {
           id: `asst-${Date.now()}`,
           role: 'assistant',
@@ -57,14 +53,14 @@ const ChatPanel: React.FC = () => {
         setMessages(prev => [...prev, {
           id: `sys-${Date.now()}`,
           role: 'system',
-          text: '🟢 Claude Code session started',
+          text: '🟢 Claude Code 会话已启动',
           timestamp: Date.now()
         }])
       } else if (status === 'stopped') {
         setMessages(prev => [...prev, {
           id: `sys-${Date.now()}`,
           role: 'system',
-          text: '🔴 Claude Code session ended',
+          text: '🔴 Claude Code 会话已结束',
           timestamp: Date.now()
         }])
       } else if (status === 'error') {
@@ -72,23 +68,19 @@ const ChatPanel: React.FC = () => {
       }
     })
 
-    return () => {
-      unsubOutput()
-      unsubStatus()
-    }
+    return () => { unsubOutput(); unsubStatus() }
   }, [])
 
   const handleStart = () => {
-    const projectPath = process.cwd?.() || '.'
     setSessionStatus('running')
     setSessionActive(true)
     setMessages(prev => [...prev, {
       id: `sys-${Date.now()}`,
       role: 'system',
-      text: 'Starting Claude Code...',
+      text: '正在启动 Claude Code...',
       timestamp: Date.now()
     }])
-    window.electronAPI.claude.start(projectPath)
+    window.electronAPI.claude.start('.')
   }
 
   const handleStop = () => {
@@ -99,14 +91,12 @@ const ChatPanel: React.FC = () => {
 
   const handleSend = () => {
     if (!input.trim() || !sessionActive) return
-
-    const userMsg: Message = {
+    setMessages(prev => [...prev, {
       id: `user-${Date.now()}`,
       role: 'user',
       text: input,
       timestamp: Date.now()
-    }
-    setMessages(prev => [...prev, userMsg])
+    }])
     window.electronAPI.claude.send(input)
     setInput('')
   }
@@ -120,73 +110,54 @@ const ChatPanel: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Session controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b flex-shrink-0"
            style={{ borderColor: 'var(--color-border)' }}>
         <button
           onClick={sessionActive ? handleStop : handleStart}
-          className={`p-1.5 rounded transition-colors ${
-            sessionActive ? 'hover:opacity-80' : 'hover:opacity-80'
-          }`}
+          className="p-1.5 rounded transition-colors"
           style={{
             backgroundColor: sessionActive ? '#e06c75' : 'var(--color-accent)',
             color: '#fff'
           }}
-          title={sessionActive ? 'Stop session' : 'Start session'}
+          title={sessionActive ? '停止会话' : '启动会话'}
         >
           {sessionActive ? <Square size={12} /> : <Play size={12} />}
         </button>
         <div className="flex items-center gap-1.5">
-          <div
-            className="w-2 h-2 rounded-full"
-            style={{
-              backgroundColor:
-                sessionStatus === 'running' ? '#98c379' :
-                sessionStatus === 'error' ? '#e06c75' :
-                sessionStatus === 'stopped' ? '#909296' : '#909296'
-            }}
-          />
+          <div className="w-2 h-2 rounded-full" style={{
+            backgroundColor:
+              sessionStatus === 'running' ? '#98c379' :
+              sessionStatus === 'error' ? '#e06c75' : '#909296'
+          }} />
           <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {sessionStatus === 'running' ? 'Connected' :
-             sessionStatus === 'error' ? 'Error' :
-             sessionStatus === 'stopped' ? 'Stopped' : 'Idle'}
+            {sessionStatus === 'running' ? '已连接' :
+             sessionStatus === 'error' ? '错误' :
+             sessionStatus === 'stopped' ? '已停止' : '空闲'}
           </span>
         </div>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg) => (
           <div key={msg.id} className={`
-            ${msg.role === 'user'
-              ? 'flex justify-end'
-              : msg.role === 'system'
-                ? 'flex justify-center'
-                : 'flex justify-start'}
+            ${msg.role === 'user' ? 'flex justify-end'
+              : msg.role === 'system' ? 'flex justify-center'
+              : 'flex justify-start'}
           `}>
-            <div className={`
-              max-w-[80%]
-              ${msg.role === 'user' ? '' : ''}
-            `}>
+            <div className="max-w-[80%]">
               {msg.role !== 'system' && (
                 <div className="text-[10px] mb-0.5 font-semibold px-1"
                      style={{ color: msg.role === 'user' ? '#61afef' : 'var(--color-text-muted)' }}>
-                  {msg.role === 'user' ? 'You' : 'Claude'}
+                  {msg.role === 'user' ? '我' : 'Claude'}
                 </div>
               )}
-              <div
-                className={`rounded-lg px-3 py-2 text-sm ${
-                  msg.role === 'system'
-                    ? ''
-                    : ''
-                }`}
-                style={msg.role !== 'system' ? {
-                  backgroundColor: msg.role === 'user' ? 'var(--color-accent)' : 'var(--color-surface)',
-                  color: msg.role === 'user' ? '#fff' : 'var(--color-text)',
-                  borderColor: msg.role !== 'user' ? 'var(--color-border)' : 'transparent',
-                  border: msg.role !== 'user' ? '1px solid' : 'none'
-                } : {}}
-              >
+              <div className="rounded-lg px-3 py-2 text-sm"
+                   style={msg.role !== 'system' ? {
+                     backgroundColor: msg.role === 'user' ? 'var(--color-accent)' : 'var(--color-surface)',
+                     color: msg.role === 'user' ? '#fff' : 'var(--color-text)',
+                     borderColor: msg.role !== 'user' ? 'var(--color-border)' : 'transparent',
+                     border: msg.role !== 'user' ? '1px solid' : 'none'
+                   } : {}}>
                 <div className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
                   {msg.text}
                 </div>
@@ -197,18 +168,15 @@ const ChatPanel: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
       <div className="p-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
         <div className="flex gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={
-              sessionActive
-                ? 'Send message... (Enter to send, Shift+Enter for newline)'
-                : 'Start Claude Code session first...'
-            }
+            placeholder={sessionActive
+              ? '输入消息...（Enter 发送，Shift+Enter 换行）'
+              : '请先启动 Claude Code 会话...'}
             disabled={!sessionActive}
             rows={2}
             className="flex-1 resize-none rounded-md p-2 text-sm outline-none disabled:opacity-40"

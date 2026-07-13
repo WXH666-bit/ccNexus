@@ -100,7 +100,7 @@ const FileTree: React.FC<FileTreeProps> = ({ onSelectFile }) => {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--color-text-muted)' }}>
-        <span className="text-xs">Loading files...</span>
+        <span className="text-xs">加载文件中...</span>
       </div>
     )
   }

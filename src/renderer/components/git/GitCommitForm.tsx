@@ -22,7 +22,7 @@ const GitCommitForm: React.FC<Props> = ({ value, onChange, onCommit }) => {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Commit message (Ctrl+Enter to commit)"
+          placeholder="提交信息（Ctrl+Enter 提交）"
           className="flex-1 text-xs px-2 py-1.5 rounded outline-none"
           style={{
             backgroundColor: 'var(--color-bg)',
@@ -37,7 +37,7 @@ const GitCommitForm: React.FC<Props> = ({ value, onChange, onCommit }) => {
           className="text-xs px-3 py-1.5 rounded font-medium disabled:opacity-30"
           style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
         >
-          Commit
+          提交
         </button>
       </div>
     </div>

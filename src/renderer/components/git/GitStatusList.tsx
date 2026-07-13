@@ -1,5 +1,5 @@
 import React from 'react'
-import { PlusCircle, MinusCircle, FileText } from 'lucide-react'
+import { PlusCircle, MinusCircle } from 'lucide-react'
 import type { GitStatus } from './GitPanel'
 
 interface Props {
@@ -20,7 +20,6 @@ const GitStatusList: React.FC<Props> = ({ status, onStage, onUnstage }) => {
     title: string,
     files: { path: string; status: string }[],
     action: 'stage' | 'unstage',
-    icon: React.ReactNode
   ) => {
     if (files.length === 0) return null
 
@@ -39,16 +38,14 @@ const GitStatusList: React.FC<Props> = ({ status, onStage, onUnstage }) => {
             className="text-[10px] px-1.5 py-0.5 rounded hover:opacity-70"
             style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}
           >
-            {action === 'stage' ? 'Stage all' : 'Unstage all'}
+            {action === 'stage' ? '全部暂存' : '全部取消'}
           </button>
         </div>
         {files.map((f) => (
           <div
             key={f.path}
             className="flex items-center gap-1.5 px-3 py-0.5 cursor-pointer hover:opacity-70 group"
-            onClick={() => {
-              action === 'stage' ? onStage([f.path]) : onUnstage([f.path])
-            }}
+            onClick={() => action === 'stage' ? onStage([f.path]) : onUnstage([f.path])}
           >
             <span className="text-[10px]" style={{ color: STATUS_COLORS[f.status] || 'var(--color-text-muted)' }}>
               {f.status === 'added' ? 'A' :
@@ -68,22 +65,22 @@ const GitStatusList: React.FC<Props> = ({ status, onStage, onUnstage }) => {
 
   return (
     <div className="py-1">
-      {renderFileList('Staged', status.staged, 'unstage', <MinusCircle size={12} />)}
-      {renderFileList('Changes', status.modified, 'stage', <PlusCircle size={12} />)}
+      {renderFileList('已暂存', status.staged, 'unstage')}
+      {renderFileList('已修改', status.modified, 'stage')}
 
       {status.untracked.length > 0 && (
         <div className="mb-1">
           <div className="flex items-center justify-between px-3 py-1">
             <span className="text-[10px] font-semibold uppercase"
                   style={{ color: 'var(--color-text-muted)' }}>
-              Untracked ({status.untracked.length})
+              未跟踪 ({status.untracked.length})
             </span>
             <button
               onClick={() => onStage(status.untracked)}
               className="text-[10px] px-1.5 py-0.5 rounded hover:opacity-70"
               style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}
             >
-              Stage all
+              全部暂存
             </button>
           </div>
           {status.untracked.map((path) => (
