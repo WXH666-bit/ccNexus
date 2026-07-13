@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { getFileTree, readFile } from './fs/fs-service'
 import { ClaudeProcess } from './claude/claude-process'
 import { loadSessions, createSession, addMessage } from './claude/session-store'
+import { loadConfig, saveConfig, readClaudeSettings, writeClaudeSettings, validateClaudePath } from './claude/config-store'
 import simpleGit from 'simple-git'
 import { mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
@@ -28,6 +29,41 @@ export function registerHandlers(mainWindow: BrowserWindow): void {
       return currentProjectPath
     }
     return null
+  })
+
+  ipcMain.handle('dialog:open-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '所有文件', extensions: ['*'] },
+        { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+      ]
+    })
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths
+    }
+    return []
+  })
+
+  // ===== Settings =====
+  ipcMain.handle('settings:read-claude', async () => {
+    return readClaudeSettings()
+  })
+
+  ipcMain.handle('settings:write-claude', async (_event, settings: any) => {
+    writeClaudeSettings(settings)
+  })
+
+  ipcMain.handle('settings:read-ccnexus', async () => {
+    return loadConfig()
+  })
+
+  ipcMain.handle('settings:write-ccnexus', async (_event, config: any) => {
+    saveConfig(config)
+  })
+
+  ipcMain.handle('claude:check-path', async (_event, claudePath: string) => {
+    return validateClaudePath(claudePath)
   })
 
   // ===== Claude Code =====

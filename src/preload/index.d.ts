@@ -14,6 +14,14 @@ export interface ElectronAPI {
   }
   dialog: {
     openProject: () => Promise<string | null>
+    openFile: () => Promise<string[]>
+  }
+  settings: {
+    readClaude: () => Promise<any>
+    writeClaude: (s: any) => Promise<void>
+    readCcNexus: () => Promise<any>
+    writeCcNexus: (c: any) => Promise<void>
+    checkClaudePath: (p: string) => Promise<{ valid: boolean; version?: string; error?: string }>
   }
   fs: {
     getTree: (dirPath?: string) => Promise<FileNode[]>

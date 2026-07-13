@@ -30,6 +30,15 @@ const api = {
   // Dialog
   dialog: {
     openProject: () => ipcRenderer.invoke('dialog:open-project'),
+    openFile: () => ipcRenderer.invoke('dialog:open-file'),
+  },
+  // Settings
+  settings: {
+    readClaude: () => ipcRenderer.invoke('settings:read-claude'),
+    writeClaude: (s: any) => ipcRenderer.invoke('settings:write-claude', s),
+    readCcNexus: () => ipcRenderer.invoke('settings:read-ccnexus'),
+    writeCcNexus: (c: any) => ipcRenderer.invoke('settings:write-ccnexus', c),
+    checkClaudePath: (p: string) => ipcRenderer.invoke('claude:check-path', p),
   },
   // File System
   fs: {

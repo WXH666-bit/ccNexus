@@ -5,6 +5,7 @@ import ChatPanel from '../chat/ChatPanel'
 import GitPanel from '../git/GitPanel'
 import FilePreview from '../files/FilePreview'
 import SessionBar from '../chat/SessionBar'
+import SettingsPanel from '../settings/SettingsPanel'
 
 interface AppShellProps {
   projectPath: string
@@ -16,6 +17,7 @@ const AppShell: React.FC<AppShellProps> = ({ projectPath, onSwitchProject }) => 
   const [gitPanelOpen, setGitPanelOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const handleNewSession = useCallback(async () => {
     const session = await window.electronAPI.claude.newSession(projectPath)
@@ -36,6 +38,7 @@ const AppShell: React.FC<AppShellProps> = ({ projectPath, onSwitchProject }) => 
         onToggleGit={() => setGitPanelOpen(!gitPanelOpen)}
         projectPath={projectPath}
         onSwitchProject={onSwitchProject}
+        onOpenSettings={() => setSettingsOpen(true)}
       >
         <SessionBar
           currentSessionId={sessionId}
@@ -72,6 +75,8 @@ const AppShell: React.FC<AppShellProps> = ({ projectPath, onSwitchProject }) => 
           <GitPanel />
         </div>
       )}
+
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

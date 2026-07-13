@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process'
 import { BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
+import { loadConfig } from './config-store'
 
 export class ClaudeProcess {
   private process: ChildProcess | null = null
@@ -8,9 +9,24 @@ export class ClaudeProcess {
   private status: 'idle' | 'running' | 'stopped' = 'idle'
   private sessionId: string | null = null
   private projectPath: string = '.'
+  private model: string | null = null
+  private permissionMode: string | null = null
 
   constructor(mainWindow: BrowserWindow) {
     this.mainWindow = mainWindow
+  }
+
+  setModel(model: string | null): void {
+    this.model = model
+  }
+
+  setPermissionMode(mode: string | null): void {
+    this.permissionMode = mode
+  }
+
+  private getClaudePath(): string {
+    const config = loadConfig()
+    return config.claudePath || 'claude'
   }
 
   get isRunning(): boolean {
@@ -29,16 +45,37 @@ export class ClaudeProcess {
     this.mainWindow.webContents.send('claude:output', `\n[系统] Claude Code 会话已就绪 (session: ${this.sessionId.slice(0, 8)}...)\n\n`)
   }
 
-  send(input: string): void {
+  send(input: string, attachments?: string[]): void {
     if (!this.sessionId) return
 
     const args = [
       '--print',
       input,
       '--session-id', this.sessionId,
+      '--verbose',
     ]
 
-    this.process = spawn('claude', args, {
+    if (this.model) {
+      args.push('--model', this.model)
+    }
+
+    if (this.permissionMode) {
+      args.push('--permission-mode', this.permissionMode)
+    }
+
+    // Add file attachments as --add-dir
+    if (attachments && attachments.length > 0) {
+      const dirs = new Set<string>()
+      for (const f of attachments) {
+        const dir = f.replace(/[/\\][^/\\]*$/, '')
+        dirs.add(dir)
+      }
+      args.push('--add-dir', ...dirs)
+    }
+
+    const claudePath = this.getClaudePath()
+
+    this.process = spawn(claudePath, args, {
       cwd: this.projectPath,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {

@@ -1,5 +1,5 @@
 import React from 'react'
-import { FolderTree, GitBranch, Terminal, Plus, Minus, FolderOpen } from 'lucide-react'
+import { FolderTree, GitBranch, Terminal, Plus, Minus, FolderOpen, Settings } from 'lucide-react'
 import { useUIStore } from '../../stores/ui-store'
 
 interface ToolbarProps {
@@ -9,6 +9,7 @@ interface ToolbarProps {
   onToggleGit: () => void
   projectPath: string
   onSwitchProject: () => void
+  onOpenSettings: () => void
   children?: React.ReactNode
 }
 
@@ -16,7 +17,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   sidebarOpen, onToggleSidebar,
   gitPanelOpen, onToggleGit,
   projectPath, onSwitchProject,
-  children
+  onOpenSettings, children
 }) => {
   const { fontSize, increaseFont, decreaseFont } = useUIStore()
   const projectName = projectPath.split(/[/\\]/).pop() || projectPath
@@ -51,6 +52,12 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {children}
 
       <div className="flex-1" />
+
+      <button onClick={onOpenSettings}
+              className="p-1.5 rounded hover:opacity-70"
+              style={{ color: 'var(--color-text-muted)' }} title="设置">
+        <Settings size={15} />
+      </button>
 
       <button onClick={decreaseFont} className="p-1 rounded hover:opacity-70"
               style={{ color: 'var(--color-text-muted)' }} title="缩小字体">
