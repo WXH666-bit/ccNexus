@@ -53,6 +53,8 @@ export class ClaudeProcess {
       input,
       '--session-id', this.sessionId,
       '--verbose',
+      '--output-format', 'stream-json',
+      '--include-partial-messages',
     ]
 
     if (this.model) {
@@ -89,14 +91,83 @@ export class ClaudeProcess {
 
     let output = ''
 
+    let lineBuffer = ''
+
+    const processLine = (line: string) => {
+      if (!line.trim()) return
+      try {
+        const obj = JSON.parse(line)
+        // Extract text from stream-json format
+        let text = ''
+        let isThinking = false
+
+        if (obj.type === 'stream_event') {
+          const evt = obj.event || {}
+          if (evt.type === 'content_block_delta') {
+            const delta = evt.delta || {}
+            if (delta.type === 'text_delta') {
+              text = delta.text || ''
+            } else if (delta.type === 'thinking_delta') {
+              text = delta.thinking || ''
+              isThinking = true
+            } else if (delta.type === 'input_json_delta') {
+              text = delta.partial_json || ''
+            }
+          }
+        } else if (obj.type === 'assistant') {
+          // Final message
+          const content = obj.message?.content
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'text') text += block.text || ''
+              if (block.type === 'thinking') { text += block.thinking || ''; isThinking = true }
+            }
+          }
+        } else if (obj.type === 'system') {
+          text = obj.subtype ? `[${obj.subtype}] ` : ''
+        } else if (obj.type === 'user') {
+          // Skip user message echo
+          return
+        } else if (obj.type === 'result') {
+          text = obj.result || ''
+        }
+
+        if (text) {
+          const prefix = isThinking ? '💭 ' : ''
+          this.mainWindow.webContents.send('claude:output', prefix + text)
+        }
+      } catch {
+        // Not JSON, send as-is
+        this.mainWindow.webContents.send('claude:output', line)
+      }
+    }
+
     this.process.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
-      output += text
-      this.mainWindow.webContents.send('claude:output', text)
+      lineBuffer += text
+      const lines = lineBuffer.split('\n')
+      lineBuffer = lines.pop() || '' // Keep incomplete last line
+      for (const line of lines) {
+        processLine(line)
+      }
     })
 
     this.process.stderr?.on('data', (chunk: Buffer) => {
-      this.mainWindow.webContents.send('claude:output', chunk.toString('utf-8'))
+      const text = chunk.toString('utf-8')
+      // stderr might also contain stream-json or debug logs
+      const lines = text.split('\n')
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const obj = JSON.parse(line)
+            if (obj.type === 'stream_event') {
+              processLine(line)
+              continue
+            }
+          } catch {}
+          this.mainWindow.webContents.send('claude:output', `[stderr] ${line}`)
+        }
+      }
     })
 
     this.process.on('exit', (code) => {
