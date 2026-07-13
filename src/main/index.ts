@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
+import { registerHandlers } from './ipc-handlers'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -23,6 +24,9 @@ function createWindow(): void {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  // Register IPC handlers
+  registerHandlers(mainWindow)
 
   // Load the renderer
   if (process.env.ELECTRON_RENDERER_URL) {

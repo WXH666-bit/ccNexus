@@ -1,34 +1,42 @@
-import React from 'react'
-import { File, Folder, FolderOpen } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { File, Folder, FolderOpen, FolderTree } from 'lucide-react'
+
+interface FileNode {
+  name: string
+  path: string
+  relativePath: string
+  type: 'file' | 'directory'
+  children?: FileNode[]
+  extension?: string
+}
 
 interface FileTreeProps {
   onSelectFile: (path: string) => void
 }
 
-// Mock file tree for now - will be replaced with real fs:tree IPC
-const MOCK_TREE = [
-  { name: 'src', type: 'directory' as const, children: [
-    { name: 'main', type: 'directory' as const, children: [
-      { name: 'index.ts', type: 'file' as const }
-    ]},
-    { name: 'preload', type: 'directory' as const, children: [
-      { name: 'index.ts', type: 'file' as const }
-    ]},
-    { name: 'renderer', type: 'directory' as const, children: [
-      { name: 'App.tsx', type: 'file' as const },
-      { name: 'main.tsx', type: 'file' as const },
-      { name: 'index.html', type: 'file' as const },
-      { name: 'components', type: 'directory' as const },
-      { name: 'styles', type: 'directory' as const },
-    ]}
-  ]},
-  { name: 'package.json', type: 'file' as const },
-  { name: 'tsconfig.json', type: 'file' as const },
-  { name: '.gitignore', type: 'file' as const },
-]
+const FILE_ICONS: Record<string, string> = {
+  '.ts': '🔷', '.tsx': '⚛️', '.js': '🟨', '.jsx': '⚛️',
+  '.json': '📋', '.md': '📝', '.css': '🎨', '.html': '🌐',
+  '.gitignore': '⚙️', '.env': '🔒',
+}
+
+const FileIcon: React.FC<{ name: string; type: 'file' | 'directory'; expanded?: boolean }> = ({ name, type, expanded }) => {
+  if (type === 'directory') {
+    return expanded
+      ? <FolderOpen size={14} style={{ color: 'var(--color-accent)' }} />
+      : <Folder size={14} style={{ color: 'var(--color-accent)' }} />
+  }
+
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
+  const emoji = FILE_ICONS[ext]
+  if (emoji) {
+    return <span className="text-xs">{emoji}</span>
+  }
+  return <File size={14} style={{ color: 'var(--color-text-muted)' }} />
+}
 
 const FileTreeNode: React.FC<{
-  node: any
+  node: FileNode
   depth?: number
   onSelectFile: (path: string) => void
 }> = ({ node, depth = 0, onSelectFile }) => {
@@ -38,31 +46,25 @@ const FileTreeNode: React.FC<{
     if (node.type === 'directory') {
       setExpanded(!expanded)
     } else {
-      onSelectFile(node.name)
+      onSelectFile(node.path)
     }
   }
 
   return (
     <div>
       <div
-        className="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:opacity-80 text-sm"
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        className="flex items-center gap-1.5 px-2 py-0.5 cursor-pointer hover:opacity-80 text-sm"
+        style={{ paddingLeft: `${depth * 16 + 6}px` }}
         onClick={handleClick}
       >
-        {node.type === 'directory' ? (
-          expanded
-            ? <FolderOpen size={14} style={{ color: 'var(--color-accent)' }} />
-            : <Folder size={14} style={{ color: 'var(--color-accent)' }} />
-        ) : (
-          <File size={14} style={{ color: 'var(--color-text-muted)' }} />
-        )}
-        <span className="truncate">{node.name}</span>
+        <FileIcon name={node.name} type={node.type} expanded={expanded} />
+        <span className="truncate text-xs">{node.name}</span>
       </div>
       {node.type === 'directory' && expanded && node.children && (
         <div>
-          {node.children.map((child: any, i: number) => (
+          {node.children.map((child, i) => (
             <FileTreeNode
-              key={i}
+              key={child.relativePath}
               node={child}
               depth={depth + 1}
               onSelectFile={onSelectFile}
@@ -75,11 +77,53 @@ const FileTreeNode: React.FC<{
 }
 
 const FileTree: React.FC<FileTreeProps> = ({ onSelectFile }) => {
+  const [tree, setTree] = useState<FileNode[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true)
+        const data = await window.electronAPI.fs.getTree()
+        setTree(data)
+        setError(null)
+      } catch (e: any) {
+        setError(e.message || 'Failed to load file tree')
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--color-text-muted)' }}>
+        <span className="text-xs">Loading files...</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-4" style={{ color: '#e06c75' }}>
+        <span className="text-xs">{error}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex-1 overflow-y-auto py-1">
-      {MOCK_TREE.map((node, i) => (
-        <FileTreeNode key={i} node={node} onSelectFile={onSelectFile} />
-      ))}
+      {tree.length === 0 ? (
+        <div className="p-4 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          No files found
+        </div>
+      ) : (
+        tree.map((node) => (
+          <FileTreeNode key={node.relativePath} node={node} onSelectFile={onSelectFile} />
+        ))
+      )}
     </div>
   )
 }
