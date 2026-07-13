@@ -1,11 +1,35 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { getFileTree, readFile } from './fs/fs-service'
 import { ClaudeProcess } from './claude/claude-process'
+import { loadSessions, createSession, addMessage } from './claude/session-store'
 import simpleGit from 'simple-git'
+import { mkdirSync, existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 
 let claudeProcess: ClaudeProcess | null = null
+let currentProjectPath: string = process.cwd()
+let currentSessionId: string | null = null
+
+const dataDir = join(homedir(), '.ccNexus')
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true })
+}
 
 export function registerHandlers(mainWindow: BrowserWindow): void {
+  // ===== Dialog =====
+  ipcMain.handle('dialog:open-project', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+      title: '选择项目文件夹'
+    })
+    if (!result.canceled && result.filePaths.length > 0) {
+      currentProjectPath = result.filePaths[0]
+      return currentProjectPath
+    }
+    return null
+  })
+
   // ===== Claude Code =====
   claudeProcess = new ClaudeProcess(mainWindow)
 
@@ -19,6 +43,38 @@ export function registerHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('claude:stop', async () => {
     claudeProcess?.stop()
+  })
+
+  // ===== Sessions =====
+  ipcMain.handle('claude:list-sessions', async () => {
+    return loadSessions()
+  })
+
+  ipcMain.handle('claude:new-session', async (_event, projectPath: string) => {
+    const session = createSession(projectPath)
+    currentSessionId = session.id
+    claudeProcess?.start(projectPath)
+    return session
+  })
+
+  ipcMain.handle('claude:switch-session', async (_event, sessionId: string) => {
+    const sessions = loadSessions()
+    const session = sessions.find((s) => s.id === sessionId)
+    if (session) {
+      currentSessionId = session.id
+      return session
+    }
+    return null
+  })
+
+  ipcMain.handle('claude:add-message', async (_event, sessionId: string, message: any) => {
+    addMessage(sessionId, message)
+  })
+
+  ipcMain.handle('claude:current-session', async () => {
+    if (!currentSessionId) return null
+    const sessions = loadSessions()
+    return sessions.find((s) => s.id === currentSessionId) || null
   })
 
   // ===== File System =====

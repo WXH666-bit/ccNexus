@@ -1,14 +1,31 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import Toolbar from './Toolbar'
 import FileTree from '../files/FileTree'
 import ChatPanel from '../chat/ChatPanel'
 import GitPanel from '../git/GitPanel'
 import FilePreview from '../files/FilePreview'
+import SessionBar from '../chat/SessionBar'
 
-const AppShell: React.FC = () => {
+interface AppShellProps {
+  projectPath: string
+  onSwitchProject: () => void
+}
+
+const AppShell: React.FC<AppShellProps> = ({ projectPath, onSwitchProject }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [gitPanelOpen, setGitPanelOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+
+  const handleNewSession = useCallback(async () => {
+    const session = await window.electronAPI.claude.newSession(projectPath)
+    if (session) setSessionId(session.id)
+  }, [projectPath])
+
+  const handleSwitchSession = useCallback(async (id: string) => {
+    const session = await window.electronAPI.claude.switchSession(id)
+    if (session) setSessionId(session.id)
+  }, [])
 
   return (
     <div className="h-full flex flex-col">
@@ -17,10 +34,18 @@ const AppShell: React.FC = () => {
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         gitPanelOpen={gitPanelOpen}
         onToggleGit={() => setGitPanelOpen(!gitPanelOpen)}
-      />
+        projectPath={projectPath}
+        onSwitchProject={onSwitchProject}
+      >
+        <SessionBar
+          currentSessionId={sessionId}
+          projectPath={projectPath}
+          onNewSession={handleNewSession}
+          onSwitchSession={handleSwitchSession}
+        />
+      </Toolbar>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - File Tree */}
         {sidebarOpen && (
           <div className="w-64 flex-shrink-0 border-r flex flex-col"
                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
@@ -28,21 +53,19 @@ const AppShell: React.FC = () => {
                  style={{ color: 'var(--color-text-muted)' }}>
               文件
             </div>
-            <FileTree onSelectFile={setSelectedFile} />
+            <FileTree onSelectFile={setSelectedFile} projectPath={projectPath} />
           </div>
         )}
 
-        {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {selectedFile ? (
             <FilePreview filePath={selectedFile} onClose={() => setSelectedFile(null)} />
           ) : (
-            <ChatPanel />
+            <ChatPanel projectPath={projectPath} sessionId={sessionId} />
           )}
         </div>
       </div>
 
-      {/* Bottom Git Panel */}
       {gitPanelOpen && (
         <div className="h-56 flex-shrink-0 border-t"
              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>

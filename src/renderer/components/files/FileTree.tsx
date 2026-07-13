@@ -12,6 +12,7 @@ interface FileNode {
 
 interface FileTreeProps {
   onSelectFile: (path: string) => void
+  projectPath: string
 }
 
 const FILE_ICONS: Record<string, string> = {
@@ -22,17 +23,24 @@ const FILE_ICONS: Record<string, string> = {
 
 const FileIcon: React.FC<{ name: string; type: 'file' | 'directory'; expanded?: boolean }> = ({ name, type, expanded }) => {
   if (type === 'directory') {
-    return expanded
-      ? <FolderOpen size={14} style={{ color: 'var(--color-accent)' }} />
-      : <Folder size={14} style={{ color: 'var(--color-accent)' }} />
+    return (
+      <span className="flex items-center gap-0.5">
+        <span className="text-[10px] leading-none" style={{ color: 'var(--color-accent)', width: 10, textAlign: 'center' }}>
+          {expanded ? '▾' : '▸'}
+        </span>
+        {expanded
+          ? <FolderOpen size={14} style={{ color: 'var(--color-accent)' }} />
+          : <Folder size={14} style={{ color: 'var(--color-accent)' }} />}
+      </span>
+    )
   }
 
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
   const emoji = FILE_ICONS[ext]
   if (emoji) {
-    return <span className="text-xs">{emoji}</span>
+    return <span className="flex items-center gap-0.5"><span className="text-[10px]" style={{ width: 10 }} />{emoji}</span>
   }
-  return <File size={14} style={{ color: 'var(--color-text-muted)' }} />
+  return <span className="flex items-center gap-0.5"><span className="text-[10px]" style={{ width: 10 }} /><File size={14} style={{ color: 'var(--color-text-muted)' }} /></span>
 }
 
 const FileTreeNode: React.FC<{
@@ -76,7 +84,7 @@ const FileTreeNode: React.FC<{
   )
 }
 
-const FileTree: React.FC<FileTreeProps> = ({ onSelectFile }) => {
+const FileTree: React.FC<FileTreeProps> = ({ onSelectFile, projectPath }) => {
   const [tree, setTree] = useState<FileNode[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -85,17 +93,17 @@ const FileTree: React.FC<FileTreeProps> = ({ onSelectFile }) => {
     const load = async () => {
       try {
         setLoading(true)
-        const data = await window.electronAPI.fs.getTree()
+        const data = await window.electronAPI.fs.getTree(projectPath)
         setTree(data)
         setError(null)
       } catch (e: any) {
-        setError(e.message || 'Failed to load file tree')
+        setError(e.message || '加载文件树失败')
       } finally {
         setLoading(false)
       }
     }
     load()
-  }, [])
+  }, [projectPath])
 
   if (loading) {
     return (

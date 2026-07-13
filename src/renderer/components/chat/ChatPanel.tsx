@@ -8,19 +8,53 @@ interface Message {
   timestamp: number
 }
 
-const ChatPanel: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'init',
-      role: 'system',
-      text: 'ccNexus 就绪，点击 ▶ 启动 Claude Code 会话',
-      timestamp: Date.now()
-    }
-  ])
+interface ChatPanelProps {
+  projectPath: string
+  sessionId: string | null
+}
+
+const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, sessionId }) => {
+  const [messages, setMessages] = useState<Message[]>([{
+    id: 'init',
+    role: 'system',
+    text: sessionId
+      ? 'ccNexus 就绪，点击 ▶ 启动 Claude Code 会话'
+      : '请先创建一个会话（点击工具栏的 ➕）',
+    timestamp: Date.now()
+  }])
   const [input, setInput] = useState('')
   const [sessionActive, setSessionActive] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('idle')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Load messages when sessionId changes
+  useEffect(() => {
+    if (!sessionId) return
+    const load = async () => {
+      const session = await window.electronAPI.claude.currentSession()
+      if (session?.messages?.length) {
+        setMessages(session.messages)
+      } else {
+        setMessages([{
+          id: 'init',
+          role: 'system',
+          text: 'ccNexus 就绪，点击 ▶ 启动 Claude Code 会话',
+          timestamp: Date.now()
+        }])
+      }
+    }
+    load()
+  }, [sessionId])
+
+  // Save message to session
+  const saveMsg = async (msg: Message) => {
+    if (!sessionId) return
+    try {
+      await window.electronAPI.claude.addMessage(sessionId, msg)
+    } catch {
+      // ignore save errors
+    }
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -30,57 +64,43 @@ const ChatPanel: React.FC = () => {
     const unsubOutput = window.electronAPI.claude.onOutput((data: string) => {
       setMessages(prev => {
         const last = prev[prev.length - 1]
+        let newMsg: Message
         if (last && last.role === 'assistant' && Date.now() - last.timestamp < 5000) {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, text: last.text + data, timestamp: Date.now() }
-          ]
+          newMsg = { ...last, text: last.text + data, timestamp: Date.now() }
+        } else {
+          newMsg = { id: `asst-${Date.now()}`, role: 'assistant', text: data, timestamp: Date.now() }
         }
-        return [...prev, {
-          id: `asst-${Date.now()}`,
-          role: 'assistant',
-          text: data,
-          timestamp: Date.now()
-        }]
+        saveMsg(newMsg)
+        return last?.role === 'assistant' && Date.now() - last.timestamp < 5000
+          ? [...prev.slice(0, -1), newMsg]
+          : [...prev, newMsg]
       })
     })
 
     const unsubStatus = window.electronAPI.claude.onStatus((status: string) => {
       setSessionStatus(status)
       setSessionActive(status === 'running')
-
       if (status === 'running') {
-        setMessages(prev => [...prev, {
-          id: `sys-${Date.now()}`,
-          role: 'system',
-          text: '🟢 Claude Code 会话已启动',
-          timestamp: Date.now()
-        }])
+        const msg: Message = { id: `sys-${Date.now()}`, role: 'system', text: '🟢 Claude Code 会话已启动', timestamp: Date.now() }
+        setMessages(prev => [...prev, msg])
+        saveMsg(msg)
       } else if (status === 'stopped') {
-        setMessages(prev => [...prev, {
-          id: `sys-${Date.now()}`,
-          role: 'system',
-          text: '🔴 Claude Code 会话已结束',
-          timestamp: Date.now()
-        }])
-      } else if (status === 'error') {
-        setSessionActive(false)
+        const msg: Message = { id: `sys-${Date.now()}`, role: 'system', text: '🔴 Claude Code 会话已结束', timestamp: Date.now() }
+        setMessages(prev => [...prev, msg])
+        saveMsg(msg)
       }
     })
 
     return () => { unsubOutput(); unsubStatus() }
-  }, [])
+  }, [sessionId])
 
   const handleStart = () => {
     setSessionStatus('running')
     setSessionActive(true)
-    setMessages(prev => [...prev, {
-      id: `sys-${Date.now()}`,
-      role: 'system',
-      text: '正在启动 Claude Code...',
-      timestamp: Date.now()
-    }])
-    window.electronAPI.claude.start('.')
+    const msg: Message = { id: `sys-${Date.now()}`, role: 'system', text: '正在启动 Claude Code...', timestamp: Date.now() }
+    setMessages(prev => [...prev, msg])
+    saveMsg(msg)
+    window.electronAPI.claude.start(projectPath)
   }
 
   const handleStop = () => {
@@ -91,12 +111,9 @@ const ChatPanel: React.FC = () => {
 
   const handleSend = () => {
     if (!input.trim() || !sessionActive) return
-    setMessages(prev => [...prev, {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      text: input,
-      timestamp: Date.now()
-    }])
+    const msg: Message = { id: `user-${Date.now()}`, role: 'user', text: input, timestamp: Date.now() }
+    setMessages(prev => [...prev, msg])
+    saveMsg(msg)
     window.electronAPI.claude.send(input)
     setInput('')
   }
@@ -114,7 +131,8 @@ const ChatPanel: React.FC = () => {
            style={{ borderColor: 'var(--color-border)' }}>
         <button
           onClick={sessionActive ? handleStop : handleStart}
-          className="p-1.5 rounded transition-colors"
+          disabled={!sessionId}
+          className="p-1.5 rounded transition-colors disabled:opacity-30"
           style={{
             backgroundColor: sessionActive ? '#e06c75' : 'var(--color-accent)',
             color: '#fff'
@@ -125,8 +143,7 @@ const ChatPanel: React.FC = () => {
         </button>
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full" style={{
-            backgroundColor:
-              sessionStatus === 'running' ? '#98c379' :
+            backgroundColor: sessionStatus === 'running' ? '#98c379' :
               sessionStatus === 'error' ? '#e06c75' : '#909296'
           }} />
           <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -176,7 +193,7 @@ const ChatPanel: React.FC = () => {
             onKeyDown={handleKeyDown}
             placeholder={sessionActive
               ? '输入消息...（Enter 发送，Shift+Enter 换行）'
-              : '请先启动 Claude Code 会话...'}
+              : '请先创建会话并点击 ▶ 启动...'}
             disabled={!sessionActive}
             rows={2}
             className="flex-1 resize-none rounded-md p-2 text-sm outline-none disabled:opacity-40"

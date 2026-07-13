@@ -3,9 +3,17 @@ export interface ElectronAPI {
     start: (projectPath: string) => Promise<void>
     send: (input: string) => Promise<void>
     stop: () => Promise<void>
+    listSessions: () => Promise<any[]>
+    newSession: (projectPath: string) => Promise<any>
+    switchSession: (sessionId: string) => Promise<any>
+    addMessage: (sessionId: string, message: any) => Promise<void>
+    currentSession: () => Promise<any>
     onOutput: (cb: (data: string) => void) => () => void
     onStatus: (cb: (status: string) => void) => () => void
     onExit: (cb: (code: number | null) => void) => () => void
+  }
+  dialog: {
+    openProject: () => Promise<string | null>
   }
   fs: {
     getTree: (dirPath?: string) => Promise<FileNode[]>

@@ -1,10 +1,13 @@
 import { spawn, ChildProcess } from 'child_process'
 import { BrowserWindow } from 'electron'
+import { randomUUID } from 'crypto'
 
 export class ClaudeProcess {
   private process: ChildProcess | null = null
   private mainWindow: BrowserWindow
   private status: 'idle' | 'running' | 'stopped' = 'idle'
+  private sessionId: string | null = null
+  private projectPath: string = '.'
 
   constructor(mainWindow: BrowserWindow) {
     this.mainWindow = mainWindow
@@ -19,79 +22,71 @@ export class ClaudeProcess {
   }
 
   start(projectPath: string): void {
-    if (this.isRunning) {
-      this.stop()
-    }
-
+    this.projectPath = projectPath
+    this.sessionId = randomUUID()
     this.status = 'running'
     this.mainWindow.webContents.send('claude:status', 'running')
+    this.mainWindow.webContents.send('claude:output', `\n[系统] Claude Code 会话已就绪 (session: ${this.sessionId.slice(0, 8)}...)\n\n`)
+  }
 
-    this.process = spawn('claude', [], {
-      cwd: projectPath,
-      stdio: ['pipe', 'pipe', 'pipe'],
+  send(input: string): void {
+    if (!this.sessionId) return
+
+    const args = [
+      '--print',
+      input,
+      '--session-id', this.sessionId,
+    ]
+
+    this.process = spawn('claude', args, {
+      cwd: this.projectPath,
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         FORCE_COLOR: '1',
-        CI: 'true',
         PAGER: 'cat',
         GIT_PAGER: 'cat',
       },
       shell: true,
     })
 
-    // stdout → renderer
+    let output = ''
+
     this.process.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
+      output += text
       this.mainWindow.webContents.send('claude:output', text)
     })
 
-    // stderr → renderer (also useful)
     this.process.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      this.mainWindow.webContents.send('claude:output', text)
+      this.mainWindow.webContents.send('claude:output', chunk.toString('utf-8'))
     })
 
-    // Exit
     this.process.on('exit', (code) => {
-      this.status = 'stopped'
       this.process = null
-      this.mainWindow.webContents.send('claude:status', 'stopped')
-      this.mainWindow.webContents.send('claude:exit', code)
+      if (code !== 0 && code !== null) {
+        this.mainWindow.webContents.send('claude:output', `\n[系统] Claude Code 返回错误码: ${code}\n`)
+      }
     })
 
-    // Error (e.g., claude not found)
     this.process.on('error', (err) => {
-      this.status = 'stopped'
       this.process = null
-      this.mainWindow.webContents.send('claude:output', `\n[Error] Claude Code failed to start: ${err.message}\n`)
-      this.mainWindow.webContents.send('claude:output', `\nMake sure Claude Code is installed: npm install -g @anthropic-ai/claude-code\n`)
-      this.mainWindow.webContents.send('claude:status', 'error')
+      this.mainWindow.webContents.send('claude:output', `\n[错误] ${err.message}\n`)
     })
   }
 
   write(input: string): void {
-    if (this.process && this.isRunning) {
-      this.process.stdin?.write(input + '\n')
-    }
+    this.send(input)
   }
 
   stop(): void {
-    if (!this.process) return
-
-    // Graceful shutdown: Ctrl+C → wait → EOF → force kill
-    this.process.stdin?.write('\x03')
-    setTimeout(() => {
-      if (this.process) {
-        this.process.stdin?.end()
-      }
-      setTimeout(() => {
-        if (this.process) {
-          this.process.kill()
-          this.process = null
-          this.status = 'stopped'
-        }
-      }, 2000)
-    }, 500)
+    if (this.process) {
+      this.process.kill()
+      this.process = null
+    }
+    this.sessionId = null
+    this.status = 'stopped'
+    this.mainWindow.webContents.send('claude:status', 'stopped')
   }
 
   forceKill(): void {

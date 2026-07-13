@@ -6,6 +6,11 @@ const api = {
     start: (projectPath: string) => ipcRenderer.invoke('claude:start', projectPath),
     send: (input: string) => ipcRenderer.invoke('claude:send', input),
     stop: () => ipcRenderer.invoke('claude:stop'),
+    listSessions: () => ipcRenderer.invoke('claude:list-sessions'),
+    newSession: (projectPath: string) => ipcRenderer.invoke('claude:new-session', projectPath),
+    switchSession: (sessionId: string) => ipcRenderer.invoke('claude:switch-session', sessionId),
+    addMessage: (sessionId: string, message: any) => ipcRenderer.invoke('claude:add-message', sessionId, message),
+    currentSession: () => ipcRenderer.invoke('claude:current-session'),
     onOutput: (cb: (data: string) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: string) => cb(data)
       ipcRenderer.on('claude:output', handler)
@@ -21,6 +26,10 @@ const api = {
       ipcRenderer.on('claude:exit', handler)
       return () => ipcRenderer.removeListener('claude:exit', handler)
     }
+  },
+  // Dialog
+  dialog: {
+    openProject: () => ipcRenderer.invoke('dialog:open-project'),
   },
   // File System
   fs: {
