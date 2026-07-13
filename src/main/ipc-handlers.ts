@@ -1,9 +1,26 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { getFileTree, readFile } from './fs/fs-service'
+import { ClaudeProcess } from './claude/claude-process'
 import simpleGit from 'simple-git'
-import { join } from 'path'
+
+let claudeProcess: ClaudeProcess | null = null
 
 export function registerHandlers(mainWindow: BrowserWindow): void {
+  // ===== Claude Code =====
+  claudeProcess = new ClaudeProcess(mainWindow)
+
+  ipcMain.handle('claude:start', async (_event, projectPath: string) => {
+    claudeProcess?.start(projectPath)
+  })
+
+  ipcMain.handle('claude:send', async (_event, input: string) => {
+    claudeProcess?.write(input)
+  })
+
+  ipcMain.handle('claude:stop', async () => {
+    claudeProcess?.stop()
+  })
+
   // ===== File System =====
   ipcMain.handle('fs:tree', async (_event, dirPath?: string) => {
     const projectRoot = dirPath || process.cwd()
