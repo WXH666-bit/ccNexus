@@ -1,6 +1,10 @@
 import { app, BrowserWindow, shell } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { registerHandlers } from './ipc-handlers'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 let mainWindow: BrowserWindow | null = null
 
@@ -12,7 +16,7 @@ function createWindow(): void {
     minHeight: 600,
     title: 'ccNexus',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
