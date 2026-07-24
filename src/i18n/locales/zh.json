@@ -1,0 +1,282 @@
+{
+  "app": {
+    "title": "ccNexus",
+    "loading": "加载中..."
+  },
+  "nav": {
+    "chat": "对话",
+    "history": "历史",
+    "settings": "设置"
+  },
+  "chat": {
+    "newSession": "新对话",
+    "welcome": {
+      "title": "ccNexus",
+      "subtitle": "Claude Code 可视化客户端",
+      "hint": "输入消息开始对话"
+    },
+    "input": {
+      "placeholder": "输入消息... (@ 引用文件, / 切换模式)",
+      "send": "发送",
+      "queue": "排队",
+      "queued": "已排队"
+    },
+    "message": {
+      "copy": "复制",
+      "copied": "已复制",
+      "rewind": "回溯到此",
+      "retry": "重试"
+    },
+    "search": {
+      "placeholder": "搜索对话...",
+      "noResults": "未找到匹配结果",
+      "resultCount": "{{current}} / {{total}}"
+    },
+    "rewind": {
+      "title": "确认回溯",
+      "message": "确定要回溯到此消息吗？此后的对话将被清除。",
+      "confirm": "确认回溯",
+      "cancel": "取消"
+    },
+    "status": {
+      "idle": "空闲",
+      "thinking": "思考中",
+      "executing": "执行中",
+      "error": "错误"
+    },
+    "permission": {
+      "title": "权限请求",
+      "allow": "允许",
+      "deny": "拒绝",
+      "allowAll": "全部允许"
+    },
+    "planApproval": {
+      "title": "计划审批",
+      "approve": "批准",
+      "reject": "拒绝",
+      "feedback": "反馈意见"
+    },
+    "askQuestion": {
+      "submit": "提交",
+      "custom": "自定义回答"
+    },
+    "provider": {
+      "default": "默认供应商",
+      "switch": "切换供应商"
+    },
+    "reasoning": {
+      "title": "思考深度",
+      "low": "低",
+      "lowDesc": "快速响应，较少思考",
+      "medium": "中",
+      "mediumDesc": "平衡速度与深度",
+      "high": "高",
+      "highDesc": "深度思考，推荐",
+      "xhigh": "超高",
+      "xhighDesc": "极深思考，耗时较长",
+      "max": "最大",
+      "maxDesc": "最大思考，最慢但最全面"
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "sections": {
+      "basic": "基础配置",
+      "permissions": "权限配置",
+      "agents": "智能体管理",
+      "providers": "供应商管理",
+      "mcp": "MCP 服务器",
+      "skills": "Skills 管理",
+      "usage": "用量统计",
+      "env": "环境变量",
+      "appearance": "外观",
+      "prompt": "提示词增强"
+    },
+    "basic": {
+      "workDir": "工作目录",
+      "defaultModel": "默认模型",
+      "language": "语言",
+      "autoSave": "自动保存"
+    },
+    "permissions": {
+      "title": "权限配置",
+      "desc": "配置工具调用的默认权限行为",
+      "mode": "默认权限模式",
+      "modes": {
+        "auto": "自动模式",
+        "plan": "计划模式",
+        "acceptEdits": "接受编辑"
+      },
+      "whitelist": "工具权限白名单",
+      "addTool": "添加工具"
+    },
+    "agents": {
+      "title": "智能体管理",
+      "desc": "管理可用的 AI 智能体",
+      "empty": "暂无自定义智能体",
+      "add": "添加智能体"
+    },
+    "providers": {
+      "title": "供应商管理",
+      "desc": "配置 AI 模型供应商",
+      "add": "添加供应商",
+      "switch": "切换供应商",
+      "current": "当前供应商"
+    },
+    "mcp": {
+      "title": "MCP 服务器",
+      "desc": "管理 MCP 服务器连接",
+      "add": "添加服务器",
+      "empty": "暂无 MCP 服务器"
+    },
+    "skills": {
+      "title": "Skills 管理",
+      "desc": "管理可用的 Skills",
+      "add": "添加 Skill",
+      "empty": "暂无 Skills"
+    },
+    "usage": {
+      "title": "用量统计",
+      "desc": "Token 消耗统计",
+      "total": "总计",
+      "today": "今日",
+      "thisWeek": "本周",
+      "thisMonth": "本月"
+    },
+    "env": {
+      "title": "环境变量",
+      "desc": "编辑环境变量",
+      "add": "添加变量",
+      "key": "变量名",
+      "value": "变量值"
+    },
+    "appearance": {
+      "title": "外观",
+      "theme": "主题",
+      "themes": {
+        "dark": "深色",
+        "light": "浅色"
+      },
+      "fontSize": "字体大小",
+      "fontSizes": {
+        "small": "小",
+        "normal": "正常",
+        "large": "大"
+      }
+    },
+    "prompt": {
+      "title": "提示词增强",
+      "desc": "配置提示词增强规则",
+      "enable": "启用提示词增强",
+      "rules": "增强规则",
+      "addRule": "添加规则"
+    }
+  },
+  "history": {
+    "title": "历史对话",
+    "empty": "暂无历史对话",
+    "delete": "删除",
+    "rename": "重命名"
+  },
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "edit": "编辑",
+    "close": "关闭",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功"
+  },
+  "config": {
+    "title": "配置",
+    "agent": "智能体",
+    "provider": "供应商",
+    "processes": "进程管理",
+    "streaming": "流式传输",
+    "thinking": "思考",
+    "noAgent": "无智能体",
+    "noProcesses": "暂无运行中的进程",
+    "kill": "结束"
+  },
+  "status": {
+    "tasks": "任务",
+    "subagents": "子代理",
+    "edits": "编辑",
+    "tasksList": "任务列表",
+    "subagentsList": "子代理",
+    "fileChanges": "文件变更",
+    "noTasks": "暂无任务运行",
+    "noSubagents": "暂无子代理运行",
+    "noChanges": "暂无文件改动",
+    "undoFile": "撤销此文件的变更",
+    "collapse": "收起状态面板",
+    "expand": "展开状态面板"
+  },
+  "completion": {
+    "files": "文件",
+    "commands": "命令",
+    "prompts": "提示词",
+    "noResults": "无匹配结果"
+  },
+  "scroll": {
+    "scrollToBottom": "回到底部",
+    "newMessages": "有新消息"
+  },
+  "contextUsage": {
+    "title": "上下文用量",
+    "total": "总计",
+    "systemPrompt": "系统提示",
+    "tools": "工具定义",
+    "messages": "消息历史",
+    "memory": "记忆",
+    "other": "其他"
+  },
+  "rewind": {
+    "title": "会话回退",
+    "selectCheckpoint": "选择要回退的检查点",
+    "turn": "轮次",
+    "noCheckpoints": "暂无可用的检查点"
+  },
+  "longContext": {
+    "title": "长上下文模式",
+    "label": "长上下文"
+  },
+  "prompt": {
+    "title": "提示词管理",
+    "create": "新建提示词",
+    "edit": "编辑",
+    "delete": "删除",
+    "view": "查看",
+    "name": "名称",
+    "description": "描述",
+    "content": "内容",
+    "noPrompts": "暂无提示词"
+  },
+  "agent": {
+    "title": "智能体管理",
+    "enable": "启用",
+    "disable": "禁用",
+    "view": "查看详情",
+    "name": "名称",
+    "description": "描述",
+    "tools": "允许工具",
+    "model": "模型",
+    "noAgents": "暂无智能体"
+  },
+  "contextMenu": {
+    "copy": "复制内容",
+    "copyMarkdown": "复制为 Markdown",
+    "delete": "删除消息"
+  },
+  "notification": {
+    "title": "任务完成",
+    "message": "AI 回复已完成",
+    "settings": "通知设置",
+    "enable": "启用通知",
+    "sound": "提示音",
+    "volume": "音量",
+    "test": "试听"
+  }
+}

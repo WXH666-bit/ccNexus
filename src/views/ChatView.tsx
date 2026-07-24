@@ -1,0 +1,684 @@
+import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { ChevronDown, Layers } from 'lucide-react';
+import ChatHeader from '../components/ChatHeader';
+import MessageList from '../components/MessageList';
+import ChatInputBox from '../components/ChatInputBox';
+import StatusPanel from '../components/StatusPanel';
+import PermissionDialog from '../components/PermissionDialog';
+import WelcomeScreen from '../components/WelcomeScreen';
+import RewindDialog from '../components/RewindDialog';
+import PlanApprovalDialog from '../components/PlanApprovalDialog';
+import MessageAnchorRail from '../components/MessageAnchorRail';
+import MessageQueue from '../components/MessageQueue';
+import type { QueuedMessage } from '../components/MessageQueue';
+import { useWebSocket } from '../hooks/useWebSocket';
+import type { 
+  ChatMessage, Session, StatusData, PermissionRequest, ContentBlock, ToolUseBlock,
+  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
+} from '../types';
+
+let msgIdCounter = 0;
+function genId() { return `msg-${Date.now()}-${++msgIdCounter}`; }
+
+export default function ChatView() {
+  const { sessionId: urlSessionId } = useParams();
+  const navigate = useNavigate();
+  const { send, lastMessage, connected } = useWebSocket();
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [permission, setPermission] = useState<PermissionRequest | null>(null);
+  const [status, setStatus] = useState<StatusData>({});
+  const [mode, setMode] = useState('default');
+  const [model, setModel] = useState('default');
+  const [reasoning, setReasoning] = useState('high');
+
+  // P1 features state
+  const [rewindTarget, setRewindTarget] = useState<ChatMessage | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [currentSearchIdx, setCurrentSearchIdx] = useState(0);
+  const [planApproval, setPlanApproval] = useState<PlanApprovalRequest | null>(null);
+  const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
+  const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([]);
+
+  // P2: Message queue state
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  const queueProcessingRef = useRef(false);
+
+  // Status panel visibility
+  const [showStatusPanel, setShowStatusPanel] = useState(() => {
+    const saved = localStorage.getItem('showStatusPanel');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const streamingMsgRef = useRef<string | null>(null);
+  const partialBlocksRef = useRef<Map<string, ContentBlock>>(new Map());
+
+  // Search logic
+  const performSearch = useCallback((query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setCurrentSearchIdx(0);
+      return;
+    }
+    
+    const results: SearchResult[] = [];
+    const lowerQuery = query.toLowerCase();
+    
+    messages.forEach((msg, msgIdx) => {
+      msg.content.forEach((block, blockIdx) => {
+        if (block.type === 'text') {
+          const text = (block as { type: 'text'; text: string }).text;
+          const lowerText = text.toLowerCase();
+          const idx = lowerText.indexOf(lowerQuery);
+          if (idx >= 0) {
+            const contextBefore = text.slice(Math.max(0, idx - 30), idx);
+            const contextAfter = text.slice(idx + query.length, idx + query.length + 30);
+            results.push({
+              messageId: msg.id,
+              messageIndex: msgIdx,
+              blockIndex: blockIdx,
+              matchText: text.slice(idx, idx + query.length),
+              contextBefore,
+              contextAfter,
+            });
+          }
+        }
+      });
+    });
+    
+    setSearchResults(results);
+    setCurrentSearchIdx(0);
+  }, [messages]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => performSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, performSearch]);
+
+  // Navigate search results
+  const navigateSearch = useCallback((direction: 'next' | 'prev') => {
+    if (searchResults.length === 0) return;
+    const newIdx = direction === 'next' 
+      ? (currentSearchIdx + 1) % searchResults.length
+      : (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
+    setCurrentSearchIdx(newIdx);
+    
+    // Scroll to message
+    const result = searchResults[newIdx];
+    const msgEl = document.getElementById(`msg-${result.messageId}`);
+    if (msgEl) {
+      msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [searchResults, currentSearchIdx]);
+
+  // Rewind handler
+  const handleRewind = useCallback((messageId: string) => {
+    const msg = messages.find(m => m.id === messageId);
+    if (msg) {
+      setRewindTarget(msg);
+    }
+  }, [messages]);
+
+  const confirmRewind = useCallback(() => {
+    if (!rewindTarget || !currentSession) return;
+    
+    send({
+      type: 'rewind',
+      messageId: rewindTarget.id,
+      sessionId: currentSession.id,
+    });
+    
+    // Truncate messages locally
+    const idx = messages.findIndex(m => m.id === rewindTarget.id);
+    if (idx >= 0) {
+      setMessages(messages.slice(0, idx + 1));
+    }
+    
+    setRewindTarget(null);
+  }, [rewindTarget, currentSession, messages, send]);
+
+  // File undo handler
+  const handleUndoFile = useCallback((filePath: string) => {
+    if (!currentSession) return;
+    send({
+      type: 'undo_file',
+      filePath,
+      sessionId: currentSession.id,
+    });
+  }, [currentSession, send]);
+
+  // Plan approval handlers
+  const handlePlanApprove = useCallback(() => {
+    if (!planApproval) return;
+    send({
+      type: 'plan_approval_response',
+      planId: planApproval.plan_id,
+      approved: true,
+    });
+    setPlanApproval(null);
+  }, [planApproval, send]);
+
+  const handlePlanReject = useCallback((feedback: string) => {
+    if (!planApproval) return;
+    send({
+      type: 'plan_approval_response',
+      planId: planApproval.plan_id,
+      approved: false,
+      feedback,
+    });
+    setPlanApproval(null);
+  }, [planApproval, send]);
+
+  // Ask user question handler
+  const handleQuestionAnswer = useCallback((answer: string, selectedOption?: string) => {
+    if (!askQuestion) return;
+    send({
+      type: 'ask_user_question_response',
+      questionId: askQuestion.question_id,
+      answer,
+      selectedOption,
+    });
+    setAskQuestion(null);
+  }, [askQuestion, send]);
+
+  // Anchor click handler
+  const handleAnchorClick = useCallback((messageId: string) => {
+    const msgEl = document.getElementById(`msg-${messageId}`);
+    if (msgEl) {
+      msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, []);
+
+  // Initialize: request session list
+  useEffect(() => {
+    send({ type: 'get_sessions' });
+  }, [send]);
+
+  // Handle URL session change
+  useEffect(() => {
+    if (urlSessionId) {
+      send({ type: 'switch_session', session_id: urlSessionId });
+      setMessages([]);
+      partialBlocksRef.current.clear();
+      streamingMsgRef.current = null;
+    }
+  }, [urlSessionId, send]);
+
+  // Handle WebSocket messages
+  useEffect(() => {
+    if (!lastMessage) return;
+    const msg = lastMessage;
+
+    switch (msg.type) {
+      case 'session_list': {
+        setSessions(msg.sessions);
+        if (urlSessionId) {
+          const s = msg.sessions.find(x => x.id === urlSessionId);
+          if (s) setCurrentSession(s);
+        } else if (msg.sessions.length > 0) {
+          const latest = [...msg.sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+          setCurrentSession(latest);
+        }
+        break;
+      }
+      case 'session_created': {
+        setSessions(prev => [...prev, msg.session]);
+        setCurrentSession(msg.session);
+        navigate(`/chat/${msg.session.id}`, { replace: true });
+        break;
+      }
+      case 'session_deleted': {
+        setSessions(prev => prev.filter(s => s.id !== msg.session_id));
+        if (currentSession?.id === msg.session_id) {
+          setCurrentSession(null);
+          setMessages([]);
+          navigate('/chat', { replace: true });
+        }
+        break;
+      }
+      case 'session_renamed': {
+        setSessions(prev => prev.map(s => s.id === msg.session_id ? { ...s, title: msg.title } : s));
+        if (currentSession?.id === msg.session_id) {
+          setCurrentSession(prev => prev ? { ...prev, title: msg.title } : prev);
+        }
+        break;
+      }
+
+      case 'stream_event': {
+        const event = msg.event as Record<string, unknown>;
+        const eventType = event.type as string;
+
+        if (eventType === 'content_block_start') {
+          const blockStart = event.content_block as Record<string, unknown>;
+          const blockType = blockStart.type as string;
+          const index = event.index as number;
+          const blockKey = `${streamingMsgRef.current || 'current'}-${index}`;
+
+          if (blockType === 'text') {
+            partialBlocksRef.current.set(blockKey, { type: 'text', text: '' });
+          } else if (blockType === 'thinking') {
+            partialBlocksRef.current.set(blockKey, { type: 'thinking', thinking: '' });
+          } else if (blockType === 'tool_use') {
+            partialBlocksRef.current.set(blockKey, {
+              type: 'tool_use',
+              id: (blockStart.id as string) || '',
+              name: (blockStart.name as string) || '',
+              input: {},
+            });
+          }
+        } else if (eventType === 'content_block_delta') {
+          const delta = event.delta as Record<string, unknown>;
+          const deltaType = delta.type as string;
+          const index = event.index as number;
+          const blockKey = `${streamingMsgRef.current || 'current'}-${index}`;
+          const existing = partialBlocksRef.current.get(blockKey);
+
+          if (existing) {
+            if (deltaType === 'text_delta' && existing.type === 'text') {
+              existing.text += delta.text as string;
+            } else if (deltaType === 'thinking_delta' && existing.type === 'thinking') {
+              existing.thinking += delta.thinking as string;
+            } else if (deltaType === 'input_json_delta' && existing.type === 'tool_use') {
+              const partial = (existing as ToolUseBlock)._partialInput || '';
+              (existing as ToolUseBlock)._partialInput = partial + (delta.partial_json as string);
+              try {
+                (existing as ToolUseBlock).input = JSON.parse(partial + (delta.partial_json as string));
+              } catch { /* partial JSON, keep trying */ }
+            }
+            setMessages(prev => {
+              const updated = [...prev];
+              const lastMsg = updated[updated.length - 1];
+              if (lastMsg && lastMsg.isStreaming) {
+                const blocks = Array.from(partialBlocksRef.current.values());
+                updated[updated.length - 1] = { ...lastMsg, content: blocks };
+              }
+              return updated;
+            });
+          }
+        }
+        break;
+      }
+
+      case 'assistant': {
+        const completeMsg: ChatMessage = {
+          id: msg.message.id || genId(),
+          role: 'assistant',
+          content: msg.message.content,
+          timestamp: Date.now(),
+          sessionId: msg.message.sessionId,
+          model: msg.message.model,
+          isStreaming: false,
+          cost: msg.message.cost,
+          duration: msg.message.duration,
+          turns: msg.message.turns,
+        };
+        streamingMsgRef.current = null;
+        partialBlocksRef.current.clear();
+        setIsStreaming(false);
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.isStreaming);
+          return [...filtered, completeMsg];
+        });
+        break;
+      }
+
+      case 'tool_result': {
+        setMessages(prev => prev.map(m => {
+          if (!m.isStreaming) return m;
+          return {
+            ...m,
+            content: [
+              ...m.content,
+              { type: 'tool_result' as const, tool_use_id: msg.tool_use_id, content: msg.content, is_error: msg.is_error },
+            ],
+          };
+        }));
+        break;
+      }
+
+      case 'tool_progress': {
+        setStatus(prev => ({
+          ...prev,
+          tasks: prev.tasks ? { ...prev.tasks } : undefined,
+        }));
+        break;
+      }
+
+      case 'permission': {
+        setPermission({ permission_id: msg.permission_id, tool_name: msg.tool_name, input: msg.input });
+        break;
+      }
+
+      case 'status': {
+        if (msg.subtype === 'todo') {
+          try {
+            const data = JSON.parse(msg.message);
+            setStatus(prev => ({ ...prev, tasks: data }));
+          } catch { /* ignore */ }
+        }
+        break;
+      }
+
+      case 'result': {
+        setIsStreaming(false);
+        streamingMsgRef.current = null;
+        partialBlocksRef.current.clear();
+        setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
+        break;
+      }
+
+      case 'error': {
+        setIsStreaming(false);
+        setMessages(prev => [
+          ...prev,
+          { id: genId(), role: 'system', content: [{ type: 'text', text: `Error: ${msg.message}` }], timestamp: Date.now() },
+        ]);
+        break;
+      }
+
+      // P1 features
+      case 'plan_approval': {
+        setPlanApproval(msg.plan);
+        break;
+      }
+
+      case 'ask_user_question': {
+        setAskQuestion(msg.question);
+        break;
+      }
+
+      case 'subagent_update': {
+        setSubAgents(msg.agents);
+        setStatus(prev => ({ ...prev, subagents: msg.agents }));
+        break;
+      }
+
+      case 'rewind_complete': {
+        setMessages(msg.messages);
+        break;
+      }
+
+      case 'undo_complete': {
+        if (msg.success) {
+          // Refresh status
+          setStatus(prev => {
+            if (!prev.edits) return prev;
+            const newFiles = prev.edits.files.filter(f => f !== msg.filePath);
+            return { ...prev, edits: { ...prev.edits, files: newFiles } };
+          });
+        }
+        break;
+      }
+    }
+  }, [lastMessage, urlSessionId, navigate]);
+
+  const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean) => {
+    if (!text.trim() && attachments.length === 0) return;
+
+    // If AI is streaming and queue is requested, add to queue
+    if (isStreaming && queue) {
+      const queuedMsg: QueuedMessage = {
+        id: genId(),
+        text: text.trim(),
+        timestamp: Date.now(),
+      };
+      setMessageQueue(prev => [...prev, queuedMsg]);
+      return;
+    }
+
+    // If AI is streaming but not queued, still add to queue
+    if (isStreaming) {
+      const queuedMsg: QueuedMessage = {
+        id: genId(),
+        text: text.trim(),
+        timestamp: Date.now(),
+      };
+      setMessageQueue(prev => [...prev, queuedMsg]);
+      return;
+    }
+
+    const userMsg: ChatMessage = {
+      id: genId(),
+      role: 'user',
+      content: [{ type: 'text', text: text.trim() }],
+      timestamp: Date.now(),
+      sessionId: currentSession?.id,
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setIsStreaming(true);
+
+    const streamingId = genId();
+    streamingMsgRef.current = streamingId;
+    partialBlocksRef.current.clear();
+    setMessages(prev => [...prev, {
+      id: streamingId,
+      role: 'assistant',
+      content: [],
+      timestamp: Date.now(),
+      isStreaming: true,
+    }]);
+
+    send({
+      type: 'chat',
+      text: text.trim(),
+      session_id: currentSession?.id,
+      attachments,
+      options: { 
+        mode, 
+        model, 
+        reasoning: reasoningEffort || reasoning,
+        agent,
+        streaming,
+        alwaysThinking,
+      },
+    });
+  }, [send, currentSession, mode, model, reasoning, isStreaming]);
+
+  // Process message queue when streaming completes
+  useEffect(() => {
+    if (!isStreaming && messageQueue.length > 0 && !queueProcessingRef.current) {
+      queueProcessingRef.current = true;
+      const nextMsg = messageQueue[0];
+      setMessageQueue(prev => prev.slice(1));
+      
+      // Send the queued message
+      setTimeout(() => {
+        handleSend(nextMsg.text, [], false);
+        queueProcessingRef.current = false;
+      }, 100);
+    }
+  }, [isStreaming, messageQueue, handleSend]);
+
+  // Queue management
+  const removeFromQueue = useCallback((id: string) => {
+    setMessageQueue(prev => prev.filter(m => m.id !== id));
+  }, []);
+
+  const clearQueue = useCallback(() => {
+    setMessageQueue([]);
+  }, []);
+
+  const handleStop = useCallback(() => {
+    send({ type: 'abort' });
+    setIsStreaming(false);
+    streamingMsgRef.current = null;
+    partialBlocksRef.current.clear();
+    setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
+  }, [send]);
+
+  const handleNewSession = useCallback(() => {
+    send({ type: 'new_session' });
+    setMessages([]);
+    partialBlocksRef.current.clear();
+    streamingMsgRef.current = null;
+    setIsStreaming(false);
+  }, [send]);
+
+  const handleRenameSession = useCallback((title: string) => {
+    if (currentSession) {
+      send({ type: 'rename_session', session_id: currentSession.id, title });
+    }
+  }, [send, currentSession]);
+
+  const handlePermission = useCallback((permissionId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
+    send({ type: 'permission_response', permission_id: permissionId, behavior });
+    setPermission(null);
+  }, [send]);
+
+  // Compute status data from messages
+  useEffect(() => {
+    let additions = 0;
+    let deletions = 0;
+    const files = new Set<string>();
+
+    messages.forEach(m => {
+      m.content.forEach(block => {
+        if (block.type === 'tool_use' && block.name === 'Edit') {
+          const input = block.input;
+          const filePath = input.file_path as string || input.path as string || '';
+          if (filePath) files.add(filePath);
+          const oldStr = input.old_string as string || '';
+          const newStr = input.new_string as string || '';
+          deletions += oldStr.split('\n').length;
+          additions += newStr.split('\n').length;
+        }
+      });
+    });
+
+    if (additions > 0 || deletions > 0 || files.size > 0) {
+      setStatus(prev => ({ ...prev, edits: { additions, deletions, files: Array.from(files) } }));
+    }
+  }, [messages]);
+
+  // Search highlight prop
+  const searchHighlight = useMemo(() => {
+    if (!searchQuery || searchResults.length === 0) return undefined;
+    return {
+      query: searchQuery,
+      currentMatchId: searchResults[currentSearchIdx]?.messageId,
+      totalMatches: searchResults.length,
+      currentMatchIndex: currentSearchIdx,
+    };
+  }, [searchQuery, searchResults, currentSearchIdx]);
+
+  return (
+    <div className="chat-view">
+      <ChatHeader
+        sessionTitle={currentSession?.title || ''}
+        onNewSession={handleNewSession}
+        onRenameSession={handleRenameSession}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchResults={searchResults}
+        currentSearchIdx={currentSearchIdx}
+        onSearchNext={() => navigateSearch('next')}
+        onSearchPrev={() => navigateSearch('prev')}
+        onRewind={rewindTarget ? () => setRewindTarget(null) : undefined}
+      />
+      <div className="chat-main">
+        {messages.length === 0 ? (
+          <WelcomeScreen onSuggestion={handleSend} />
+        ) : (
+          <div className="chat-content-with-rail">
+            <MessageList 
+              messages={messages} 
+              isStreaming={isStreaming}
+              searchHighlight={searchHighlight}
+            />
+            <MessageAnchorRail 
+              messages={messages}
+              onAnchorClick={handleAnchorClick}
+            />
+          </div>
+        )}
+      </div>
+      {showStatusPanel && <StatusPanel status={status} onUndoFile={handleUndoFile} />}
+      <MessageQueue 
+        queue={messageQueue} 
+        onRemove={removeFromQueue} 
+        onClear={clearQueue} 
+      />
+      <ChatInputBox
+        onSend={handleSend}
+        onStop={handleStop}
+        isStreaming={isStreaming}
+        connected={connected}
+        mode={mode}
+        setMode={setMode}
+        model={model}
+        setModel={setModel}
+        reasoning={reasoning}
+        setReasoning={setReasoning}
+        showStatusPanel={showStatusPanel}
+        setShowStatusPanel={setShowStatusPanel}
+      />
+      {permission && (
+        <PermissionDialog
+          permission={permission}
+          onAllow={() => handlePermission(permission.permission_id, 'allow')}
+          onDeny={() => handlePermission(permission.permission_id, 'deny')}
+          onAlwaysAllow={() => handlePermission(permission.permission_id, 'always_allow')}
+        />
+      )}
+      {rewindTarget && (
+        <RewindDialog
+          targetMessage={rewindTarget}
+          messageIndex={messages.findIndex(m => m.id === rewindTarget.id)}
+          totalMessages={messages.length}
+          onConfirm={confirmRewind}
+          onCancel={() => setRewindTarget(null)}
+        />
+      )}
+      {planApproval && (
+        <PlanApprovalDialog
+          plan={planApproval}
+          onApprove={handlePlanApprove}
+          onReject={handlePlanReject}
+        />
+      )}
+      {askQuestion && (
+        <div className="ask-question-overlay">
+          <div className="ask-question-container">
+            <div className="ask-question-header">
+              <span className="ask-icon">?</span>
+              <span>需要您的回答</span>
+            </div>
+            <div className="ask-question-body">
+              <p>{askQuestion.question}</p>
+              {askQuestion.options && (
+                <div className="ask-options">
+                  {askQuestion.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      className="ask-option-btn"
+                      onClick={() => handleQuestionAnswer(opt, opt)}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <textarea
+                className="ask-textarea"
+                placeholder="或输入自定义回答..."
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const value = (e.target as HTMLTextAreaElement).value;
+                    if (value.trim()) handleQuestionAnswer(value);
+                  }
+                }}
+                rows={3}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

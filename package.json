@@ -1,36 +1,39 @@
 {
   "name": "ccnexus",
-  "version": "0.1.0",
-  "description": "Claude Code GUI with Git integration",
+  "version": "2.0.0",
+  "private": true,
   "type": "module",
-  "main": "./out/main/index.js",
+  "description": "Self-hosted Claude Code visual client — chat-based UI with diff view, file tree, and session management",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "package": "electron-builder"
+    "dev": "concurrently -n server,client -c blue,green \"node --watch server/index.js\" \"vite --port 5000 --host 0.0.0.0\"",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server/index.js"
   },
   "dependencies": {
-    "clsx": "^2.1.0",
-    "extract-zip": "^2.0.1",
-    "lucide-react": "^0.400.0",
-    "simple-git": "^3.25.0",
-    "zustand": "^4.5.0"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.218",
+    "concurrently": "^9.0.0",
+    "diff": "^7.0.0",
+    "diff2html": "^3.4.48",
+    "dompurify": "^3.4.12",
+    "express": "^4.21.0",
+    "i18next": "^26.3.6",
+    "lucide-react": "^1.26.0",
+    "marked": "^18.0.7",
+    "mermaid": "^11.16.0",
+    "react-i18next": "^17.0.11",
+    "react-router-dom": "^7.18.1",
+    "sql.js": "^1.14.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
-    "autoprefixer": "^10.4.0",
-    "electron": "^43.1.0",
-    "electron-vite": "^2.3.0",
-    "postcss": "^8.4.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "tailwindcss": "^3.4.0",
-    "typescript": "^5.5.0"
-  },
-  "allowScripts": {
-    "electron@43.1.0": true
+    "@types/diff": "^6.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "highlight.js": "^11.10.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0"
   }
 }

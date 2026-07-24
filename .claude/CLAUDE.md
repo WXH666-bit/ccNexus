@@ -2,70 +2,84 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Build & Run
+## Commands
 
 ```bash
-npm run dev      # dev server + Electron (hot reload)
-npm run build    # production build
+npm run dev      # Dev: Vite (port 5000, HMR) + Express API (port 3456), run concurrently
+npm run build    # Production build: Vite outputs to dist/
+npm start        # Production: Express serves dist/ directly on PORT env (default 5000)
 ```
+
+- Vite proxies `/api` and `/ws` to the Express backend in dev; in production Express handles everything.
+- No test suite or linter is configured.
 
 ## Architecture
 
-ccNexus is an Electron + React desktop GUI wrapper for Claude Code CLI, with file browsing, preview, and Git integration.
+This is a **self-hosted web client for Claude Code** (recently migrated from Electron to Express + Vite). The backend wraps the `@anthropic-ai/claude-agent-sdk` `query()` function behind WebSocket; the frontend is a single-page chat UI styled after JetBrains CC GUI.
 
-### Layers
+### Server (`server/index.js` — monolithic)
 
-```
-src/main/       → Electron main process (Node.js) — IPC handlers, services
-src/preload/    → contextBridge — security boundary
-src/renderer/   → React + Vite + Tailwind CSS + Zustand
-```
+One file holds Express HTTP routes, WebSocket server, and all business logic:
 
-### Claude Code Integration
+- **SDK integration**: `sdkQuery({ prompt, options })` returns an async iterable. Events (`stream_event`, `assistant`, `user`, `result`, `tool_progress`, `system`) are forwarded as typed JSON over WebSocket.
+- **Streaming**: `includePartialMessages: true` on the SDK options. `content_block_start` / `content_block_delta` events carry incremental text/thinking/input_json; the frontend accumulates them in `partialBlocksRef` and renders a streaming placeholder message.
+- **Permission flow**: SDK `canUseTool` callback → `createPermissionHandler(ws)` → pending promise stored in `pendingPermissions` Map → WS `permission_request` → frontend `PermissionDialog` → WS `permission_response` → promise resolved with allow/deny. 5-minute timeout defaults to deny.
+- **Session metadata**: `~/.ccnexus/sessions/_index.json` (lightweight list of `{id, title, updatedAt}`). The SDK owns conversation persistence; the backend only manages display metadata.
+- **File edit + undo**: Before every `Edit`/`Write`/`MultiEdit` tool result, the backend snapshots the file's original content into `fileEditHistory[ sessionId ][ absPath ]`. `POST /api/files/undo` restores from snapshot. `undo_file` WS message does the same.
+- **Provider switching**: Reads providers from `~/.cc-switch/data.db` (SQLite via sql.js) → writes `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, model aliases to `~/.claude/settings.json` env block. Model resolution chain: `ANTHROPIC_MODEL` > alias map (`ANTHROPIC_DEFAULT_SONNET_MODEL` etc.) > original model ID.
+- **Session rewind**: `sessionMessages[ sessionId ]` array tracks every user + assistant message. Rewind truncates the array at a target index (both via HTTP `POST /api/sessions/:id/rewind` and WS `rewind`).
+- **Path security**: `safePath()` resolves + verifies the result starts with `CWD`. All file-access endpoints use it.
 
-- Uses `child_process.spawn` (NOT `node-pty`) — zero native deps
-- Each user message spawns `claude --print "<msg>" --session-id <uuid> --verbose`
-- Session continuity via `--session-id`, creates new UUID per session
-- Configurable Claude binary path stored in `~/.ccNexus/config.json`
-- Settings read/write from `~/.claude/settings.json`
+### Frontend (React 19 + TypeScript 5 + Vite 6)
 
-### Key Files
+Three routes managed by `react-router-dom`:
+- `/chat` / `/chat/:sessionId` — main chat interface (`ChatView`)
+- `/history` — session list (`HistoryView`)
+- `/settings` — 10-section settings panel with sidebar (`SettingsView`)
 
-| File | Purpose |
-|------|---------|
-| `src/main/ipc-handlers.ts` | All IPC registrations (claude, fs, git, settings, dialog) |
-| `src/main/claude/claude-process.ts` | Claude Code spawn + output parsing |
-| `src/main/claude/session-store.ts` | Session persistence to `~/.ccNexus/sessions.json` |
-| `src/main/claude/config-store.ts` | ccNexus config + Claude settings I/O |
-| `src/main/fs/fs-service.ts` | File tree builder (recursive, skips node_modules/.git) |
-| `src/preload/index.ts` | `contextBridge.exposeInMainWorld('electronAPI', ...)` |
-| `src/renderer/App.tsx` | Root: WelcomeScreen until project selected, then AppShell |
-| `src/renderer/components/layout/AppShell.tsx` | Main layout: Toolbar + sidebar + chat + git |
-| `src/renderer/components/chat/ChatPanel.tsx` | Chat messages + input + model/permission selectors + attachments |
-| `src/renderer/stores/ui-store.ts` | Font size state (Zustand, persisted to localStorage) |
+**ChatView (`src/views/ChatView.tsx`)** is the central state machine. It owns all state and dispatches based on `lastMessage.type` from the `useWebSocket` hook:
 
-### Data Flow
+| WS message type | Effect |
+|---|---|
+| `stream_event` | Accumulates partial `ContentBlock` objects in `partialBlocksRef`, overwrites the last (streaming) message on every delta |
+| `assistant` | Replaces streaming message with the complete message from the SDK |
+| `permission` | Opens `PermissionDialog` modal |
+| `tool_result` | Appends `tool_result` block to the streaming message's content |
+| `result` | Finalizes streaming, clears partial state |
+| `session_list`/`session_created`/`session_deleted` | Updates session state and optionally navigates |
+| `plan_approval` | Opens `PlanApprovalDialog` |
+| `ask_user_question` | Renders inline question card |
+| `subagent_update` | Updates sub-agent status |
 
-```
-Renderer: window.electronAPI.fs.getTree(projectPath)
-  → ipcRenderer.invoke('fs:tree')
-    → ipcMain.handle('fs:tree') in ipc-handlers.ts
-      → fs-service.ts
-    ← result
-  ← Promise
-```
+**Message queue**: When `isStreaming` is true, `handleSend` appends to `messageQueue` instead of sending immediately. On streaming completion, the queue auto-drains (one message per tick, 100ms delay). `ChatInputBox` passes a `queue` param to control this behavior.
 
-Same request-response pattern for all IPC. Push events (e.g., `claude:output`) use `webContents.send()` → `ipcRenderer.on()`.
+**Tool blocks** (`src/components/toolBlocks/`) follow a consistent pattern: each receives a `ToolUseBlock`, renders an icon + collapsible header + expandable body. Same-type consecutive tool blocks are grouped by `AgentGroupBlock`.
 
-### ESM
+**State that persists to localStorage**: `theme` (dark/light), `fontSize` (small/normal/large), `language` (zh/en), `showStatusPanel`.
 
-`package.json` has `"type": "module"`. In main process, `__dirname` is not available — use:
+### TypeScript types (`src/types.ts`)
 
-```ts
-import { fileURLToPath } from 'url'
-import { dirname } from 'path'
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-```
+All shared types live here: `ContentBlock` variants (text/thinking/tool_use/tool_result), `ChatMessage`, `Session`, `WSMessage` discriminated union, `StatusData`, `PermissionRequest`, plus P1 types (`SearchResult`, `MessageAnchor`, `SubAgentInfo`, `PlanApprovalRequest`, `AskUserQuestionRequest`).
 
-Preload output is `.mjs` — BrowserWindow preload path must end with `.mjs`.
+### Utils
+
+- `src/utils/markdown.ts` — marked + highlight.js, configured once at import time. `renderMarkdown()` also wraps file-like backtick references in clickable `<code class="file-link">`.
+- `src/utils/diff.ts` — line-based diff stats + HTML patch rendering using the `diff` package.
+
+### i18n (`src/i18n/`)
+
+i18next + react-i18next. Two locales (zh as default/fallback, en). Language persisted to localStorage. Components use the `useTranslation()` hook.
+
+### Theming (`src/index.css`)
+
+CSS variables on `:root` and `[data-theme="light"]`. The `data-theme` attribute is set on `<html>` in `main.tsx` from localStorage. Font size is also a CSS variable (`--base-font-size`) set the same way.
+
+## Conventions
+
+- React functional components + hooks only (no class components).
+- No implicit `any` — all event handlers and callbacks are typed.
+- `highlight.js` languages are registered individually per usage site (tree-shaking).
+- Server detects dev vs production via `NODE_ENV`; port logic differs accordingly.
+- Scripts under `scripts/` compute `PROJECT_DIR` from `SCRIPT_DIR` — they don't depend on `pwd`.
+- `path.resolve()` + `startsWith(cwd)` guard on every file-access path.
+- This project uses `pnpm` for dependency management in deploy scripts (`pnpm install`, `pnpm run build`), though `npm` works locally too.

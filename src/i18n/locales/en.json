@@ -1,0 +1,282 @@
+{
+  "app": {
+    "title": "ccNexus",
+    "loading": "Loading..."
+  },
+  "nav": {
+    "chat": "Chat",
+    "history": "History",
+    "settings": "Settings"
+  },
+  "chat": {
+    "newSession": "New Chat",
+    "welcome": {
+      "title": "ccNexus",
+      "subtitle": "Claude Code Visual Client",
+      "hint": "Type a message to start"
+    },
+    "input": {
+      "placeholder": "Type a message... (@ for files, / for modes)",
+      "send": "Send",
+      "queue": "Queue",
+      "queued": "Queued"
+    },
+    "message": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "rewind": "Rewind to here",
+      "retry": "Retry"
+    },
+    "search": {
+      "placeholder": "Search conversation...",
+      "noResults": "No results found",
+      "resultCount": "{{current}} / {{total}}"
+    },
+    "rewind": {
+      "title": "Confirm Rewind",
+      "message": "Are you sure you want to rewind to this message? All messages after this will be cleared.",
+      "confirm": "Confirm Rewind",
+      "cancel": "Cancel"
+    },
+    "status": {
+      "idle": "Idle",
+      "thinking": "Thinking",
+      "executing": "Executing",
+      "error": "Error"
+    },
+    "permission": {
+      "title": "Permission Request",
+      "allow": "Allow",
+      "deny": "Deny",
+      "allowAll": "Allow All"
+    },
+    "planApproval": {
+      "title": "Plan Approval",
+      "approve": "Approve",
+      "reject": "Reject",
+      "feedback": "Feedback"
+    },
+    "askQuestion": {
+      "submit": "Submit",
+      "custom": "Custom Answer"
+    },
+    "provider": {
+      "default": "Default Provider",
+      "switch": "Switch Provider"
+    },
+    "reasoning": {
+      "title": "Reasoning Effort",
+      "low": "Low",
+      "lowDesc": "Quick response, less thinking",
+      "medium": "Medium",
+      "mediumDesc": "Balance speed and depth",
+      "high": "High",
+      "highDesc": "Deep thinking, recommended",
+      "xhigh": "Extra High",
+      "xhighDesc": "Very deep thinking, takes longer",
+      "max": "Maximum",
+      "maxDesc": "Maximum thinking, slowest but most thorough"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "sections": {
+      "basic": "Basic",
+      "permissions": "Permissions",
+      "agents": "Agents",
+      "providers": "Providers",
+      "mcp": "MCP Servers",
+      "skills": "Skills",
+      "usage": "Usage",
+      "env": "Environment",
+      "appearance": "Appearance",
+      "prompt": "Prompt Enhancer"
+    },
+    "basic": {
+      "workDir": "Working Directory",
+      "defaultModel": "Default Model",
+      "language": "Language",
+      "autoSave": "Auto Save"
+    },
+    "permissions": {
+      "title": "Permissions",
+      "desc": "Configure default permission behavior for tool calls",
+      "mode": "Default Permission Mode",
+      "modes": {
+        "auto": "Auto Mode",
+        "plan": "Plan Mode",
+        "acceptEdits": "Accept Edits"
+      },
+      "whitelist": "Tool Permission Whitelist",
+      "addTool": "Add Tool"
+    },
+    "agents": {
+      "title": "Agents",
+      "desc": "Manage available AI agents",
+      "empty": "No custom agents",
+      "add": "Add Agent"
+    },
+    "providers": {
+      "title": "Providers",
+      "desc": "Configure AI model providers",
+      "add": "Add Provider",
+      "switch": "Switch Provider",
+      "current": "Current Provider"
+    },
+    "mcp": {
+      "title": "MCP Servers",
+      "desc": "Manage MCP server connections",
+      "add": "Add Server",
+      "empty": "No MCP servers"
+    },
+    "skills": {
+      "title": "Skills",
+      "desc": "Manage available skills",
+      "add": "Add Skill",
+      "empty": "No skills"
+    },
+    "usage": {
+      "title": "Usage Statistics",
+      "desc": "Token consumption statistics",
+      "total": "Total",
+      "today": "Today",
+      "thisWeek": "This Week",
+      "thisMonth": "This Month"
+    },
+    "env": {
+      "title": "Environment Variables",
+      "desc": "Edit environment variables",
+      "add": "Add Variable",
+      "key": "Variable Name",
+      "value": "Variable Value"
+    },
+    "appearance": {
+      "title": "Appearance",
+      "theme": "Theme",
+      "themes": {
+        "dark": "Dark",
+        "light": "Light"
+      },
+      "fontSize": "Font Size",
+      "fontSizes": {
+        "small": "Small",
+        "normal": "Normal",
+        "large": "Large"
+      }
+    },
+    "prompt": {
+      "title": "Prompt Enhancer",
+      "desc": "Configure prompt enhancement rules",
+      "enable": "Enable Prompt Enhancement",
+      "rules": "Enhancement Rules",
+      "addRule": "Add Rule"
+    }
+  },
+  "history": {
+    "title": "Chat History",
+    "empty": "No chat history",
+    "delete": "Delete",
+    "rename": "Rename"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  },
+  "config": {
+    "title": "Configuration",
+    "agent": "Agent",
+    "provider": "Provider",
+    "processes": "Process Management",
+    "streaming": "Streaming",
+    "thinking": "Thinking",
+    "noAgent": "No Agent",
+    "noProcesses": "No running processes",
+    "kill": "Kill"
+  },
+  "status": {
+    "tasks": "Tasks",
+    "subagents": "Subagents",
+    "edits": "Edits",
+    "tasksList": "Task List",
+    "subagentsList": "Subagents",
+    "fileChanges": "File Changes",
+    "noTasks": "No tasks running",
+    "noSubagents": "No subagents running",
+    "noChanges": "No file changes",
+    "undoFile": "Undo changes to this file",
+    "collapse": "Collapse status panel",
+    "expand": "Expand status panel"
+  },
+  "completion": {
+    "files": "Files",
+    "commands": "Commands",
+    "prompts": "Prompts",
+    "noResults": "No results"
+  },
+  "scroll": {
+    "scrollToBottom": "Scroll to bottom",
+    "newMessages": "New messages"
+  },
+  "contextUsage": {
+    "title": "Context Usage",
+    "total": "Total",
+    "systemPrompt": "System Prompt",
+    "tools": "Tool Definitions",
+    "messages": "Message History",
+    "memory": "Memory",
+    "other": "Other"
+  },
+  "rewind": {
+    "title": "Session Rewind",
+    "selectCheckpoint": "Select checkpoint to rewind to",
+    "turn": "Turn",
+    "noCheckpoints": "No checkpoints available"
+  },
+  "longContext": {
+    "title": "Long Context Mode",
+    "label": "Long Context"
+  },
+  "prompt": {
+    "title": "Prompt Management",
+    "create": "Create Prompt",
+    "edit": "Edit",
+    "delete": "Delete",
+    "view": "View",
+    "name": "Name",
+    "description": "Description",
+    "content": "Content",
+    "noPrompts": "No prompts"
+  },
+  "agent": {
+    "title": "Agent Management",
+    "enable": "Enable",
+    "disable": "Disable",
+    "view": "View Details",
+    "name": "Name",
+    "description": "Description",
+    "tools": "Allowed Tools",
+    "model": "Model",
+    "noAgents": "No agents"
+  },
+  "contextMenu": {
+    "copy": "Copy Content",
+    "copyMarkdown": "Copy as Markdown",
+    "delete": "Delete Message"
+  },
+  "notification": {
+    "title": "Task Complete",
+    "message": "AI response is ready",
+    "settings": "Notification Settings",
+    "enable": "Enable Notifications",
+    "sound": "Sound",
+    "volume": "Volume",
+    "test": "Test"
+  }
+}
