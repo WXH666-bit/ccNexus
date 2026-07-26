@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from './protocol.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -139,14 +140,13 @@ function createPermissionHandler(ws) {
     const requestId = Math.random().toString(36).slice(2, 12);
     return new Promise((resolve) => {
       pendingPermissions.set(requestId, { resolve, toolName, input });
-      ws.send(JSON.stringify({
-        type: 'permission_request',
+      ws.send(JSON.stringify(permissionRequestEvent({
         requestId,
         toolName,
         input,
         title: options?.title || `Allow ${toolName}?`,
         displayName: options?.displayName || toolName,
-      }));
+      })));
       // Timeout after 5 minutes
       setTimeout(() => {
         if (pendingPermissions.has(requestId)) {
@@ -854,6 +854,7 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', (ws) => {
   console.log('[ws] client connected');
   let currentSessionId = null;
+  const ownedQueries = new Map();
 
   ws.on('message', async (raw) => {
     let msg;
@@ -897,9 +898,9 @@ wss.on('connection', (ws) => {
 
         ws.send(JSON.stringify({ type: 'status', status: 'thinking' }));
 
+        let q;
         try {
-          const q = sdkQuery({ prompt, options: queryOpts });
-          if (currentSessionId) activeQueries.set(currentSessionId, q);
+          q = sdkQuery({ prompt, options: queryOpts });
 
           // Track user message in history (will be updated with session_id after init)
           const userMsg = {
@@ -917,8 +918,10 @@ wss.on('connection', (ws) => {
                 if (event.subtype === 'init') {
                   // Capture session ID
                   currentSessionId = event.session_id;
+                  activeQueries.set(currentSessionId, q);
+                  ownedQueries.set(currentSessionId, q);
                   await addSession(currentSessionId, prompt.slice(0, 60));
-                  ws.send(JSON.stringify({ type: 'session', sessionId: currentSessionId }));
+                  ws.send(JSON.stringify(sessionEvent(currentSessionId)));
                   
                   // Add user message to history now that we have session_id
                   userMsg.sessionId = currentSessionId;
@@ -933,12 +936,7 @@ wss.on('connection', (ws) => {
 
               case 'stream_event':
                 // Forward streaming events for real-time rendering
-                ws.send(JSON.stringify({
-                  type: 'stream',
-                  event: event.event,
-                  sessionId: event.session_id,
-                  uuid: event.uuid,
-                }));
+                ws.send(JSON.stringify(streamEvent(event.event, event.session_id, event.uuid)));
                 break;
 
               case 'assistant': {
@@ -986,13 +984,12 @@ wss.on('connection', (ws) => {
                   }
                 }
                 
-                ws.send(JSON.stringify({
-                  type: 'assistant',
+                ws.send(JSON.stringify(assistantEvent({
+                  id: event.uuid || `msg-${Date.now()}`,
                   content,
                   sessionId: event.session_id,
-                  uuid: event.uuid,
                   model: event.message?.model,
-                }));
+                })));
                 break;
               }
 
@@ -1054,7 +1051,12 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: err.message }));
           ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         } finally {
-          if (currentSessionId) activeQueries.delete(currentSessionId);
+          if (currentSessionId && activeQueries.get(currentSessionId) === q) {
+            activeQueries.delete(currentSessionId);
+          }
+          if (currentSessionId && ownedQueries.get(currentSessionId) === q) {
+            ownedQueries.delete(currentSessionId);
+          }
         }
         break;
       }
@@ -1074,10 +1076,13 @@ wss.on('connection', (ws) => {
       }
 
       case 'abort': {
-        const q = activeQueries.get(msg.sessionId || currentSessionId);
+        const sessionId = msg.sessionId || currentSessionId;
+        const q = ownedQueries.get(sessionId);
         if (q) {
           try { await q.interrupt(); } catch { /* ignore */ }
           try { q.close(); } catch { /* ignore */ }
+          if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
+          if (ownedQueries.get(sessionId) === q) ownedQueries.delete(sessionId);
         }
         ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         break;
@@ -1152,10 +1157,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('[ws] client disconnected');
     // Clean up active queries
-    for (const [id, q] of activeQueries) {
+    for (const [sessionId, q] of ownedQueries) {
       try { q.close(); } catch { /* ignore */ }
+      if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
     }
-    activeQueries.clear();
+    ownedQueries.clear();
   });
 });
 
