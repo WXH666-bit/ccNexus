@@ -11,6 +11,15 @@ test('get_sessions returns the persisted session list', async () => {
   assert.deepEqual(event, { type: 'session_list', sessions });
 });
 
+test('get_sessions can include sessions removed by external Claude Code cleanup', async () => {
+  const sessions = [{ id: 's1', title: 'First', updatedAt: 10 }];
+  const event = await dispatchSessionCommand({ type: 'get_sessions' }, {}, {
+    syncSessions: async () => ({ sessions, deletedSessionIds: ['stale-session'] }),
+  });
+
+  assert.deepEqual(event, { type: 'session_list', sessions, deletedSessionIds: ['stale-session'] });
+});
+
 test('load_session returns the requested persisted messages', async () => {
   const messages = [{ id: 'm1', role: 'user', content: [], timestamp: 10, sessionId: 's1' }];
   const event = await dispatchSessionCommand({ type: 'load_session', sessionId: 's1' }, {
@@ -21,6 +30,21 @@ test('load_session returns the requested persisted messages', async () => {
   });
 
   assert.deepEqual(event, { type: 'session_history', sessionId: 's1', messages });
+});
+
+test('load_session returns a cleaned session list when the requested session was externally deleted', async () => {
+  const event = await dispatchSessionCommand({ type: 'load_session', sessionId: 'stale-session' }, {}, {
+    syncSessions: async () => ({
+      sessions: [{ id: 'fresh-session', title: 'Fresh', updatedAt: 20 }],
+      deletedSessionIds: ['stale-session'],
+    }),
+  });
+
+  assert.deepEqual(event, {
+    type: 'session_list',
+    sessions: [{ id: 'fresh-session', title: 'Fresh', updatedAt: 20 }],
+    deletedSessionIds: ['stale-session'],
+  });
 });
 
 test('delete_session removes the persisted session and confirms its id', async () => {

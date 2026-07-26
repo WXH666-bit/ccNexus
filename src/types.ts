@@ -62,7 +62,7 @@ export type WSMessage =
   | { type: 'status'; status: 'thinking' | 'idle' }
   | { type: 'error'; message: string; invalidSessionId?: string }
   | { type: 'result'; subtype: string; duration?: number; cost?: number; turns?: number; is_error?: boolean; sessionId?: string }
-  | { type: 'session_list'; sessions: Session[] }
+  | { type: 'session_list'; sessions: Session[]; deletedSessionIds?: string[] }
   | { type: 'session_history'; sessionId: string; messages: ChatMessage[] }
   | { type: 'session_created'; session: Session }
   | { type: 'session_deleted'; sessionId: string }

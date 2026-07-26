@@ -2,8 +2,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
+import os from 'node:os';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, watch } from 'fs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from './protocol.js';
@@ -13,6 +14,7 @@ import { createAssistantTurn } from './assistantTurn.js';
 import { buildThinkingOptions } from './thinkingOptions.js';
 import { extractToolResults } from './toolResults.js';
 import { isMissingClaudeConversationError, staleSessionErrorEvent } from './sessionRecovery.js';
+import { claudeProjectSessionsDir, syncSessionStoreWithClaude, sessionListEventFromSync } from './sessionSync.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -40,7 +42,9 @@ const PORT = isDev
   : parseInt(process.env.DEPLOY_RUN_PORT || process.env.PORT || '3456', 10);
 const CWD = process.cwd();
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
-const SESSIONS_DIR = path.join(process.env.HOME || '/tmp', '.ccnexus', 'sessions');
+const HOME_DIR = process.env.HOME || os.homedir() || '/tmp';
+const SESSIONS_DIR = path.join(HOME_DIR, '.ccnexus', 'sessions');
+const CLAUDE_PROJECT_SESSIONS_DIR = claudeProjectSessionsDir({ homeDir: HOME_DIR, cwd: CWD });
 const sessionStore = createSessionStore(SESSIONS_DIR);
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
@@ -127,6 +131,19 @@ async function updateSessionTitle(sessionId, title) {
 
 async function deleteSession(sessionId) {
   await sessionStore.deleteSession(sessionId);
+}
+
+function forgetSessionState(sessionId) {
+  sessionMessages.delete(sessionId);
+  fileEditHistory.delete(sessionId);
+  activeQueries.delete(sessionId);
+}
+
+async function syncPersistedSessionsWithClaude() {
+  return syncSessionStoreWithClaude(sessionStore, {
+    claudeProjectDir: CLAUDE_PROJECT_SESSIONS_DIR,
+    protectedSessionIds: activeQueries.keys(),
+  });
 }
 
 // ─── Permission handling ──────────────────────────────────────────
@@ -235,8 +252,8 @@ app.post('/api/diff', async (req, res) => {
 
 // Session APIs
 app.get('/api/sessions', async (_req, res) => {
-  const index = await loadSessionIndex();
-  res.json(index);
+  const { sessions } = await syncPersistedSessionsWithClaude();
+  res.json(sessions);
 });
 
 app.put('/api/sessions/:id', async (req, res) => {
@@ -294,8 +311,8 @@ app.get('/api/sessions/:id/edits', async (req, res) => {
 
 // ─── Provider & Model Management ──────────────────────────────────
 const initSqlJs = require('sql.js');
-const CC_SWITCH_DB_PATH = path.join(process.env.HOME || '/tmp', '.cc-switch', 'data.db');
-const CLAUDE_SETTINGS_PATH = path.join(process.env.HOME || '/tmp', '.claude', 'settings.json');
+const CC_SWITCH_DB_PATH = path.join(HOME_DIR, '.cc-switch', 'data.db');
+const CLAUDE_SETTINGS_PATH = path.join(HOME_DIR, '.claude', 'settings.json');
 
 // ccGUI 同款模型列表
 const AVAILABLE_MODELS = [
@@ -848,6 +865,47 @@ if (process.env.NODE_ENV === 'production') {
 // ─── WebSocket ────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws' });
 
+function sendJson(ws, payload) {
+  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
+}
+
+function broadcastJson(payload) {
+  for (const client of wss.clients) sendJson(client, payload);
+}
+
+let sessionSyncInFlight = false;
+async function syncAndBroadcastExternalSessionDeletes() {
+  if (sessionSyncInFlight) return;
+  sessionSyncInFlight = true;
+  try {
+    const result = await syncPersistedSessionsWithClaude();
+    if (!result.deletedSessionIds.length) return;
+    for (const sessionId of result.deletedSessionIds) forgetSessionState(sessionId);
+    broadcastJson(sessionListEventFromSync(result));
+  } catch (err) {
+    console.error('[sessions] failed to sync Claude Code sessions:', err.message);
+  } finally {
+    sessionSyncInFlight = false;
+  }
+}
+
+function startClaudeSessionMonitor() {
+  const timer = setInterval(() => {
+    void syncAndBroadcastExternalSessionDeletes();
+  }, 2000);
+  timer.unref?.();
+
+  try {
+    const watcher = watch(CLAUDE_PROJECT_SESSIONS_DIR, { persistent: false }, () => {
+      void syncAndBroadcastExternalSessionDeletes();
+    });
+    watcher.unref?.();
+  } catch {
+    // The poller above covers first-run cases where Claude has not created the
+    // project session directory yet.
+  }
+}
+
 wss.on('connection', (ws) => {
   console.log('[ws] client connected');
   let currentSessionId = null;
@@ -859,9 +917,14 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
 
-    const sessionEventPayload = await dispatchSessionCommand(msg, sessionStore);
+    const sessionEventPayload = await dispatchSessionCommand(msg, sessionStore, {
+      syncSessions: syncPersistedSessionsWithClaude,
+    });
     if (sessionEventPayload) {
-      ws.send(JSON.stringify(sessionEventPayload));
+      if (sessionEventPayload.type === 'session_list' && sessionEventPayload.deletedSessionIds?.length) {
+        for (const sessionId of sessionEventPayload.deletedSessionIds) forgetSessionState(sessionId);
+      }
+      sendJson(ws, sessionEventPayload);
       if (sessionEventPayload.type === 'session_history') {
         currentSessionId = sessionEventPayload.sessionId;
         sessionMessages.set(sessionEventPayload.sessionId, sessionEventPayload.messages);
@@ -1044,9 +1107,7 @@ wss.on('connection', (ws) => {
           let invalidSessionId = null;
           if (querySessionId && isMissingClaudeConversationError(err.message)) {
             await sessionStore.deleteSession(querySessionId);
-            sessionMessages.delete(querySessionId);
-            fileEditHistory.delete(querySessionId);
-            activeQueries.delete(querySessionId);
+            forgetSessionState(querySessionId);
             ownedQueries.delete(querySessionId);
             if (currentSessionId === querySessionId) currentSessionId = null;
             invalidSessionId = querySessionId;
@@ -1172,6 +1233,8 @@ wss.on('connection', (ws) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────
+startClaudeSessionMonitor();
+
 server.listen(PORT, () => {
   console.log(`\n\x1b[36m╔══════════════════════════════════════════╗\x1b[0m`);
   console.log(`\x1b[36m║   ccNexus  v2.0              ║\x1b[0m`);

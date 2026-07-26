@@ -261,6 +261,12 @@ export default function ChatView() {
       }
       case 'session_list': {
         setSessions(msg.sessions);
+        if (urlSessionId && msg.deletedSessionIds?.includes(urlSessionId)) {
+          setCurrentSession(null);
+          setMessages([]);
+          navigate('/chat', { replace: true });
+          break;
+        }
         if (urlSessionId) {
           const s = msg.sessions.find(x => x.id === urlSessionId);
           if (s) setCurrentSession(s);
