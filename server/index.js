@@ -9,6 +9,7 @@ import { createRequire } from 'module';
 import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from './protocol.js';
 import { createSessionStore } from './sessionStore.js';
 import { dispatchSessionCommand } from './sessionBridge.js';
+import { createAssistantTurn } from './assistantTurn.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -919,6 +920,8 @@ wss.on('connection', (ws) => {
             content: [{ type: 'text', text: prompt }],
             timestamp: Date.now(),
           };
+          const assistantTurn = createAssistantTurn();
+          let lastAssistantId = null;
 
           queryEvents: for await (const event of q) {
             if (ws.readyState !== ws.OPEN) break;
@@ -960,57 +963,10 @@ wss.on('connection', (ws) => {
                 break;
 
               case 'assistant': {
-                // Complete assistant message
-                const content = event.message?.content || [];
-                const assistantMsg = {
-                  id: event.uuid || `msg-${Date.now()}`,
-                  role: 'assistant',
-                  content,
-                  timestamp: Date.now(),
-                  sessionId: event.session_id,
-                  model: event.message?.model,
-                };
-                
-                // Track message history for rewind
-                if (event.session_id) {
-                  if (!sessionMessages.has(event.session_id)) {
-                    sessionMessages.set(event.session_id, []);
-                  }
-                  sessionMessages.get(event.session_id).push(assistantMsg);
-                  await sessionStore.appendMessage(event.session_id, assistantMsg);
-                  
-                  // Track file edits for undo
-                  for (const block of content) {
-                    if (block.type === 'tool_use' && (block.name === 'Edit' || block.name === 'MultiEdit' || block.name === 'Write')) {
-                      const filePath = block.input?.file_path || block.input?.path;
-                      if (filePath) {
-                        const absPath = safePath(filePath);
-                        if (absPath) {
-                          if (!fileEditHistory.has(event.session_id)) {
-                            fileEditHistory.set(event.session_id, new Map());
-                          }
-                          const history = fileEditHistory.get(event.session_id);
-                          if (!history.has(absPath)) {
-                            try {
-                              const originalContent = await fs.readFile(absPath, 'utf-8');
-                              history.set(absPath, originalContent);
-                            } catch {
-                              // File might not exist yet (new file)
-                              history.set(absPath, '');
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-                
-                ws.send(JSON.stringify(assistantEvent({
-                  id: event.uuid || `msg-${Date.now()}`,
-                  content,
-                  sessionId: event.session_id,
-                  model: event.message?.model,
-                })));
+                // One SDK turn can emit a thinking-only assistant message before
+                // its text/tool blocks. Keep collecting until the terminal result.
+                assistantTurn.add(event.message);
+                lastAssistantId = event.uuid || lastAssistantId;
                 break;
               }
 
@@ -1027,7 +983,31 @@ wss.on('connection', (ws) => {
                 break;
               }
 
-              case 'result':
+              case 'result': {
+                const finalSessionId = event.session_id || querySessionId;
+                const finalAssistant = event.is_error ? null : assistantTurn.complete({
+                  id: lastAssistantId || `msg-${Date.now()}`,
+                  sessionId: finalSessionId,
+                });
+                if (finalAssistant) {
+                  const assistantMsg = { ...finalAssistant, role: 'assistant', timestamp: Date.now() };
+                  if (!sessionMessages.has(finalSessionId)) sessionMessages.set(finalSessionId, []);
+                  sessionMessages.get(finalSessionId).push(assistantMsg);
+                  await sessionStore.appendMessage(finalSessionId, assistantMsg);
+                  for (const block of finalAssistant.content) {
+                    if (block.type !== 'tool_use' || !['Edit', 'MultiEdit', 'Write'].includes(block.name)) continue;
+                    const filePath = block.input?.file_path || block.input?.path;
+                    const absPath = filePath && safePath(filePath);
+                    if (!absPath) continue;
+                    if (!fileEditHistory.has(finalSessionId)) fileEditHistory.set(finalSessionId, new Map());
+                    const history = fileEditHistory.get(finalSessionId);
+                    if (!history.has(absPath)) {
+                      try { history.set(absPath, await fs.readFile(absPath, 'utf-8')); }
+                      catch { history.set(absPath, ''); }
+                    }
+                  }
+                  ws.send(JSON.stringify(assistantEvent(finalAssistant)));
+                }
                 ws.send(JSON.stringify({
                   type: 'result',
                   subtype: event.subtype,
@@ -1039,6 +1019,7 @@ wss.on('connection', (ws) => {
                 }));
                 ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
                 break;
+              }
 
               case 'tool_progress':
                 ws.send(JSON.stringify({
