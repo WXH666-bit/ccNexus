@@ -214,6 +214,10 @@ export default function ChatView() {
         });
         return;
       }
+      // A different route is a real navigation, not the server-assigned route
+      // we were waiting to consume. Disarm the old one before this switch so it
+      // cannot suppress a later genuine navigation back to that stale ID.
+      serverSessionNavigationRef.current = null;
       send({ type: 'switch_session', session_id: urlSessionId });
       setMessages([]);
       partialBlocksRef.current.clear();
