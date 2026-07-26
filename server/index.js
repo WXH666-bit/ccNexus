@@ -856,6 +856,7 @@ wss.on('connection', (ws) => {
   let currentSessionId = null;
   let latestChatRequest = 0;
   const ownedQueries = new Map();
+  const latestRequestBySession = new Map();
 
   ws.on('message', async (raw) => {
     let msg;
@@ -867,6 +868,9 @@ wss.on('connection', (ws) => {
         let querySessionId = sessionId || null;
         const requestOrder = ++latestChatRequest;
         currentSessionId = querySessionId;
+        if (querySessionId) {
+          latestRequestBySession.set(querySessionId, requestOrder);
+        }
 
         // Build prompt
         let prompt = text || '';
@@ -913,7 +917,7 @@ wss.on('connection', (ws) => {
             timestamp: Date.now(),
           };
 
-          for await (const event of q) {
+          queryEvents: for await (const event of q) {
             if (ws.readyState !== ws.OPEN) break;
 
             switch (event.type) {
@@ -921,6 +925,12 @@ wss.on('connection', (ws) => {
                 if (event.subtype === 'init') {
                   // Capture session ID
                   querySessionId = event.session_id || querySessionId;
+                  if (latestRequestBySession.has(querySessionId)
+                    && latestRequestBySession.get(querySessionId) !== requestOrder) {
+                    try { q.close(); } catch { /* ignore */ }
+                    break queryEvents;
+                  }
+                  latestRequestBySession.set(querySessionId, requestOrder);
                   if (requestOrder === latestChatRequest) {
                     currentSessionId = querySessionId;
                   }
@@ -1062,6 +1072,9 @@ wss.on('connection', (ws) => {
           }
           if (querySessionId && ownedQueries.get(querySessionId) === q) {
             ownedQueries.delete(querySessionId);
+          }
+          if (querySessionId && latestRequestBySession.get(querySessionId) === requestOrder) {
+            latestRequestBySession.delete(querySessionId);
           }
         }
         break;
