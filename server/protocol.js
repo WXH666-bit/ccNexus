@@ -1,0 +1,31 @@
+export function sessionEvent(sessionId) {
+  return { type: 'session', sessionId };
+}
+
+export function streamEvent(event, sessionId, uuid) {
+  return { type: 'stream_event', event, sessionId, uuid };
+}
+
+export function assistantEvent({ id, content, sessionId, model, cost, duration, turns }) {
+  const message = {
+    id,
+    content,
+    sessionId,
+  };
+
+  for (const [key, value] of Object.entries({ model, cost, duration, turns })) {
+    if (value !== undefined) message[key] = value;
+  }
+
+  return {
+    type: 'assistant',
+    message,
+  };
+}
+
+export function permissionRequestEvent({ requestId, toolName, input, title, displayName }) {
+  const event = { type: 'permission_request', requestId, toolName, input };
+  if (title !== undefined) event.title = title;
+  if (displayName !== undefined) event.displayName = displayName;
+  return event;
+}

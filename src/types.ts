@@ -53,17 +53,19 @@ export interface Session {
 
 // ─── WebSocket message types ─────────────────────────────────────
 export type WSMessage =
-  | { type: 'stream_event'; event: unknown }
+  | { type: 'session'; sessionId: string }
+  | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
   | { type: 'assistant'; message: { id: string; content: ContentBlock[]; model?: string; sessionId?: string; cost?: number; duration?: number; turns?: number } }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
   | { type: 'tool_progress'; tool_name: string; tool_use_id: string; status: 'running' | 'completed' | 'error' }
-  | { type: 'permission'; permission_id: string; tool_name: string; input: Record<string, unknown> }
-  | { type: 'status'; subtype: string; message: string }
+  | { type: 'permission_request'; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
+  | { type: 'status'; status: 'thinking' | 'idle' }
   | { type: 'error'; message: string }
-  | { type: 'result'; subtype: 'success' | 'error'; message?: string }
+  | { type: 'result'; subtype: string; duration?: number; cost?: number; turns?: number; is_error?: boolean; sessionId?: string }
   | { type: 'session_list'; sessions: Session[] }
+  | { type: 'session_history'; sessionId: string; messages: ChatMessage[] }
   | { type: 'session_created'; session: Session }
-  | { type: 'session_deleted'; session_id: string }
+  | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_renamed'; session_id: string; title: string }
   | { type: 'rewind_complete'; messages: ChatMessage[] }
   | { type: 'plan_approval'; plan: PlanApprovalRequest }

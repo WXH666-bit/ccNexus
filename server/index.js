@@ -6,6 +6,9 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from './protocol.js';
+import { createSessionStore } from './sessionStore.js';
+import { dispatchSessionCommand } from './sessionBridge.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -34,6 +37,7 @@ const PORT = isDev
 const CWD = process.cwd();
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 const SESSIONS_DIR = path.join(process.env.HOME || '/tmp', '.ccnexus', 'sessions');
+const sessionStore = createSessionStore(SESSIONS_DIR);
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
 const BINARY_EXTS = new Set([
@@ -100,35 +104,25 @@ async function buildTree(dirPath, options = {}) {
 
 // ─── Session metadata (lightweight index) ─────────────────────────
 async function loadSessionIndex() {
-  try {
-    const data = await fs.readFile(path.join(SESSIONS_DIR, '_index.json'), 'utf-8');
-    return JSON.parse(data);
-  } catch { return []; }
-}
-
-async function saveSessionIndex(index) {
-  await fs.writeFile(path.join(SESSIONS_DIR, '_index.json'), JSON.stringify(index, null, 2));
+  return sessionStore.listSessions();
 }
 
 async function addSession(sessionId, title) {
-  const index = await loadSessionIndex();
-  const existing = index.findIndex((s) => s.id === sessionId);
-  const entry = { id: sessionId, title: title || `Session ${sessionId.slice(0, 8)}`, updatedAt: Date.now() };
-  if (existing >= 0) { index[existing] = entry; } else { index.unshift(entry); }
-  await saveSessionIndex(index);
-  return entry;
+  return sessionStore.saveSession({
+    id: sessionId,
+    title: title || `Session ${sessionId.slice(0, 8)}`,
+    updatedAt: Date.now(),
+  });
 }
 
 async function updateSessionTitle(sessionId, title) {
   const index = await loadSessionIndex();
   const entry = index.find((s) => s.id === sessionId);
-  if (entry) { entry.title = title; await saveSessionIndex(index); }
+  if (entry) await sessionStore.saveSession({ ...entry, title });
 }
 
 async function deleteSession(sessionId) {
-  const index = await loadSessionIndex();
-  const filtered = index.filter((s) => s.id !== sessionId);
-  await saveSessionIndex(filtered);
+  await sessionStore.deleteSession(sessionId);
 }
 
 // ─── Permission handling ──────────────────────────────────────────
@@ -139,14 +133,13 @@ function createPermissionHandler(ws) {
     const requestId = Math.random().toString(36).slice(2, 12);
     return new Promise((resolve) => {
       pendingPermissions.set(requestId, { resolve, toolName, input });
-      ws.send(JSON.stringify({
-        type: 'permission_request',
+      ws.send(JSON.stringify(permissionRequestEvent({
         requestId,
         toolName,
         input,
         title: options?.title || `Allow ${toolName}?`,
         displayName: options?.displayName || toolName,
-      }));
+      })));
       // Timeout after 5 minutes
       setTimeout(() => {
         if (pendingPermissions.has(requestId)) {
@@ -854,15 +847,33 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', (ws) => {
   console.log('[ws] client connected');
   let currentSessionId = null;
+  let latestChatRequest = 0;
+  const ownedQueries = new Map();
+  const latestRequestBySession = new Map();
 
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
 
+    const sessionEventPayload = await dispatchSessionCommand(msg, sessionStore);
+    if (sessionEventPayload) {
+      ws.send(JSON.stringify(sessionEventPayload));
+      if (sessionEventPayload.type === 'session_history') {
+        currentSessionId = sessionEventPayload.sessionId;
+        sessionMessages.set(sessionEventPayload.sessionId, sessionEventPayload.messages);
+      }
+      return;
+    }
+
     switch (msg.type) {
       case 'chat': {
         const { text, images, sessionId, options: clientOptions } = msg;
-        currentSessionId = sessionId || null;
+        let querySessionId = sessionId || null;
+        const requestOrder = ++latestChatRequest;
+        currentSessionId = querySessionId;
+        if (querySessionId) {
+          latestRequestBySession.set(querySessionId, requestOrder);
+        }
 
         // Build prompt
         let prompt = text || '';
@@ -891,15 +902,15 @@ wss.on('connection', (ws) => {
           queryOpts.maxThinkingTokens = 16000;
         }
         
-        if (currentSessionId) {
-          queryOpts.resume = currentSessionId;
+        if (querySessionId) {
+          queryOpts.resume = querySessionId;
         }
 
         ws.send(JSON.stringify({ type: 'status', status: 'thinking' }));
 
+        let q;
         try {
-          const q = sdkQuery({ prompt, options: queryOpts });
-          if (currentSessionId) activeQueries.set(currentSessionId, q);
+          q = sdkQuery({ prompt, options: queryOpts });
 
           // Track user message in history (will be updated with session_id after init)
           const userMsg = {
@@ -909,23 +920,35 @@ wss.on('connection', (ws) => {
             timestamp: Date.now(),
           };
 
-          for await (const event of q) {
+          queryEvents: for await (const event of q) {
             if (ws.readyState !== ws.OPEN) break;
 
             switch (event.type) {
               case 'system':
                 if (event.subtype === 'init') {
                   // Capture session ID
-                  currentSessionId = event.session_id;
-                  await addSession(currentSessionId, prompt.slice(0, 60));
-                  ws.send(JSON.stringify({ type: 'session', sessionId: currentSessionId }));
+                  querySessionId = event.session_id || querySessionId;
+                  if (latestRequestBySession.has(querySessionId)
+                    && latestRequestBySession.get(querySessionId) !== requestOrder) {
+                    try { q.close(); } catch { /* ignore */ }
+                    break queryEvents;
+                  }
+                  latestRequestBySession.set(querySessionId, requestOrder);
+                  if (requestOrder === latestChatRequest) {
+                    currentSessionId = querySessionId;
+                  }
+                  activeQueries.set(querySessionId, q);
+                  ownedQueries.set(querySessionId, q);
+                  await addSession(querySessionId, prompt.slice(0, 60));
+                  ws.send(JSON.stringify(sessionEvent(querySessionId)));
                   
                   // Add user message to history now that we have session_id
-                  userMsg.sessionId = currentSessionId;
-                  if (!sessionMessages.has(currentSessionId)) {
-                    sessionMessages.set(currentSessionId, []);
+                  userMsg.sessionId = querySessionId;
+                  if (!sessionMessages.has(querySessionId)) {
+                    sessionMessages.set(querySessionId, []);
                   }
-                  sessionMessages.get(currentSessionId).push(userMsg);
+                  sessionMessages.get(querySessionId).push(userMsg);
+                  await sessionStore.appendMessage(querySessionId, userMsg);
                 }
                 // Forward system events
                 ws.send(JSON.stringify({ type: 'system', subtype: event.subtype, sessionId: event.session_id }));
@@ -933,12 +956,7 @@ wss.on('connection', (ws) => {
 
               case 'stream_event':
                 // Forward streaming events for real-time rendering
-                ws.send(JSON.stringify({
-                  type: 'stream',
-                  event: event.event,
-                  sessionId: event.session_id,
-                  uuid: event.uuid,
-                }));
+                ws.send(JSON.stringify(streamEvent(event.event, event.session_id, event.uuid)));
                 break;
 
               case 'assistant': {
@@ -959,6 +977,7 @@ wss.on('connection', (ws) => {
                     sessionMessages.set(event.session_id, []);
                   }
                   sessionMessages.get(event.session_id).push(assistantMsg);
+                  await sessionStore.appendMessage(event.session_id, assistantMsg);
                   
                   // Track file edits for undo
                   for (const block of content) {
@@ -986,13 +1005,12 @@ wss.on('connection', (ws) => {
                   }
                 }
                 
-                ws.send(JSON.stringify({
-                  type: 'assistant',
+                ws.send(JSON.stringify(assistantEvent({
+                  id: event.uuid || `msg-${Date.now()}`,
                   content,
                   sessionId: event.session_id,
-                  uuid: event.uuid,
                   model: event.message?.model,
-                }));
+                })));
                 break;
               }
 
@@ -1054,7 +1072,12 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: err.message }));
           ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         } finally {
-          if (currentSessionId) activeQueries.delete(currentSessionId);
+          if (querySessionId && activeQueries.get(querySessionId) === q) {
+            activeQueries.delete(querySessionId);
+          }
+          if (querySessionId && ownedQueries.get(querySessionId) === q) {
+            ownedQueries.delete(querySessionId);
+          }
         }
         break;
       }
@@ -1074,10 +1097,13 @@ wss.on('connection', (ws) => {
       }
 
       case 'abort': {
-        const q = activeQueries.get(msg.sessionId || currentSessionId);
+        const sessionId = msg.sessionId || currentSessionId;
+        const q = ownedQueries.get(sessionId);
         if (q) {
           try { await q.interrupt(); } catch { /* ignore */ }
           try { q.close(); } catch { /* ignore */ }
+          if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
+          if (ownedQueries.get(sessionId) === q) ownedQueries.delete(sessionId);
         }
         ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         break;
@@ -1152,10 +1178,12 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('[ws] client disconnected');
     // Clean up active queries
-    for (const [id, q] of activeQueries) {
+    for (const [sessionId, q] of ownedQueries) {
       try { q.close(); } catch { /* ignore */ }
+      if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
     }
-    activeQueries.clear();
+    ownedQueries.clear();
+    latestRequestBySession.clear();
   });
 });
 

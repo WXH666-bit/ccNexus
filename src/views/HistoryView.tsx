@@ -26,7 +26,7 @@ export default function HistoryView() {
       setEditingId(null);
     }
     if (lastMessage?.type === 'session_deleted') {
-      setSessions(prev => prev.filter(s => s.id !== lastMessage.session_id));
+      setSessions(prev => prev.filter(s => s.id !== lastMessage.sessionId));
     }
   }, [lastMessage]);
 
@@ -36,7 +36,7 @@ export default function HistoryView() {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const handleDelete = (id: string) => {
-    send({ type: 'delete_session', session_id: id });
+    send({ type: 'delete_session', sessionId: id });
   };
 
   const handleRename = (id: string) => {
