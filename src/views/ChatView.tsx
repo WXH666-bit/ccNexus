@@ -215,6 +215,24 @@ export default function ChatView() {
     const msg = lastMessage;
 
     switch (msg.type) {
+      case 'session': {
+        const session: Session = {
+          id: msg.sessionId,
+          title: currentSession?.id === msg.sessionId ? currentSession.title : 'New Chat',
+          updatedAt: Date.now(),
+        };
+        setSessions(prev => {
+          const existing = prev.find(item => item.id === msg.sessionId);
+          return existing
+            ? prev.map(item => item.id === msg.sessionId ? { ...item, updatedAt: session.updatedAt } : item)
+            : [...prev, session];
+        });
+        if (!currentSession) {
+          setCurrentSession(session);
+          navigate(`/chat/${msg.sessionId}`, { replace: true });
+        }
+        break;
+      }
       case 'session_list': {
         setSessions(msg.sessions);
         if (urlSessionId) {
@@ -349,18 +367,12 @@ export default function ChatView() {
         break;
       }
 
-      case 'permission': {
-        setPermission({ permission_id: msg.permission_id, tool_name: msg.tool_name, input: msg.input });
+      case 'permission_request': {
+        setPermission({ permission_id: msg.requestId, tool_name: msg.toolName, input: msg.input });
         break;
       }
 
       case 'status': {
-        if (msg.subtype === 'todo') {
-          try {
-            const data = JSON.parse(msg.message);
-            setStatus(prev => ({ ...prev, tasks: data }));
-          } catch { /* ignore */ }
-        }
         break;
       }
 
@@ -415,7 +427,7 @@ export default function ChatView() {
         break;
       }
     }
-  }, [lastMessage, urlSessionId, navigate]);
+  }, [lastMessage, urlSessionId, navigate, currentSession]);
 
   const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean) => {
     if (!text.trim() && attachments.length === 0) return;
@@ -466,8 +478,8 @@ export default function ChatView() {
     send({
       type: 'chat',
       text: text.trim(),
-      session_id: currentSession?.id,
-      attachments,
+      sessionId: currentSession?.id,
+      images: attachments,
       options: { 
         mode, 
         model, 
@@ -504,12 +516,12 @@ export default function ChatView() {
   }, []);
 
   const handleStop = useCallback(() => {
-    send({ type: 'abort' });
+    send({ type: 'abort', sessionId: currentSession?.id });
     setIsStreaming(false);
     streamingMsgRef.current = null;
     partialBlocksRef.current.clear();
     setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
-  }, [send]);
+  }, [send, currentSession]);
 
   const handleNewSession = useCallback(() => {
     send({ type: 'new_session' });
@@ -526,7 +538,7 @@ export default function ChatView() {
   }, [send, currentSession]);
 
   const handlePermission = useCallback((permissionId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
-    send({ type: 'permission_response', permission_id: permissionId, behavior });
+    send({ type: 'permission_response', requestId: permissionId, allow: behavior !== 'deny' });
     setPermission(null);
   }, [send]);
 
