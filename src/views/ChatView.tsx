@@ -428,6 +428,15 @@ export default function ChatView() {
 
       case 'error': {
         setIsStreaming(false);
+        if (msg.invalidSessionId) {
+          setSessions(prev => prev.filter(session => session.id !== msg.invalidSessionId));
+          if (currentSession?.id === msg.invalidSessionId) {
+            setCurrentSession(null);
+            setMessages([]);
+            navigate('/chat', { replace: true });
+          }
+          break;
+        }
         setMessages(prev => [
           ...prev,
           { id: genId(), role: 'system', content: [{ type: 'text', text: `Error: ${msg.message}` }], timestamp: Date.now() },

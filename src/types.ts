@@ -60,7 +60,7 @@ export type WSMessage =
   | { type: 'tool_progress'; tool_name: string; tool_use_id: string; status: 'running' | 'completed' | 'error' }
   | { type: 'permission_request'; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
   | { type: 'status'; status: 'thinking' | 'idle' }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; invalidSessionId?: string }
   | { type: 'result'; subtype: string; duration?: number; cost?: number; turns?: number; is_error?: boolean; sessionId?: string }
   | { type: 'session_list'; sessions: Session[] }
   | { type: 'session_history'; sessionId: string; messages: ChatMessage[] }

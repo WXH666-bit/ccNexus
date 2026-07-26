@@ -12,6 +12,7 @@ import { dispatchSessionCommand } from './sessionBridge.js';
 import { createAssistantTurn } from './assistantTurn.js';
 import { buildThinkingOptions } from './thinkingOptions.js';
 import { extractToolResults } from './toolResults.js';
+import { isMissingClaudeConversationError, staleSessionErrorEvent } from './sessionRecovery.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -1040,7 +1041,19 @@ wss.on('connection', (ws) => {
           }
         } catch (err) {
           console.error('[chat] error:', err.message);
-          ws.send(JSON.stringify({ type: 'error', message: err.message }));
+          let invalidSessionId = null;
+          if (querySessionId && isMissingClaudeConversationError(err.message)) {
+            await sessionStore.deleteSession(querySessionId);
+            sessionMessages.delete(querySessionId);
+            fileEditHistory.delete(querySessionId);
+            activeQueries.delete(querySessionId);
+            ownedQueries.delete(querySessionId);
+            if (currentSessionId === querySessionId) currentSessionId = null;
+            invalidSessionId = querySessionId;
+          }
+          ws.send(JSON.stringify(invalidSessionId
+            ? staleSessionErrorEvent(err.message, invalidSessionId)
+            : { type: 'error', message: err.message }));
           ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         } finally {
           if (querySessionId && activeQueries.get(querySessionId) === q) {
