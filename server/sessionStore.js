@@ -2,9 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const INDEX_FILE = '_index.json';
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function sessionFile(directory, sessionId) {
-  if (!sessionId || path.basename(sessionId) !== sessionId) {
+  if (typeof sessionId !== 'string' || sessionId === '_index' || !SESSION_ID_PATTERN.test(sessionId)) {
     throw new Error('Invalid session id');
   }
   return path.join(directory, `${sessionId}.json`);
@@ -77,5 +78,16 @@ export function createSessionStore(directory) {
     }
   }
 
-  return { saveSession, appendMessage, listSessions, loadSession };
+  async function deleteSession(sessionId) {
+    const messageFile = sessionFile(directory, sessionId);
+    const index = await readIndex();
+    try {
+      await fs.unlink(messageFile);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await writeIndex(index.filter((entry) => entry.id !== sessionId));
+  }
+
+  return { saveSession, appendMessage, listSessions, loadSession, deleteSession };
 }

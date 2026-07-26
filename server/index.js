@@ -106,10 +106,6 @@ async function loadSessionIndex() {
   return sessionStore.listSessions();
 }
 
-async function saveSessionIndex(index) {
-  await fs.writeFile(path.join(SESSIONS_DIR, '_index.json'), JSON.stringify(index, null, 2));
-}
-
 async function addSession(sessionId, title) {
   return sessionStore.saveSession({
     id: sessionId,
@@ -125,9 +121,7 @@ async function updateSessionTitle(sessionId, title) {
 }
 
 async function deleteSession(sessionId) {
-  const index = await loadSessionIndex();
-  const filtered = index.filter((s) => s.id !== sessionId);
-  await saveSessionIndex(filtered);
+  await sessionStore.deleteSession(sessionId);
 }
 
 // ─── Permission handling ──────────────────────────────────────────

@@ -60,3 +60,29 @@ test('loadSession returns an empty array when a session has no message file', as
     assert.deepEqual(await store.loadSession('missing'), []);
   });
 });
+
+test('deleteSession removes the index entry and persisted message file', async () => {
+  await withStore(async (store, directory) => {
+    await store.saveSession({ id: 'session-1', title: 'Delete me', updatedAt: 10 });
+    await store.saveSession({ id: 'session-2', title: 'Keep me', updatedAt: 12 });
+    await store.appendMessage('session-1', { id: 'user-1', role: 'user', content: [], timestamp: 11 });
+
+    await store.deleteSession('session-1');
+
+    assert.deepEqual(await store.listSessions(), [
+      { id: 'session-2', title: 'Keep me', updatedAt: 12 },
+    ]);
+    await assert.rejects(fs.readFile(path.join(directory, 'session-1.json'), 'utf8'), { code: 'ENOENT' });
+  });
+});
+
+test('rejects reserved and traversal-like session ids before accessing storage', async () => {
+  await withStore(async (store) => {
+    for (const sessionId of ['_index', '../_index', '..\\_index']) {
+      await assert.rejects(store.saveSession({ id: sessionId }), /Invalid session id/);
+      await assert.rejects(store.appendMessage(sessionId, { id: 'message-1' }), /Invalid session id/);
+      await assert.rejects(store.loadSession(sessionId), /Invalid session id/);
+      await assert.rejects(store.deleteSession(sessionId), /Invalid session id/);
+    }
+  });
+});
