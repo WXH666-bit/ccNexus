@@ -57,6 +57,9 @@ export default function ChatView() {
 
   const streamingMsgRef = useRef<string | null>(null);
   const partialBlocksRef = useRef<Map<string, ContentBlock>>(new Map());
+  // The server assigns the first session after the optimistic turn exists. Keep
+  // that matching route update from being handled as a user session switch.
+  const serverSessionNavigationRef = useRef<string | null>(null);
 
   // Search logic
   const performSearch = useCallback((query: string) => {
@@ -202,6 +205,15 @@ export default function ChatView() {
   // Handle URL session change
   useEffect(() => {
     if (urlSessionId) {
+      if (serverSessionNavigationRef.current === urlSessionId) {
+        serverSessionNavigationRef.current = null;
+        setCurrentSession(prev => prev?.id === urlSessionId ? prev : {
+          id: urlSessionId,
+          title: 'New Chat',
+          updatedAt: Date.now(),
+        });
+        return;
+      }
       send({ type: 'switch_session', session_id: urlSessionId });
       setMessages([]);
       partialBlocksRef.current.clear();
@@ -229,7 +241,13 @@ export default function ChatView() {
         });
         if (!currentSession) {
           setCurrentSession(session);
-          navigate(`/chat/${msg.sessionId}`, { replace: true });
+          // Do not leave a guard behind when the canonical session event already
+          // matches the route (for example, after a direct URL load). A stale
+          // guard could otherwise suppress a later real session switch.
+          if (urlSessionId !== msg.sessionId) {
+            serverSessionNavigationRef.current = msg.sessionId;
+            navigate(`/chat/${msg.sessionId}`, { replace: true });
+          }
         }
         break;
       }
