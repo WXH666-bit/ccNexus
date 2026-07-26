@@ -1,16 +1,20 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Pencil } from 'lucide-react';
-import type { ToolUseBlock } from '../../types';
+import type { ToolResultBlock, ToolUseBlock } from '../../types';
 import { computeDiff } from '../../utils/diff';
 
-interface Props { block: ToolUseBlock }
+interface Props {
+  block: ToolUseBlock;
+  result?: ToolResultBlock | null;
+}
 
-export default function EditToolBlock({ block }: Props) {
+export default function EditToolBlock({ block, result }: Props) {
   const [expanded, setExpanded] = useState(false);
   const input = block.input;
   const filePath = (input.file_path as string) || (input.path as string) || 'unknown';
   const oldStr = (input.old_string as string) || '';
   const newStr = (input.new_string as string) || '';
+  const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
 
   let additions = 0, deletions = 0;
   if (oldStr || newStr) {
@@ -33,7 +37,7 @@ export default function EditToolBlock({ block }: Props) {
             <span className="stat-del">-{deletions}</span>
           </span>
         )}
-        <span className="status-dot success" />
+        <span className={`status-dot ${statusClass}`} />
         <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
       {expanded && diffHtml && (

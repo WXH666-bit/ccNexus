@@ -25,7 +25,58 @@ export interface ToolResultBlock {
   is_error?: boolean;
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
+export interface ImageBlock {
+  type: 'image';
+  src: string;
+  mediaType?: string;
+  alt?: string;
+}
+
+export interface AttachmentBlock {
+  type: 'attachment';
+  fileName?: string;
+  mediaType?: string;
+}
+
+export interface TaskNotificationBlock {
+  type: 'task_notification';
+  icon: string;
+  summary: string;
+  status: string;
+  detail?: string;
+}
+
+export interface CompactNotificationBlock {
+  type: 'compact_notification';
+  headerText: string;
+  items: { type: 'stdout'; text: string }[];
+}
+
+export interface CompactSummaryBlock {
+  type: 'compact_summary';
+  title: string;
+  content: string;
+  metadata?: {
+    messagesSummarized?: number;
+    direction?: 'up_to' | 'from';
+    userContext?: string;
+    trigger?: string;
+    preTokens?: number;
+    postTokens?: number;
+    durationMs?: number;
+  };
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ThinkingBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ImageBlock
+  | AttachmentBlock
+  | TaskNotificationBlock
+  | CompactNotificationBlock
+  | CompactSummaryBlock;
 
 // ── Chat message ────────────────────────────────────────────────
 export interface ChatMessage {

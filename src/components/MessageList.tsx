@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../types';
 import MessageItem from './MessageItem';
+import { findToolResultForBlock } from '../utils/toolRendering.js';
 
 interface SearchHighlight {
   query: string;
@@ -40,8 +41,10 @@ export default function MessageList({ messages, isStreaming, searchHighlight, on
           key={msg.id} 
           message={msg} 
           messageIndex={idx}
+          isLast={idx === messages.length - 1}
           searchHighlight={searchHighlight}
           onRewind={onRewind}
+          findToolResult={(toolId, messageIndex) => findToolResultForBlock(messages, messageIndex, toolId)}
         />
       ))}
       {isStreaming && messages.length > 0 && messages[messages.length - 1].isStreaming && messages[messages.length - 1].content.length === 0 && (
