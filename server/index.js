@@ -854,6 +854,7 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', (ws) => {
   console.log('[ws] client connected');
   let currentSessionId = null;
+  let latestChatRequest = 0;
   const ownedQueries = new Map();
 
   ws.on('message', async (raw) => {
@@ -863,7 +864,9 @@ wss.on('connection', (ws) => {
     switch (msg.type) {
       case 'chat': {
         const { text, images, sessionId, options: clientOptions } = msg;
-        currentSessionId = sessionId || null;
+        let querySessionId = sessionId || null;
+        const requestOrder = ++latestChatRequest;
+        currentSessionId = querySessionId;
 
         // Build prompt
         let prompt = text || '';
@@ -892,8 +895,8 @@ wss.on('connection', (ws) => {
           queryOpts.maxThinkingTokens = 16000;
         }
         
-        if (currentSessionId) {
-          queryOpts.resume = currentSessionId;
+        if (querySessionId) {
+          queryOpts.resume = querySessionId;
         }
 
         ws.send(JSON.stringify({ type: 'status', status: 'thinking' }));
@@ -917,18 +920,21 @@ wss.on('connection', (ws) => {
               case 'system':
                 if (event.subtype === 'init') {
                   // Capture session ID
-                  currentSessionId = event.session_id;
-                  activeQueries.set(currentSessionId, q);
-                  ownedQueries.set(currentSessionId, q);
-                  await addSession(currentSessionId, prompt.slice(0, 60));
-                  ws.send(JSON.stringify(sessionEvent(currentSessionId)));
+                  querySessionId = event.session_id || querySessionId;
+                  if (requestOrder === latestChatRequest) {
+                    currentSessionId = querySessionId;
+                  }
+                  activeQueries.set(querySessionId, q);
+                  ownedQueries.set(querySessionId, q);
+                  await addSession(querySessionId, prompt.slice(0, 60));
+                  ws.send(JSON.stringify(sessionEvent(querySessionId)));
                   
                   // Add user message to history now that we have session_id
-                  userMsg.sessionId = currentSessionId;
-                  if (!sessionMessages.has(currentSessionId)) {
-                    sessionMessages.set(currentSessionId, []);
+                  userMsg.sessionId = querySessionId;
+                  if (!sessionMessages.has(querySessionId)) {
+                    sessionMessages.set(querySessionId, []);
                   }
-                  sessionMessages.get(currentSessionId).push(userMsg);
+                  sessionMessages.get(querySessionId).push(userMsg);
                 }
                 // Forward system events
                 ws.send(JSON.stringify({ type: 'system', subtype: event.subtype, sessionId: event.session_id }));
@@ -1051,11 +1057,11 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: err.message }));
           ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         } finally {
-          if (currentSessionId && activeQueries.get(currentSessionId) === q) {
-            activeQueries.delete(currentSessionId);
+          if (querySessionId && activeQueries.get(querySessionId) === q) {
+            activeQueries.delete(querySessionId);
           }
-          if (currentSessionId && ownedQueries.get(currentSessionId) === q) {
-            ownedQueries.delete(currentSessionId);
+          if (querySessionId && ownedQueries.get(querySessionId) === q) {
+            ownedQueries.delete(querySessionId);
           }
         }
         break;
