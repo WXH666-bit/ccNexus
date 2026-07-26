@@ -546,6 +546,7 @@ html, body, #root {
   font-size: 13px;
 }
 .collapsible-header:hover { color: var(--text-secondary); }
+.collapsible-header .expand-icon { margin-left: 0; }
 .collapsible-title { font-style: italic; }
 .collapsible-body {
   padding: 8px 12px;
