@@ -34,3 +34,23 @@ test('complete keeps thinking streamed before the terminal assistant event', () 
     { type: 'text', text: 'Final answer' },
   ]);
 });
+
+test('complete preserves the native stream order across thinking, tools, and text', () => {
+  const turn = createAssistantTurn();
+  turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Inspect the task.' } });
+  turn.addStreamEvent({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'read-1', name: 'Read' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path":"package.json"}' } });
+  turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Use the package name.' } });
+  turn.addStreamEvent({ type: 'content_block_start', index: 1, content_block: { type: 'text' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'ccnexus' } });
+  turn.add({ content: [{ type: 'text', text: 'ccnexus' }] });
+
+  assert.deepEqual(turn.complete({ id: 'final-id', sessionId: 'session-1' }).content, [
+    { type: 'thinking', thinking: 'Inspect the task.' },
+    { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'package.json' } },
+    { type: 'thinking', thinking: 'Use the package name.' },
+    { type: 'text', text: 'ccnexus' },
+  ]);
+});

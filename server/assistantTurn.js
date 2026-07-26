@@ -1,6 +1,8 @@
 export function createAssistantTurn() {
   const content = [];
-  const streamedThinking = new Map();
+  const streamedBlocks = [];
+  const activeBlockByIndex = new Map();
+  const partialToolInputs = new Map();
   let model;
 
   return {
@@ -10,26 +12,57 @@ export function createAssistantTurn() {
     },
 
     addStreamEvent(event) {
-      if (event?.type === 'content_block_start'
-        && event.content_block?.type === 'thinking') {
-        streamedThinking.set(event.index, '');
+      if (event?.type === 'content_block_start') {
+        const source = event.content_block;
+        let block;
+        if (source?.type === 'thinking') block = { type: 'thinking', thinking: '' };
+        if (source?.type === 'text') block = { type: 'text', text: '' };
+        if (source?.type === 'tool_use') {
+          block = { type: 'tool_use', id: source.id || '', name: source.name || '', input: {} };
+        }
+        if (block) {
+          activeBlockByIndex.set(event.index, streamedBlocks.length);
+          streamedBlocks.push(block);
+        }
+        return;
       }
-      if (event?.type === 'content_block_delta'
-        && event.delta?.type === 'thinking_delta'
-        && streamedThinking.has(event.index)) {
-        streamedThinking.set(event.index, streamedThinking.get(event.index) + (event.delta.thinking || ''));
+
+      if (event?.type === 'content_block_delta') {
+        const blockIndex = activeBlockByIndex.get(event.index);
+        const block = streamedBlocks[blockIndex];
+        if (!block) return;
+        if (event.delta?.type === 'thinking_delta' && block.type === 'thinking') {
+          block.thinking += event.delta.thinking || '';
+        }
+        if (event.delta?.type === 'text_delta' && block.type === 'text') {
+          block.text += event.delta.text || '';
+        }
+        if (event.delta?.type === 'input_json_delta' && block.type === 'tool_use') {
+          const current = partialToolInputs.get(blockIndex) || '';
+          const input = current + (event.delta.partial_json || '');
+          partialToolInputs.set(blockIndex, input);
+          try { block.input = JSON.parse(input); } catch { /* wait for complete JSON */ }
+        }
       }
     },
 
     complete({ id, sessionId }) {
-      const hasTerminalThinking = content.some((block) => block.type === 'thinking');
-      const thinking = hasTerminalThinking
-        ? []
-        : [...streamedThinking.entries()]
-          .sort(([left], [right]) => left - right)
-          .map(([, value]) => ({ type: 'thinking', thinking: value }))
-          .filter((block) => block.thinking.length > 0);
-      const completeContent = [...thinking, ...content];
+      const completeContent = streamedBlocks.length > 0 ? [...streamedBlocks] : [...content];
+      if (streamedBlocks.length > 0) {
+        for (const block of content) {
+          if (block.type === 'text' && !completeContent.some((item) => item.type === 'text')) {
+            completeContent.push(block);
+          }
+          if (block.type === 'thinking' && !completeContent.some((item) => item.type === 'thinking')) {
+            completeContent.push(block);
+          }
+          if (block.type === 'tool_use') {
+            const streamedTool = completeContent.find((item) => item.type === 'tool_use' && item.id === block.id);
+            if (streamedTool) Object.assign(streamedTool, block);
+            else completeContent.push(block);
+          }
+        }
+      }
       if (completeContent.length === 0) return null;
       const message = { id, content: completeContent, sessionId };
       if (model !== undefined) message.model = model;
