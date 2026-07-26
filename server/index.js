@@ -10,6 +10,8 @@ import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } fro
 import { createSessionStore } from './sessionStore.js';
 import { dispatchSessionCommand } from './sessionBridge.js';
 import { createAssistantTurn } from './assistantTurn.js';
+import { buildThinkingOptions } from './thinkingOptions.js';
+import { extractToolResults } from './toolResults.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -889,19 +891,8 @@ wss.on('connection', (ws) => {
           canUseTool,
           includePartialMessages: clientOptions?.streaming !== false, // 流式传输开关
           env: { ...process.env },
+          ...buildThinkingOptions(clientOptions?.reasoning),
         };
-        
-        // Handle reasoning effort (effort and maxThinkingTokens are mutually exclusive)
-        if (clientOptions?.reasoning) {
-          const validEfforts = ['low', 'medium', 'high', 'xhigh', 'max'];
-          const effort = clientOptions.reasoning;
-          if (validEfforts.includes(effort)) {
-            queryOpts.effort = effort;
-          }
-        } else if (clientOptions?.alwaysThinking) {
-          // 思考开关：开启且未选思考深度档位时，使用 maxThinkingTokens
-          queryOpts.maxThinkingTokens = 16000;
-        }
         
         if (querySessionId) {
           queryOpts.resume = querySessionId;
@@ -959,6 +950,7 @@ wss.on('connection', (ws) => {
 
               case 'stream_event':
                 // Forward streaming events for real-time rendering
+                assistantTurn.addStreamEvent(event.event);
                 ws.send(JSON.stringify(streamEvent(event.event, event.session_id, event.uuid)));
                 break;
 
@@ -971,11 +963,9 @@ wss.on('connection', (ws) => {
               }
 
               case 'user': {
-                // Tool result
-                if (event.tool_use_result) {
+                for (const result of extractToolResults(event.message)) {
                   ws.send(JSON.stringify({
-                    type: 'tool_result',
-                    result: event.tool_use_result,
+                    ...result,
                     sessionId: event.session_id,
                     uuid: event.uuid,
                   }));

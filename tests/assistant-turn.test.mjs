@@ -21,3 +21,16 @@ test('complete returns one message containing thinking and text blocks in arriva
 test('complete returns null for an empty turn', () => {
   assert.equal(createAssistantTurn().complete({ id: 'final-id', sessionId: 'session-1' }), null);
 });
+
+test('complete keeps thinking streamed before the terminal assistant event', () => {
+  const turn = createAssistantTurn();
+  turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Check assumptions. ' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Then answer.' } });
+  turn.add({ content: [{ type: 'text', text: 'Final answer' }] });
+
+  assert.deepEqual(turn.complete({ id: 'final-id', sessionId: 'session-1' }).content, [
+    { type: 'thinking', thinking: 'Check assumptions. Then answer.' },
+    { type: 'text', text: 'Final answer' },
+  ]);
+});
