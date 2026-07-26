@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import type { WSMessage } from '../types';
+import { createOutboundMessageQueue } from './websocketQueue.js';
 
 interface UseWebSocketReturn {
   send: (msg: Record<string, unknown>) => void;
@@ -12,6 +13,16 @@ export function useWebSocket(): UseWebSocketReturn {
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WSMessage | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const outboundQueueRef = useRef<ReturnType<typeof createOutboundMessageQueue> | null>(null);
+
+  if (!outboundQueueRef.current) {
+    outboundQueueRef.current = createOutboundMessageQueue((message) => {
+      const socket = wsRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+      }
+    });
+  }
 
   const connect = useCallback(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -20,6 +31,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
     ws.onopen = () => {
       setConnected(true);
+      outboundQueueRef.current?.flush();
     };
 
     ws.onmessage = (event) => {
@@ -41,14 +53,14 @@ export function useWebSocket(): UseWebSocketReturn {
     connect();
     return () => {
       clearTimeout(reconnectTimer.current);
+      outboundQueueRef.current?.clear();
       wsRef.current?.close();
     };
   }, [connect]);
 
   const send = useCallback((msg: Record<string, unknown>) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(msg));
-    }
+    const isOpen = wsRef.current?.readyState === WebSocket.OPEN;
+    outboundQueueRef.current?.send(msg, isOpen);
   }, []);
 
   return { send, lastMessage, connected };
