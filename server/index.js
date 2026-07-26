@@ -1073,9 +1073,6 @@ wss.on('connection', (ws) => {
           if (querySessionId && ownedQueries.get(querySessionId) === q) {
             ownedQueries.delete(querySessionId);
           }
-          if (querySessionId && latestRequestBySession.get(querySessionId) === requestOrder) {
-            latestRequestBySession.delete(querySessionId);
-          }
         }
         break;
       }
@@ -1181,6 +1178,7 @@ wss.on('connection', (ws) => {
       if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
     }
     ownedQueries.clear();
+    latestRequestBySession.clear();
   });
 });
 
