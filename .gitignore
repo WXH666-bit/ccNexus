@@ -93,3 +93,8 @@ logs/
 
 # CodeGraph index
 .codegraph
+
+
+.claude/
+.agents/
+.worktrees/
