@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from './protocol.js';
 import { createSessionStore } from './sessionStore.js';
+import { dispatchSessionCommand } from './sessionBridge.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -853,6 +854,16 @@ wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    const sessionEventPayload = await dispatchSessionCommand(msg, sessionStore);
+    if (sessionEventPayload) {
+      ws.send(JSON.stringify(sessionEventPayload));
+      if (sessionEventPayload.type === 'session_history') {
+        currentSessionId = sessionEventPayload.sessionId;
+        sessionMessages.set(sessionEventPayload.sessionId, sessionEventPayload.messages);
+      }
+      return;
+    }
 
     switch (msg.type) {
       case 'chat': {

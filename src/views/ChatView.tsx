@@ -57,6 +57,7 @@ export default function ChatView() {
 
   const streamingMsgRef = useRef<string | null>(null);
   const partialBlocksRef = useRef<Map<string, ContentBlock>>(new Map());
+  const requestedHistorySessionRef = useRef<string | null>(null);
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
   const serverSessionNavigationRef = useRef<string | null>(null);
@@ -218,7 +219,10 @@ export default function ChatView() {
       // we were waiting to consume. Disarm the old one before this switch so it
       // cannot suppress a later genuine navigation back to that stale ID.
       serverSessionNavigationRef.current = null;
-      send({ type: 'switch_session', session_id: urlSessionId });
+      if (requestedHistorySessionRef.current !== urlSessionId) {
+        requestedHistorySessionRef.current = urlSessionId;
+        send({ type: 'load_session', sessionId: urlSessionId });
+      }
       setMessages([]);
       partialBlocksRef.current.clear();
       streamingMsgRef.current = null;
@@ -273,8 +277,8 @@ export default function ChatView() {
         break;
       }
       case 'session_deleted': {
-        setSessions(prev => prev.filter(s => s.id !== msg.session_id));
-        if (currentSession?.id === msg.session_id) {
+        setSessions(prev => prev.filter(s => s.id !== msg.sessionId));
+        if (currentSession?.id === msg.sessionId) {
           setCurrentSession(null);
           setMessages([]);
           navigate('/chat', { replace: true });
@@ -391,6 +395,22 @@ export default function ChatView() {
 
       case 'permission_request': {
         setPermission({ permission_id: msg.requestId, tool_name: msg.toolName, input: msg.input });
+        break;
+      }
+      case 'session_history': {
+        if (urlSessionId !== msg.sessionId) break;
+        requestedHistorySessionRef.current = msg.sessionId;
+        partialBlocksRef.current.clear();
+        streamingMsgRef.current = null;
+        setIsStreaming(false);
+        setMessages(msg.messages);
+        setCurrentSession(prev => prev?.id === msg.sessionId
+          ? prev
+          : sessions.find(session => session.id === msg.sessionId) || {
+            id: msg.sessionId,
+            title: 'New Chat',
+            updatedAt: Date.now(),
+          });
         break;
       }
 

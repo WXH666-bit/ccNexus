@@ -63,8 +63,9 @@ export type WSMessage =
   | { type: 'error'; message: string }
   | { type: 'result'; subtype: string; duration?: number; cost?: number; turns?: number; is_error?: boolean; sessionId?: string }
   | { type: 'session_list'; sessions: Session[] }
+  | { type: 'session_history'; sessionId: string; messages: ChatMessage[] }
   | { type: 'session_created'; session: Session }
-  | { type: 'session_deleted'; session_id: string }
+  | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_renamed'; session_id: string; title: string }
   | { type: 'rewind_complete'; messages: ChatMessage[] }
   | { type: 'plan_approval'; plan: PlanApprovalRequest }
