@@ -7,6 +7,7 @@ import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from './protocol.js';
+import { createSessionStore } from './sessionStore.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -35,6 +36,7 @@ const PORT = isDev
 const CWD = process.cwd();
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 const SESSIONS_DIR = path.join(process.env.HOME || '/tmp', '.ccnexus', 'sessions');
+const sessionStore = createSessionStore(SESSIONS_DIR);
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
 const BINARY_EXTS = new Set([
@@ -101,10 +103,7 @@ async function buildTree(dirPath, options = {}) {
 
 // ─── Session metadata (lightweight index) ─────────────────────────
 async function loadSessionIndex() {
-  try {
-    const data = await fs.readFile(path.join(SESSIONS_DIR, '_index.json'), 'utf-8');
-    return JSON.parse(data);
-  } catch { return []; }
+  return sessionStore.listSessions();
 }
 
 async function saveSessionIndex(index) {
@@ -112,18 +111,17 @@ async function saveSessionIndex(index) {
 }
 
 async function addSession(sessionId, title) {
-  const index = await loadSessionIndex();
-  const existing = index.findIndex((s) => s.id === sessionId);
-  const entry = { id: sessionId, title: title || `Session ${sessionId.slice(0, 8)}`, updatedAt: Date.now() };
-  if (existing >= 0) { index[existing] = entry; } else { index.unshift(entry); }
-  await saveSessionIndex(index);
-  return entry;
+  return sessionStore.saveSession({
+    id: sessionId,
+    title: title || `Session ${sessionId.slice(0, 8)}`,
+    updatedAt: Date.now(),
+  });
 }
 
 async function updateSessionTitle(sessionId, title) {
   const index = await loadSessionIndex();
   const entry = index.find((s) => s.id === sessionId);
-  if (entry) { entry.title = title; await saveSessionIndex(index); }
+  if (entry) await sessionStore.saveSession({ ...entry, title });
 }
 
 async function deleteSession(sessionId) {
@@ -945,6 +943,7 @@ wss.on('connection', (ws) => {
                     sessionMessages.set(querySessionId, []);
                   }
                   sessionMessages.get(querySessionId).push(userMsg);
+                  await sessionStore.appendMessage(querySessionId, userMsg);
                 }
                 // Forward system events
                 ws.send(JSON.stringify({ type: 'system', subtype: event.subtype, sessionId: event.session_id }));
@@ -973,6 +972,7 @@ wss.on('connection', (ws) => {
                     sessionMessages.set(event.session_id, []);
                   }
                   sessionMessages.get(event.session_id).push(assistantMsg);
+                  await sessionStore.appendMessage(event.session_id, assistantMsg);
                   
                   // Track file edits for undo
                   for (const block of content) {
