@@ -13,8 +13,14 @@ import MessageAnchorRail from '../components/MessageAnchorRail';
 import MessageQueue from '../components/MessageQueue';
 import type { QueuedMessage } from '../components/MessageQueue';
 import { useWebSocket } from '../hooks/useWebSocket';
+import {
+  createStreamingBlockState,
+  applyStreamEventToBlocks,
+  appendToolResultBlock,
+  resetStreamingBlockState,
+} from '../utils/streamingBlocks.js';
 import type { 
-  ChatMessage, Session, StatusData, PermissionRequest, ContentBlock, ToolUseBlock,
+  ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
 } from '../types';
 
@@ -56,7 +62,7 @@ export default function ChatView() {
   });
 
   const streamingMsgRef = useRef<string | null>(null);
-  const partialBlocksRef = useRef<Map<string, ContentBlock>>(new Map());
+  const streamingBlocksRef = useRef(createStreamingBlockState());
   const requestedHistorySessionRef = useRef<string | null>(null);
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
@@ -224,7 +230,7 @@ export default function ChatView() {
         send({ type: 'load_session', sessionId: urlSessionId });
       }
       setMessages([]);
-      partialBlocksRef.current.clear();
+      resetStreamingBlockState(streamingBlocksRef.current);
       streamingMsgRef.current = null;
     }
   }, [urlSessionId, send]);
@@ -303,53 +309,16 @@ export default function ChatView() {
         const event = msg.event as Record<string, unknown>;
         const eventType = event.type as string;
 
-        if (eventType === 'content_block_start') {
-          const blockStart = event.content_block as Record<string, unknown>;
-          const blockType = blockStart.type as string;
-          const index = event.index as number;
-          const blockKey = `${streamingMsgRef.current || 'current'}-${index}`;
-
-          if (blockType === 'text') {
-            partialBlocksRef.current.set(blockKey, { type: 'text', text: '' });
-          } else if (blockType === 'thinking') {
-            partialBlocksRef.current.set(blockKey, { type: 'thinking', thinking: '' });
-          } else if (blockType === 'tool_use') {
-            partialBlocksRef.current.set(blockKey, {
-              type: 'tool_use',
-              id: (blockStart.id as string) || '',
-              name: (blockStart.name as string) || '',
-              input: {},
-            });
-          }
-        } else if (eventType === 'content_block_delta') {
-          const delta = event.delta as Record<string, unknown>;
-          const deltaType = delta.type as string;
-          const index = event.index as number;
-          const blockKey = `${streamingMsgRef.current || 'current'}-${index}`;
-          const existing = partialBlocksRef.current.get(blockKey);
-
-          if (existing) {
-            if (deltaType === 'text_delta' && existing.type === 'text') {
-              existing.text += delta.text as string;
-            } else if (deltaType === 'thinking_delta' && existing.type === 'thinking') {
-              existing.thinking += delta.thinking as string;
-            } else if (deltaType === 'input_json_delta' && existing.type === 'tool_use') {
-              const partial = (existing as ToolUseBlock)._partialInput || '';
-              (existing as ToolUseBlock)._partialInput = partial + (delta.partial_json as string);
-              try {
-                (existing as ToolUseBlock).input = JSON.parse(partial + (delta.partial_json as string));
-              } catch { /* partial JSON, keep trying */ }
+        if (eventType === 'message_start' || eventType === 'content_block_start' || eventType === 'content_block_delta') {
+          applyStreamEventToBlocks(streamingBlocksRef.current, event);
+          setMessages(prev => {
+            const updated = [...prev];
+            const lastMsg = updated[updated.length - 1];
+            if (lastMsg && lastMsg.isStreaming) {
+              updated[updated.length - 1] = { ...lastMsg, content: [...streamingBlocksRef.current.blocks] };
             }
-            setMessages(prev => {
-              const updated = [...prev];
-              const lastMsg = updated[updated.length - 1];
-              if (lastMsg && lastMsg.isStreaming) {
-                const blocks = Array.from(partialBlocksRef.current.values());
-                updated[updated.length - 1] = { ...lastMsg, content: blocks };
-              }
-              return updated;
-            });
-          }
+            return updated;
+          });
         }
         break;
       }
@@ -368,7 +337,7 @@ export default function ChatView() {
           turns: msg.message.turns,
         };
         streamingMsgRef.current = null;
-        partialBlocksRef.current.clear();
+        resetStreamingBlockState(streamingBlocksRef.current);
         setIsStreaming(false);
         setMessages(prev => {
           const filtered = prev.filter(m => !m.isStreaming);
@@ -378,14 +347,13 @@ export default function ChatView() {
       }
 
       case 'tool_result': {
+        const resultBlock = { type: 'tool_result' as const, tool_use_id: msg.tool_use_id, content: msg.content, is_error: msg.is_error };
+        appendToolResultBlock(streamingBlocksRef.current, resultBlock);
         setMessages(prev => prev.map(m => {
           if (!m.isStreaming) return m;
           return {
             ...m,
-            content: [
-              ...m.content,
-              { type: 'tool_result' as const, tool_use_id: msg.tool_use_id, content: msg.content, is_error: msg.is_error },
-            ],
+            content: [...streamingBlocksRef.current.blocks],
           };
         }));
         break;
@@ -406,7 +374,7 @@ export default function ChatView() {
       case 'session_history': {
         if (urlSessionId !== msg.sessionId) break;
         requestedHistorySessionRef.current = msg.sessionId;
-        partialBlocksRef.current.clear();
+        resetStreamingBlockState(streamingBlocksRef.current);
         streamingMsgRef.current = null;
         setIsStreaming(false);
         setMessages(msg.messages);
@@ -427,7 +395,7 @@ export default function ChatView() {
       case 'result': {
         setIsStreaming(false);
         streamingMsgRef.current = null;
-        partialBlocksRef.current.clear();
+        resetStreamingBlockState(streamingBlocksRef.current);
         setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
         break;
       }
@@ -523,7 +491,7 @@ export default function ChatView() {
 
     const streamingId = genId();
     streamingMsgRef.current = streamingId;
-    partialBlocksRef.current.clear();
+    resetStreamingBlockState(streamingBlocksRef.current);
     setMessages(prev => [...prev, {
       id: streamingId,
       role: 'assistant',
@@ -576,14 +544,14 @@ export default function ChatView() {
     send({ type: 'abort', sessionId: currentSession?.id });
     setIsStreaming(false);
     streamingMsgRef.current = null;
-    partialBlocksRef.current.clear();
+    resetStreamingBlockState(streamingBlocksRef.current);
     setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
   }, [send, currentSession]);
 
   const handleNewSession = useCallback(() => {
     send({ type: 'new_session' });
     setMessages([]);
-    partialBlocksRef.current.clear();
+    resetStreamingBlockState(streamingBlocksRef.current);
     streamingMsgRef.current = null;
     setIsStreaming(false);
   }, [send]);
@@ -595,7 +563,7 @@ export default function ChatView() {
   }, [send, currentSession]);
 
   const handlePermission = useCallback((permissionId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
-    send({ type: 'permission_response', requestId: permissionId, allow: behavior !== 'deny' });
+    send({ type: 'permission_response', requestId: permissionId, behavior, allow: behavior !== 'deny' });
     setPermission(null);
   }, [send]);
 

@@ -3,12 +3,37 @@ export function createAssistantTurn() {
   const streamedBlocks = [];
   const activeBlockByIndex = new Map();
   const partialToolInputs = new Map();
+  const toolResults = [];
   let model;
+
+  function interleaveToolResults(blocks) {
+    if (toolResults.length === 0) return blocks;
+    const usedResultIndexes = new Set();
+    const result = [];
+    for (const block of blocks) {
+      result.push(block);
+      if (block?.type !== 'tool_use' || !block.id) continue;
+      toolResults.forEach((toolResult, index) => {
+        if (toolResult.tool_use_id === block.id) {
+          result.push(toolResult);
+          usedResultIndexes.add(index);
+        }
+      });
+    }
+    toolResults.forEach((toolResult, index) => {
+      if (!usedResultIndexes.has(index)) result.push(toolResult);
+    });
+    return result;
+  }
 
   return {
     add(message) {
       if (Array.isArray(message?.content)) content.push(...message.content);
       if (message?.model !== undefined) model = message.model;
+    },
+
+    addToolResult(block) {
+      if (block?.type === 'tool_result') toolResults.push(block);
     },
 
     addStreamEvent(event) {
@@ -63,8 +88,9 @@ export function createAssistantTurn() {
           }
         }
       }
-      if (completeContent.length === 0) return null;
-      const message = { id, content: completeContent, sessionId };
+      const contentWithToolResults = interleaveToolResults(completeContent);
+      if (contentWithToolResults.length === 0) return null;
+      const message = { id, content: contentWithToolResults, sessionId };
       if (model !== undefined) message.model = model;
       return message;
     },

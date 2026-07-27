@@ -11,10 +11,11 @@ import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } fro
 import { createSessionStore } from './sessionStore.js';
 import { dispatchSessionCommand } from './sessionBridge.js';
 import { createAssistantTurn } from './assistantTurn.js';
-import { buildThinkingOptions } from './thinkingOptions.js';
 import { extractToolResults } from './toolResults.js';
 import { isMissingClaudeConversationError, staleSessionErrorEvent } from './sessionRecovery.js';
 import { claudeProjectSessionsDir, syncSessionStoreWithClaude, sessionListEventFromSync } from './sessionSync.js';
+import { createPermissionPolicy } from './permissionPolicy.js';
+import { buildClaudeQueryOptions } from './queryOptions.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -149,27 +150,32 @@ async function syncPersistedSessionsWithClaude() {
 // ─── Permission handling ──────────────────────────────────────────
 const pendingPermissions = new Map(); // requestId → { resolve, toolName, input }
 
+function requestPermissionFromClient(ws, toolName, input, options) {
+  const requestId = Math.random().toString(36).slice(2, 12);
+  return new Promise((resolve) => {
+    pendingPermissions.set(requestId, { resolve, toolName, input });
+    ws.send(JSON.stringify(permissionRequestEvent({
+      requestId,
+      toolName,
+      input,
+      title: options?.title || `Allow ${toolName}?`,
+      displayName: options?.displayName || toolName,
+    })));
+    // Timeout after 5 minutes.
+    setTimeout(() => {
+      if (pendingPermissions.has(requestId)) {
+        pendingPermissions.delete(requestId);
+        resolve({ behavior: 'deny', message: 'Permission request timed out' });
+      }
+    }, 300000);
+  });
+}
+
 function createPermissionHandler(ws) {
-  return async (toolName, input, options) => {
-    const requestId = Math.random().toString(36).slice(2, 12);
-    return new Promise((resolve) => {
-      pendingPermissions.set(requestId, { resolve, toolName, input });
-      ws.send(JSON.stringify(permissionRequestEvent({
-        requestId,
-        toolName,
-        input,
-        title: options?.title || `Allow ${toolName}?`,
-        displayName: options?.displayName || toolName,
-      })));
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        if (pendingPermissions.has(requestId)) {
-          pendingPermissions.delete(requestId);
-          resolve({ behavior: 'deny', message: 'Permission request timed out' });
-        }
-      }, 300000);
-    });
-  };
+  const policy = createPermissionPolicy({
+    askUser: (toolName, input, options) => requestPermissionFromClient(ws, toolName, input, options),
+  });
+  return policy.canUseTool;
 }
 
 // ─── Active queries ───────────────────────────────────────────────
@@ -950,13 +956,12 @@ wss.on('connection', (ws) => {
         }
 
         const canUseTool = createPermissionHandler(ws);
-        const queryOpts = {
+        const queryOpts = buildClaudeQueryOptions({
           cwd: CWD,
+          env: process.env,
           canUseTool,
-          includePartialMessages: clientOptions?.streaming !== false, // 流式传输开关
-          env: { ...process.env },
-          ...buildThinkingOptions(clientOptions?.reasoning),
-        };
+          clientOptions,
+        });
         
         if (querySessionId) {
           queryOpts.resume = querySessionId;
@@ -1028,6 +1033,7 @@ wss.on('connection', (ws) => {
 
               case 'user': {
                 for (const result of extractToolResults(event.message)) {
+                  assistantTurn.addToolResult(result);
                   ws.send(JSON.stringify({
                     ...result,
                     sessionId: event.session_id,
@@ -1128,15 +1134,14 @@ wss.on('connection', (ws) => {
       }
 
       case 'permission_response': {
-        const { requestId, allow, message } = msg;
+        const { requestId, allow, behavior, message } = msg;
         const pending = pendingPermissions.get(requestId);
         if (pending) {
           pendingPermissions.delete(requestId);
-          if (allow) {
-            pending.resolve({ behavior: 'allow' });
-          } else {
-            pending.resolve({ behavior: 'deny', message: message || 'Denied by user' });
-          }
+          const decision = behavior || (allow ? 'allow' : 'deny');
+          pending.resolve(decision === 'deny'
+            ? { behavior: 'deny', message: message || 'Denied by user' }
+            : { behavior: decision });
         }
         break;
       }

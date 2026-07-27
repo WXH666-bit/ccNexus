@@ -54,3 +54,17 @@ test('complete preserves the native stream order across thinking, tools, and tex
     { type: 'text', text: 'ccnexus' },
   ]);
 });
+
+test('complete keeps tool_result blocks with their matching tool_use for live and history replay', () => {
+  const turn = createAssistantTurn();
+  turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'read-1', name: 'Read' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"file_path":"package.json"}' } });
+  turn.addToolResult({ type: 'tool_result', tool_use_id: 'read-1', content: 'package contents', is_error: false });
+  turn.add({ content: [{ type: 'text', text: 'Done' }] });
+
+  assert.deepEqual(turn.complete({ id: 'final-id', sessionId: 'session-1' }).content, [
+    { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'package.json' } },
+    { type: 'tool_result', tool_use_id: 'read-1', content: 'package contents', is_error: false },
+    { type: 'text', text: 'Done' },
+  ]);
+});
