@@ -68,3 +68,37 @@ test('complete keeps tool_result blocks with their matching tool_use for live an
     { type: 'text', text: 'Done' },
   ]);
 });
+
+test('complete normalizes cumulative text and thinking deltas like ccgui', () => {
+  const turn = createAssistantTurn();
+  turn.addStreamEvent({ type: 'message_start' });
+  turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan carefully' } });
+  turn.addStreamEvent({ type: 'content_block_start', index: 1, content_block: { type: 'text' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Answer' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Answer now' } });
+
+  assert.deepEqual(turn.complete({ id: 'final-id', sessionId: 'session-1' }).content, [
+    { type: 'thinking', thinking: 'Plan carefully' },
+    { type: 'text', text: 'Answer now' },
+  ]);
+});
+
+test('complete tail-fills streamed text and thinking from assistant snapshots like ccgui', () => {
+  const turn = createAssistantTurn();
+  turn.addStreamEvent({ type: 'message_start' });
+  turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Pla' } });
+  turn.addStreamEvent({ type: 'content_block_start', index: 1, content_block: { type: 'text' } });
+  turn.addStreamEvent({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Ans' } });
+  turn.add({ content: [
+    { type: 'thinking', thinking: 'Plan carefully' },
+    { type: 'text', text: 'Answer now' },
+  ] });
+
+  assert.deepEqual(turn.complete({ id: 'final-id', sessionId: 'session-1' }).content, [
+    { type: 'thinking', thinking: 'Plan carefully' },
+    { type: 'text', text: 'Answer now' },
+  ]);
+});

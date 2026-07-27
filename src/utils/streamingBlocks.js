@@ -1,8 +1,13 @@
+import { normalizeStreamDelta, resetTurnBlockState } from './streamDeltaNormalizer.js';
+
 export function createStreamingBlockState() {
   return {
     blocks: [],
     activeBlockByIndex: new Map(),
     partialToolInputs: new Map(),
+    textBlockContentByIndex: new Map(),
+    thinkingBlockContentByIndex: new Map(),
+    blockStreamModeByKey: new Map(),
   };
 }
 
@@ -10,6 +15,7 @@ export function resetStreamingBlockState(state) {
   state.blocks = [];
   state.activeBlockByIndex.clear();
   state.partialToolInputs.clear();
+  resetTurnBlockState(state);
 }
 
 export function appendToolResultBlock(state, block) {
@@ -29,6 +35,7 @@ export function applyStreamEventToBlocks(state, event) {
   if (event?.type === 'message_start') {
     state.activeBlockByIndex.clear();
     state.partialToolInputs.clear();
+    resetTurnBlockState(state);
     return state.blocks;
   }
 
@@ -60,10 +67,10 @@ export function applyStreamEventToBlocks(state, event) {
 
     const delta = event.delta || {};
     if (delta.type === 'text_delta' && block.type === 'text') {
-      block.text += delta.text || '';
+      block.text += normalizeStreamDelta(state, 'text', event.index, delta.text || '');
     }
     if (delta.type === 'thinking_delta' && block.type === 'thinking') {
-      block.thinking += delta.thinking || '';
+      block.thinking += normalizeStreamDelta(state, 'thinking', event.index, delta.thinking || '');
     }
     if (delta.type === 'input_json_delta' && block.type === 'tool_use') {
       const current = state.partialToolInputs.get(blockIndex) || '';

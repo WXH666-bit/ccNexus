@@ -1,8 +1,15 @@
+import { normalizeStreamDelta, resetTurnBlockState, resolveSnapshotDelta } from '../src/utils/streamDeltaNormalizer.js';
+
 export function createAssistantTurn() {
   const content = [];
   const streamedBlocks = [];
   const activeBlockByIndex = new Map();
   const partialToolInputs = new Map();
+  const streamDeltaState = {
+    textBlockContentByIndex: new Map(),
+    thinkingBlockContentByIndex: new Map(),
+    blockStreamModeByKey: new Map(),
+  };
   const toolResults = [];
   let model;
 
@@ -26,9 +33,29 @@ export function createAssistantTurn() {
     return result;
   }
 
+  function tailFillSnapshotBlock(block, index) {
+    if (streamedBlocks.length === 0) return;
+    const streamedIndex = activeBlockByIndex.get(index);
+    const streamedBlock = streamedBlocks[streamedIndex];
+    if (!streamedBlock) return;
+
+    if (block.type === 'text' && streamedBlock.type === 'text') {
+      const { delta, hadPrevious } = resolveSnapshotDelta(streamDeltaState, 'text', index, block.text || '');
+      if (delta && hadPrevious) streamedBlock.text += delta;
+    }
+
+    if (block.type === 'thinking' && streamedBlock.type === 'thinking') {
+      const { delta, hadPrevious } = resolveSnapshotDelta(streamDeltaState, 'thinking', index, block.thinking || block.text || '');
+      if (delta && hadPrevious) streamedBlock.thinking += delta;
+    }
+  }
+
   return {
     add(message) {
-      if (Array.isArray(message?.content)) content.push(...message.content);
+      if (Array.isArray(message?.content)) {
+        message.content.forEach((block, index) => tailFillSnapshotBlock(block, index));
+        content.push(...message.content);
+      }
       if (message?.model !== undefined) model = message.model;
     },
 
@@ -37,6 +64,13 @@ export function createAssistantTurn() {
     },
 
     addStreamEvent(event) {
+      if (event?.type === 'message_start') {
+        activeBlockByIndex.clear();
+        partialToolInputs.clear();
+        resetTurnBlockState(streamDeltaState);
+        return;
+      }
+
       if (event?.type === 'content_block_start') {
         const source = event.content_block;
         let block;
@@ -57,10 +91,10 @@ export function createAssistantTurn() {
         const block = streamedBlocks[blockIndex];
         if (!block) return;
         if (event.delta?.type === 'thinking_delta' && block.type === 'thinking') {
-          block.thinking += event.delta.thinking || '';
+          block.thinking += normalizeStreamDelta(streamDeltaState, 'thinking', event.index, event.delta.thinking || '');
         }
         if (event.delta?.type === 'text_delta' && block.type === 'text') {
-          block.text += event.delta.text || '';
+          block.text += normalizeStreamDelta(streamDeltaState, 'text', event.index, event.delta.text || '');
         }
         if (event.delta?.type === 'input_json_delta' && block.type === 'tool_use') {
           const current = partialToolInputs.get(blockIndex) || '';

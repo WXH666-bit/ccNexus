@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Copy, RotateCcw } from 'lucide-react';
 import type { ChatMessage, ContentBlock, SubAgentInfo, ToolResultBlock, ToolUseBlock } from '../types';
 import EditToolBlock from './toolBlocks/EditToolBlock';
@@ -10,6 +10,7 @@ import AgentGroupBlock from './toolBlocks/AgentGroupBlock';
 import ToolGroupBlock from './toolBlocks/ToolGroupBlock';
 import AskUserQuestionCard from './AskUserQuestionCard';
 import CollapsibleBlock from './CollapsibleBlock';
+import ThinkingBlock from './ThinkingBlock';
 import { renderMarkdown } from '../utils/markdown';
 import {
   AGENT_TOOL_NAMES,
@@ -119,6 +120,9 @@ export default function MessageItem({
   findToolResult,
 }: MessageItemProps) {
   const [copied, setCopied] = useState(false);
+  const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
+  const [manuallyExpandedThinking, setManuallyExpandedThinking] = useState<Record<number, boolean>>({});
+  const lastAutoExpandedIndexRef = useRef<number>(-1);
   const isCurrentSearchMatch = searchHighlight?.currentMatchId === message.id;
 
   const getResult = (toolId: string | undefined) => findToolResult?.(toolId, messageIndex) ?? null;
@@ -158,6 +162,47 @@ export default function MessageItem({
 
   const groupedBlocks = groupBlocks(message.content);
   const isMessageStreaming = Boolean(message.isStreaming && isLast);
+
+  const toggleThinking = useCallback((blockIndex: number) => {
+    setExpandedThinking((prev) => {
+      const nextExpanded = !prev[blockIndex];
+      setManuallyExpandedThinking((manualPrev) => ({
+        ...manualPrev,
+        [blockIndex]: nextExpanded,
+      }));
+      return {
+        ...prev,
+        [blockIndex]: nextExpanded,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isMessageStreaming) return;
+
+    const thinkingIndices = groupedBlocks
+      .map((grouped, index) => (
+        grouped.type === 'single' && grouped.block.type === 'thinking' ? index : -1
+      ))
+      .filter((index) => index >= 0);
+
+    if (thinkingIndices.length === 0) return;
+
+    const lastThinkingIndex = thinkingIndices[thinkingIndices.length - 1];
+    if (lastThinkingIndex === lastAutoExpandedIndexRef.current) return;
+
+    setExpandedThinking((prev) => {
+      const next = { ...prev };
+      thinkingIndices.forEach((index) => {
+        if (!manuallyExpandedThinking[index]) next[index] = false;
+      });
+      if (!manuallyExpandedThinking[lastThinkingIndex]) {
+        next[lastThinkingIndex] = true;
+      }
+      return next;
+    });
+    lastAutoExpandedIndexRef.current = lastThinkingIndex;
+  }, [groupedBlocks, isMessageStreaming, manuallyExpandedThinking]);
 
   return (
     <div className={`message-row assistant-row ${isCurrentSearchMatch ? 'search-match' : ''}`} id={`msg-${message.id}`}>
@@ -217,9 +262,13 @@ export default function MessageItem({
           if (block.type === 'thinking') {
             const isLastBlock = idx === groupedBlocks.length - 1;
             return (
-              <CollapsibleBlock key={idx} title={isMessageStreaming && isLastBlock ? 'Thinking process' : 'Thinking'} defaultOpen={isMessageStreaming && isLastBlock}>
-                <div className="thinking-content">{block.thinking}</div>
-              </CollapsibleBlock>
+              <ThinkingBlock
+                key={idx}
+                thinking={block.thinking}
+                isExpanded={Boolean(expandedThinking[idx])}
+                isStreamingLatest={isMessageStreaming && isLastBlock}
+                onToggle={() => toggleThinking(idx)}
+              />
             );
           }
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readClaudeSessionMessages } from '../server/claudeHistory.js';
+import { convertClaudeHistoryEntry, readClaudeSessionMessages } from '../server/claudeHistory.js';
 
 async function withClaudeProject(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ccnexus-claude-history-'));
@@ -86,4 +86,64 @@ test('reads Claude JSONL history as chat messages when ccnexus cache is empty', 
       },
     ]);
   });
+});
+
+test('history conversion mirrors ccgui content block normalization for thinking and command tags', () => {
+  const assistant = convertClaudeHistoryEntry({
+    type: 'assistant',
+    uuid: 'assistant-normalized',
+    timestamp: '2026-07-27T01:00:03.000Z',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', text: 'Plan from text fallback.' },
+        { type: 'text', text: '<command-message>example</command-message> stays visible in assistant code examples' },
+      ],
+    },
+  }, 'session-1');
+
+  assert.deepEqual(assistant.content, [
+    { type: 'thinking', thinking: 'Plan from text fallback.', text: 'Plan from text fallback.' },
+    { type: 'text', text: '<command-message>example</command-message> stays visible in assistant code examples' },
+  ]);
+
+  const userCommand = convertClaudeHistoryEntry({
+    type: 'user',
+    uuid: 'user-command',
+    timestamp: '2026-07-27T01:00:04.000Z',
+    message: {
+      role: 'user',
+      content: '<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>src</command-args>',
+    },
+  }, 'session-1');
+
+  assert.deepEqual(userCommand.content, [{ type: 'text', text: '/review src' }]);
+
+  const hiddenMetadata = convertClaudeHistoryEntry({
+    type: 'user',
+    uuid: 'hidden-command-metadata',
+    timestamp: '2026-07-27T01:00:05.000Z',
+    message: {
+      role: 'user',
+      content: '<command-name>/review</command-name>\n<command-args>src</command-args>',
+    },
+  }, 'session-1');
+
+  assert.equal(hiddenMetadata, null);
+});
+
+test('history conversion mirrors ccgui task notification blocks', () => {
+  const message = convertClaudeHistoryEntry({
+    type: 'user',
+    uuid: 'task-notification',
+    timestamp: '2026-07-27T01:00:06.000Z',
+    message: {
+      role: 'user',
+      content: '<task-notification><status>completed</status><summary>Subtask finished</summary></task-notification>',
+    },
+  }, 'session-1');
+
+  assert.deepEqual(message.content, [
+    { type: 'task_notification', icon: '●', summary: 'Subtask finished', status: 'completed' },
+  ]);
 });

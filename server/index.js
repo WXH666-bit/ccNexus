@@ -965,9 +965,11 @@ wss.on('connection', (ws) => {
         }
 
         const canUseTool = createPermissionHandler(ws);
+        const claudeSettings = await readClaudeSettings();
+        const queryEnv = { ...process.env, ...(claudeSettings.env || {}) };
         const queryOpts = buildClaudeQueryOptions({
           cwd: CWD,
-          env: process.env,
+          env: queryEnv,
           canUseTool,
           clientOptions,
         });

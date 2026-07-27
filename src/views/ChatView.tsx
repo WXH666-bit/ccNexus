@@ -19,6 +19,10 @@ import {
   appendToolResultBlock,
   resetStreamingBlockState,
 } from '../utils/streamingBlocks.js';
+import {
+  STREAM_STALL_CHECK_INTERVAL_MS,
+  shouldRecoverStalledStream,
+} from '../utils/streamWatchdog.js';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
@@ -64,6 +68,8 @@ export default function ChatView() {
 
   const streamingMsgRef = useRef<string | null>(null);
   const streamingBlocksRef = useRef(createStreamingBlockState());
+  const streamActivityAtRef = useRef(Date.now());
+  const streamStallIntervalRef = useRef<number | null>(null);
   const requestedHistorySessionRef = useRef<string | null>(null);
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
@@ -205,6 +211,40 @@ export default function ChatView() {
     }
   }, []);
 
+  const finishStreamingMessage = useCallback(() => {
+    setIsStreaming(false);
+    streamingMsgRef.current = null;
+    resetStreamingBlockState(streamingBlocksRef.current);
+    setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
+  }, []);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      if (streamStallIntervalRef.current !== null) {
+        window.clearInterval(streamStallIntervalRef.current);
+        streamStallIntervalRef.current = null;
+      }
+      return;
+    }
+
+    streamStallIntervalRef.current = window.setInterval(() => {
+      if (shouldRecoverStalledStream({
+        isStreaming: true,
+        lastActivityAt: streamActivityAtRef.current,
+        now: Date.now(),
+      })) {
+        finishStreamingMessage();
+      }
+    }, STREAM_STALL_CHECK_INTERVAL_MS);
+
+    return () => {
+      if (streamStallIntervalRef.current !== null) {
+        window.clearInterval(streamStallIntervalRef.current);
+        streamStallIntervalRef.current = null;
+      }
+    };
+  }, [finishStreamingMessage, isStreaming]);
+
   // Initialize: request session list
   useEffect(() => {
     send({ type: 'get_sessions' });
@@ -315,6 +355,7 @@ export default function ChatView() {
         const eventType = event.type as string;
 
         if (eventType === 'message_start' || eventType === 'content_block_start' || eventType === 'content_block_delta') {
+          streamActivityAtRef.current = Date.now();
           applyStreamEventToBlocks(streamingBlocksRef.current, event);
           setMessages(prev => {
             const updated = [...prev];
@@ -341,9 +382,9 @@ export default function ChatView() {
           duration: msg.message.duration,
           turns: msg.message.turns,
         };
+        setIsStreaming(false);
         streamingMsgRef.current = null;
         resetStreamingBlockState(streamingBlocksRef.current);
-        setIsStreaming(false);
         setMessages(prev => {
           const filtered = prev.filter(m => !m.isStreaming);
           return [...filtered, completeMsg];
@@ -352,6 +393,7 @@ export default function ChatView() {
       }
 
       case 'tool_result': {
+        streamActivityAtRef.current = Date.now();
         const resultBlock = { type: 'tool_result' as const, tool_use_id: msg.tool_use_id, content: msg.content, is_error: msg.is_error };
         appendToolResultBlock(streamingBlocksRef.current, resultBlock);
         setMessages(prev => prev.map(m => {
@@ -394,6 +436,9 @@ export default function ChatView() {
       }
 
       case 'status': {
+        if (msg.status === 'idle') {
+          finishStreamingMessage();
+        }
         break;
       }
 
@@ -403,15 +448,12 @@ export default function ChatView() {
       }
 
       case 'result': {
-        setIsStreaming(false);
-        streamingMsgRef.current = null;
-        resetStreamingBlockState(streamingBlocksRef.current);
-        setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
+        finishStreamingMessage();
         break;
       }
 
       case 'error': {
-        setIsStreaming(false);
+        finishStreamingMessage();
         if (msg.invalidSessionId) {
           setSessions(prev => prev.filter(session => session.id !== msg.invalidSessionId));
           if (currentSession?.id === msg.invalidSessionId) {
@@ -462,7 +504,7 @@ export default function ChatView() {
         break;
       }
     }
-  }, [lastMessage, urlSessionId, navigate, currentSession]);
+  }, [lastMessage, urlSessionId, navigate, currentSession, finishStreamingMessage]);
 
   const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
     if (!text.trim() && attachments.length === 0) return;
@@ -498,6 +540,7 @@ export default function ChatView() {
     };
     setMessages(prev => [...prev, userMsg]);
     setIsStreaming(true);
+    streamActivityAtRef.current = Date.now();
 
     const streamingId = genId();
     streamingMsgRef.current = streamingId;
@@ -552,11 +595,8 @@ export default function ChatView() {
 
   const handleStop = useCallback(() => {
     send({ type: 'abort', sessionId: currentSession?.id });
-    setIsStreaming(false);
-    streamingMsgRef.current = null;
-    resetStreamingBlockState(streamingBlocksRef.current);
-    setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
-  }, [send, currentSession]);
+    finishStreamingMessage();
+  }, [send, currentSession, finishStreamingMessage]);
 
   const handleNewSession = useCallback(() => {
     send({ type: 'new_session' });

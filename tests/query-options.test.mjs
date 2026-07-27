@@ -62,3 +62,20 @@ test('strips ccgui long context marker before passing model to SDK', () => {
 
   assert.equal(options.model, 'claude-opus-4-8');
 });
+
+test('resolves ccgui provider model mapping before passing model to SDK', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'GLM-4.6-W8A8',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'Qwen3-Next-80B-A3B-Thinking',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M2.7-bf16',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6[1m]',
+    },
+  });
+
+  assert.equal(options.model, 'GLM-4.6-W8A8');
+});

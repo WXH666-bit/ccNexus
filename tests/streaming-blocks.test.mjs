@@ -46,3 +46,42 @@ test('streaming accumulator keeps tool_result blocks across later deltas', () =>
     { type: 'text', text: 'Finished' },
   ]);
 });
+
+test('streaming text deltas follow ccgui cumulative-snapshot normalization', () => {
+  const state = createStreamingBlockState();
+
+  applyStreamEventToBlocks(state, { type: 'message_start' });
+  applyStreamEventToBlocks(state, { type: 'content_block_start', index: 0, content_block: { type: 'text' } });
+  applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } });
+  applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello world' } });
+
+  assert.equal(state.blocks[0].text, 'Hello world');
+});
+
+test('streaming thinking deltas follow ccgui cumulative-snapshot normalization', () => {
+  const state = createStreamingBlockState();
+
+  applyStreamEventToBlocks(state, { type: 'message_start' });
+  applyStreamEventToBlocks(state, { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan' } });
+  applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan carefully' } });
+
+  assert.equal(state.blocks[0].thinking, 'Plan carefully');
+});
+
+test('streaming normalizer resets block indexes at message_start like ccgui', () => {
+  const state = createStreamingBlockState();
+
+  applyStreamEventToBlocks(state, { type: 'message_start' });
+  applyStreamEventToBlocks(state, { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Old turn' } });
+
+  applyStreamEventToBlocks(state, { type: 'message_start' });
+  applyStreamEventToBlocks(state, { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });
+  applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'New turn' } });
+
+  assert.deepEqual(state.blocks, [
+    { type: 'thinking', thinking: 'Old turn' },
+    { type: 'thinking', thinking: 'New turn' },
+  ]);
+});
