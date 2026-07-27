@@ -1,4 +1,5 @@
-import { Terminal } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronRight, Terminal } from 'lucide-react';
 import type { ToolResultBlock, ToolUseBlock } from '../../types';
 
 interface Props {
@@ -24,21 +25,28 @@ function resultText(result?: ToolResultBlock | null): string {
 }
 
 export default function BashToolBlock({ block, result }: Props) {
+  const [expanded, setExpanded] = useState(false);
   const command = (block.input.command as string) || (block.input._partialInput as string) || '';
   const output = resultText(result);
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
 
   return (
     <div className="tool-block bash-block">
-      <div className="tool-block-header">
+      <div
+        className={`tool-block-header ${expanded ? 'expanded' : ''}`}
+        onClick={() => setExpanded(prev => !prev)}
+      >
         <span className="tool-icon"><Terminal size={14} /></span>
         <span className="tool-label">Bash</span>
         <span className={`status-dot ${statusClass}`} />
+        <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
-      <div className="tool-block-body">
-        <pre className="command-text">{command}</pre>
-        {output && <pre className={`command-output ${result?.is_error ? 'error' : ''}`}>{output}</pre>}
-      </div>
+      {expanded && (
+        <div className="tool-block-body">
+          <pre className="command-text">{command}</pre>
+          {output && <pre className={`command-output ${result?.is_error ? 'error' : ''}`}>{output}</pre>}
+        </div>
+      )}
     </div>
   );
 }

@@ -7,8 +7,12 @@ function normalizePermissionMode(mode) {
 }
 
 function normalizeModel(model) {
-  return typeof model === 'string' && model.trim() && model !== 'default'
-    ? model.trim()
+  const normalized = typeof model === 'string'
+    ? model.trim().replace(/\[1m\]$/i, '')
+    : '';
+
+  return normalized && normalized !== 'default'
+    ? normalized
     : null;
 }
 

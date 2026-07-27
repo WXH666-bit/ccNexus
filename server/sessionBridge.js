@@ -14,10 +14,14 @@ export async function dispatchSessionCommand(message, store, options = {}) {
           return sessionListEventFromSync(result);
         }
       }
+      let messages = await store.loadSession(message.sessionId);
+      if (messages.length === 0 && options.loadClaudeSessionMessages) {
+        messages = await options.loadClaudeSessionMessages(message.sessionId);
+      }
       return {
         type: 'session_history',
         sessionId: message.sessionId,
-        messages: await store.loadSession(message.sessionId),
+        messages,
       };
     }
     case 'delete_session':

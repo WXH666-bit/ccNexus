@@ -1,0 +1,103 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function read(path) {
+  return readFileSync(resolve(root, path), 'utf8');
+}
+
+test('ChatInputBox uses ccgui-style module boundaries', () => {
+  const files = [
+    'src/components/ChatInputBox/index.tsx',
+    'src/components/ChatInputBox/ContextBar.tsx',
+    'src/components/ChatInputBox/InputEditable.tsx',
+    'src/components/ChatInputBox/ButtonArea.tsx',
+    'src/components/ChatInputBox/ModeSelect.tsx',
+    'src/components/ChatInputBox/ModelSelect.tsx',
+    'src/components/ChatInputBox/CompletionDropdown.tsx',
+  ];
+
+  for (const file of files) {
+    assert.equal(existsSync(resolve(root, file)), true, `${file} should exist`);
+  }
+});
+
+test('ChatInputBox copies ccgui input semantics instead of using textarea', () => {
+  const source = read('src/components/ChatInputBox/index.tsx');
+  const editable = read('src/components/ChatInputBox/InputEditable.tsx');
+
+  assert.equal(source.includes('<textarea'), false);
+  assert.match(editable, /contentEditable=\{!disabled\}/);
+  assert.match(editable, /onCompositionStart/);
+  assert.match(editable, /onCompositionEnd/);
+  assert.match(editable, /insertParagraph/);
+  assert.match(source, /@引用文件，#唤起智能体，!插入提示词，Enter 发送/);
+});
+
+test('ChatInputBox supports ccgui trigger completions and toolbar controls', () => {
+  const source = read('src/components/ChatInputBox/index.tsx');
+  const buttonArea = read('src/components/ChatInputBox/ButtonArea.tsx');
+
+  assert.match(source, /trigger:\s*'@'/);
+  assert.match(source, /trigger:\s*'#'/);
+  assert.match(source, /trigger:\s*'!'/);
+  assert.match(source, /trigger:\s*'\/'/);
+  assert.match(buttonArea, /ModeSelect/);
+  assert.match(buttonArea, /ModelSelect/);
+  assert.match(buttonArea, /ReasoningSelect/);
+  assert.match(buttonArea, /longContextEnabled/);
+  assert.equal(buttonArea.includes('<ProviderSelect'), false);
+});
+
+test('ChatInputBox does not steal focus from selector controls', () => {
+  const source = read('src/components/ChatInputBox/index.tsx');
+
+  assert.match(source, /shouldFocusEditor/);
+  assert.match(source, /\.closest\('\.button-area/);
+  assert.match(source, /event\.target/);
+});
+
+test('ChatInputBox token indicator uses dynamic usage props instead of a hard-coded percentage', () => {
+  const source = read('src/components/ChatInputBox/index.tsx');
+  const contextBar = read('src/components/ChatInputBox/ContextBar.tsx');
+
+  assert.equal(source.includes('useState(26)'), false);
+  assert.match(source, /usageUsedTokens/);
+  assert.match(source, /getModelContextLimit/);
+  assert.match(source, /calculateContextPercentage/);
+  assert.match(contextBar, /TokenIndicator/);
+  assert.match(contextBar, /usedTokens/);
+  assert.match(contextBar, /maxTokens/);
+});
+
+test('ModeSelect uses ccgui custom dropdown instead of a native select popup', () => {
+  const buttonArea = read('src/components/ChatInputBox/ButtonArea.tsx');
+  const modeSelect = read('src/components/ChatInputBox/ModeSelect.tsx');
+
+  assert.equal(buttonArea.includes('<select className="selector mode-select"'), false);
+  assert.match(modeSelect, /selector-button/);
+  assert.match(modeSelect, /selector-dropdown/);
+  assert.match(modeSelect, /stopPropagation/);
+  assert.match(modeSelect, /document\.addEventListener\('mousedown'/);
+});
+
+test('ModeSelect dropdown is left aligned so it stays inside the chat input boundary', () => {
+  const styles = read('src/index.css');
+
+  assert.match(styles, /\.mode-select-dropdown\s*\{[^}]*left:\s*0;/s);
+  assert.match(styles, /\.mode-select-dropdown\s*\{[^}]*right:\s*auto;/s);
+});
+
+test('ModelSelect merges provider mapping with model choice like ccgui', () => {
+  const source = read('src/components/ChatInputBox/ModelSelect.tsx');
+
+  assert.match(source, /resolveModelDisplay/);
+  assert.match(source, /modelSupportsLongContext/);
+  assert.match(source, /1M上下文/);
+  assert.match(source, /添加模型/);
+  assert.match(source, /model-option-subtitle/);
+});

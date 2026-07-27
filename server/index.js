@@ -14,8 +14,10 @@ import { createAssistantTurn } from './assistantTurn.js';
 import { extractToolResults } from './toolResults.js';
 import { isMissingClaudeConversationError, staleSessionErrorEvent } from './sessionRecovery.js';
 import { claudeProjectSessionsDir, syncSessionStoreWithClaude, sessionListEventFromSync } from './sessionSync.js';
+import { readClaudeSessionMessages } from './claudeHistory.js';
 import { createPermissionPolicy } from './permissionPolicy.js';
 import { buildClaudeQueryOptions } from './queryOptions.js';
+import { createUsageUpdate, extractUsageFromSdkEvent } from '../src/utils/contextUsage.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
@@ -395,6 +397,9 @@ async function writeClaudeSettings(settings) {
 
 // 解析实际模型（参考 ccGUI model-utils.js）
 function resolveModelFromSettings(modelId, env) {
+  const baseModelId = typeof modelId === 'string'
+    ? modelId.replace(/\[1m\]$/i, '')
+    : modelId;
   // 优先级：ANTHROPIC_MODEL 全局覆盖 > ANTHROPIC_DEFAULT_*_MODEL 按别名映射 > 原模型 ID
   if (env.ANTHROPIC_MODEL) {
     return env.ANTHROPIC_MODEL;
@@ -409,12 +414,12 @@ function resolveModelFromSettings(modelId, env) {
     'claude-haiku-4-5': env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
   };
   
-  const mapped = aliasMap[modelId];
+  const mapped = aliasMap[baseModelId];
   if (mapped) {
     return mapped;
   }
   
-  return modelId;
+  return baseModelId;
 }
 
 // 获取供应商列表 API
@@ -925,6 +930,10 @@ wss.on('connection', (ws) => {
 
     const sessionEventPayload = await dispatchSessionCommand(msg, sessionStore, {
       syncSessions: syncPersistedSessionsWithClaude,
+      loadClaudeSessionMessages: (sessionId) => readClaudeSessionMessages({
+        claudeProjectDir: CLAUDE_PROJECT_SESSIONS_DIR,
+        sessionId,
+      }),
     });
     if (sessionEventPayload) {
       if (sessionEventPayload.type === 'session_list' && sessionEventPayload.deletedSessionIds?.length) {
@@ -962,6 +971,9 @@ wss.on('connection', (ws) => {
           canUseTool,
           clientOptions,
         });
+        const modelForUsage = clientOptions?.model && clientOptions.model !== 'default'
+          ? clientOptions.model
+          : 'claude-sonnet-4-6';
         
         if (querySessionId) {
           queryOpts.resume = querySessionId;
@@ -985,6 +997,15 @@ wss.on('connection', (ws) => {
 
           queryEvents: for await (const event of q) {
             if (ws.readyState !== ws.OPEN) break;
+
+            const usage = extractUsageFromSdkEvent(event);
+            if (usage) {
+              ws.send(JSON.stringify(createUsageUpdate({
+                usage,
+                provider: 'claude',
+                model: modelForUsage,
+              })));
+            }
 
             switch (event.type) {
               case 'system':

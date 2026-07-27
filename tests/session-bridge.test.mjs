@@ -32,6 +32,20 @@ test('load_session returns the requested persisted messages', async () => {
   assert.deepEqual(event, { type: 'session_history', sessionId: 's1', messages });
 });
 
+test('load_session falls back to Claude JSONL history when ccnexus has no cached messages', async () => {
+  const claudeMessages = [{ id: 'm1', role: 'user', content: [{ type: 'text', text: 'from jsonl' }], timestamp: 10, sessionId: 's1' }];
+  const event = await dispatchSessionCommand({ type: 'load_session', sessionId: 's1' }, {
+    loadSession: async () => [],
+  }, {
+    loadClaudeSessionMessages: async (sessionId) => {
+      assert.equal(sessionId, 's1');
+      return claudeMessages;
+    },
+  });
+
+  assert.deepEqual(event, { type: 'session_history', sessionId: 's1', messages: claudeMessages });
+});
+
 test('load_session returns a cleaned session list when the requested session was externally deleted', async () => {
   const event = await dispatchSessionCommand({ type: 'load_session', sessionId: 'stale-session' }, {}, {
     syncSessions: async () => ({

@@ -41,6 +41,7 @@ export default function ChatView() {
   const [mode, setMode] = useState('default');
   const [model, setModel] = useState('default');
   const [reasoning, setReasoning] = useState('high');
+  const [usageUsedTokens, setUsageUsedTokens] = useState<number | undefined>(undefined);
 
   // P1 features state
   const [rewindTarget, setRewindTarget] = useState<ChatMessage | null>(null);
@@ -279,6 +280,10 @@ export default function ChatView() {
         } else if (msg.sessions.length > 0) {
           const latest = [...msg.sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0];
           setCurrentSession(latest);
+          if (requestedHistorySessionRef.current !== latest.id) {
+            requestedHistorySessionRef.current = latest.id;
+            send({ type: 'load_session', sessionId: latest.id });
+          }
         }
         break;
       }
@@ -372,7 +377,7 @@ export default function ChatView() {
         break;
       }
       case 'session_history': {
-        if (urlSessionId !== msg.sessionId) break;
+        if (urlSessionId && urlSessionId !== msg.sessionId) break;
         requestedHistorySessionRef.current = msg.sessionId;
         resetStreamingBlockState(streamingBlocksRef.current);
         streamingMsgRef.current = null;
@@ -389,6 +394,11 @@ export default function ChatView() {
       }
 
       case 'status': {
+        break;
+      }
+
+      case 'usage_update': {
+        setUsageUsedTokens(msg.usedTokens);
         break;
       }
 
@@ -454,7 +464,7 @@ export default function ChatView() {
     }
   }, [lastMessage, urlSessionId, navigate, currentSession]);
 
-  const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean) => {
+  const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
     if (!text.trim() && attachments.length === 0) return;
 
     // If AI is streaming and queue is requested, add to queue
@@ -507,7 +517,7 @@ export default function ChatView() {
       images: attachments,
       options: { 
         mode, 
-        model, 
+        model: modelOverride || model, 
         reasoning: reasoningEffort || reasoning,
         agent,
         streaming,
@@ -653,6 +663,7 @@ export default function ChatView() {
         setReasoning={setReasoning}
         showStatusPanel={showStatusPanel}
         setShowStatusPanel={setShowStatusPanel}
+        usageUsedTokens={usageUsedTokens}
       />
       {permission && (
         <PermissionDialog

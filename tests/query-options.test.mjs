@@ -49,3 +49,16 @@ test('omits default model and disables partial messages when streaming is false'
   assert.equal(options.allowDangerouslySkipPermissions, undefined);
   assert.equal(options.effort, 'high');
 });
+
+test('strips ccgui long context marker before passing model to SDK', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-opus-4-8[1m]',
+    },
+  });
+
+  assert.equal(options.model, 'claude-opus-4-8');
+});

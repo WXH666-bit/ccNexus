@@ -107,6 +107,7 @@ export type WSMessage =
   | { type: 'session'; sessionId: string }
   | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
   | { type: 'assistant'; message: { id: string; content: ContentBlock[]; model?: string; sessionId?: string; cost?: number; duration?: number; turns?: number } }
+  | { type: 'usage_update'; percentage: number; totalTokens: number; limit: number; usedTokens: number; maxTokens: number }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
   | { type: 'tool_progress'; tool_name: string; tool_use_id: string; status: 'running' | 'completed' | 'error' }
   | { type: 'permission_request'; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
