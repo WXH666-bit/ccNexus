@@ -24,7 +24,8 @@ test('builds ccgui-style SDK options from client dialogue controls', () => {
   assert.equal(options.includePartialMessages, true);
   assert.equal(options.allowDangerouslySkipPermissions, true);
   assert.deepEqual(options.settingSources, ['user', 'project', 'local']);
-  assert.deepEqual(options.thinking, { type: 'adaptive', display: 'summarized' });
+  assert.equal(Object.hasOwn(options, 'thinking'), false);
+  assert.equal(Object.hasOwn(options, 'maxThinkingTokens'), false);
   assert.equal(options.effort, 'xhigh');
   assert.equal(options.env.EXISTING, '1');
   assert.equal(options.canUseTool, canUseTool);
@@ -40,6 +41,7 @@ test('omits default model and disables partial messages when streaming is false'
       model: 'default',
       streaming: false,
       reasoning: 'not-real',
+      alwaysThinking: true,
     },
   });
 
@@ -47,7 +49,8 @@ test('omits default model and disables partial messages when streaming is false'
   assert.equal('model' in options, false);
   assert.equal(options.includePartialMessages, false);
   assert.equal(options.allowDangerouslySkipPermissions, undefined);
-  assert.equal(options.effort, 'high');
+  assert.equal(options.effort, undefined);
+  assert.equal(options.maxThinkingTokens, 10000);
 });
 
 test('strips ccgui long context marker before passing model to SDK', () => {

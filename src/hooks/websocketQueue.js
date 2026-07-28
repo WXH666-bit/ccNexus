@@ -30,3 +30,29 @@ export function createOutboundMessageQueue(deliver) {
     },
   };
 }
+
+export function createInboundMessageQueue() {
+  const messages = [];
+
+  return {
+    push(message) {
+      messages.push(message);
+    },
+
+    consumeFrom(cursor) {
+      const nextCursor = messages.length;
+      return {
+        messages: messages.slice(cursor),
+        nextCursor,
+      };
+    },
+
+    clear() {
+      messages.length = 0;
+    },
+
+    size() {
+      return messages.length;
+    },
+  };
+}

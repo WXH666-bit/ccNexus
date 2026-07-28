@@ -29,7 +29,11 @@ export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = 
     includePartialMessages: clientOptions.streaming !== false,
     env: { ...env },
     settingSources: ['user', 'project', 'local'],
-    ...buildThinkingOptions(clientOptions.reasoning),
+    ...buildThinkingOptions(clientOptions.reasoning, {
+      alwaysThinkingEnabled: clientOptions.alwaysThinking === true,
+      maxThinkingTokens: clientOptions.maxThinkingTokens,
+      disableThinking: clientOptions.disableThinking,
+    }),
   };
 
   if (model) options.model = model;

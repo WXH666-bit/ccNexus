@@ -34,7 +34,7 @@ function genId() { return `msg-${Date.now()}-${++msgIdCounter}`; }
 export default function ChatView() {
   const { sessionId: urlSessionId } = useParams();
   const navigate = useNavigate();
-  const { send, lastMessage, connected } = useWebSocket();
+  const { send, incomingMessages, connected } = useWebSocket();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -71,6 +71,7 @@ export default function ChatView() {
   const streamActivityAtRef = useRef(Date.now());
   const streamStallIntervalRef = useRef<number | null>(null);
   const requestedHistorySessionRef = useRef<string | null>(null);
+  const processedIncomingMessageCountRef = useRef(0);
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
   const serverSessionNavigationRef = useRef<string | null>(null);
@@ -278,10 +279,11 @@ export default function ChatView() {
 
   // Handle WebSocket messages
   useEffect(() => {
-    if (!lastMessage) return;
-    const msg = lastMessage;
+    const nextMessages = incomingMessages.slice(processedIncomingMessageCountRef.current);
+    processedIncomingMessageCountRef.current = incomingMessages.length;
 
-    switch (msg.type) {
+    for (const msg of nextMessages) {
+      switch (msg.type) {
       case 'session': {
         const session: Session = {
           id: msg.sessionId,
@@ -501,10 +503,11 @@ export default function ChatView() {
             return { ...prev, edits: { ...prev.edits, files: newFiles } };
           });
         }
-        break;
+          break;
+        }
       }
     }
-  }, [lastMessage, urlSessionId, navigate, currentSession, finishStreamingMessage]);
+  }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage]);
 
   const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
     if (!text.trim() && attachments.length === 0) return;

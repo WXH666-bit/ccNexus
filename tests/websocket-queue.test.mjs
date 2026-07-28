@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOutboundMessageQueue } from '../src/hooks/websocketQueue.js';
+import { createInboundMessageQueue, createOutboundMessageQueue } from '../src/hooks/websocketQueue.js';
 
 test('queues messages sent before WebSocket open and flushes them in order', () => {
   const delivered = [];
@@ -29,4 +29,22 @@ test('sends immediately after the socket is open', () => {
 
   assert.deepEqual(delivered, [{ type: 'get_sessions' }]);
   assert.equal(queue.size(), 0);
+});
+
+test('keeps rapid incoming messages in order until the view consumes them', () => {
+  const queue = createInboundMessageQueue();
+
+  queue.push({ type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: 'done' }] } });
+  queue.push({ type: 'result', is_error: false });
+  queue.push({ type: 'status', status: 'idle' });
+
+  assert.deepEqual(queue.consumeFrom(0), {
+    messages: [
+      { type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: 'done' }] } },
+      { type: 'result', is_error: false },
+      { type: 'status', status: 'idle' },
+    ],
+    nextCursor: 3,
+  });
+  assert.deepEqual(queue.consumeFrom(3), { messages: [], nextCursor: 3 });
 });
