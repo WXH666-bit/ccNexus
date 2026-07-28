@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -36,21 +36,11 @@ interface FileResponse {
   size: number;
 }
 
-const HIDDEN_TREE_NAMES = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage']);
 const CODE_EXTS = new Set(['js', 'jsx', 'ts', 'tsx', 'json', 'css', 'html', 'md', 'mjs', 'cjs']);
 
 function extensionOf(name: string) {
   const match = /\.([^.]+)$/.exec(name);
   return match?.[1]?.toLowerCase() ?? '';
-}
-
-function visibleNodes(nodes: FileNode[]): FileNode[] {
-  return nodes
-    .filter((node) => !HIDDEN_TREE_NAMES.has(node.name))
-    .map((node) => ({
-      ...node,
-      children: node.children ? visibleNodes(node.children) : undefined,
-    }));
 }
 
 function FileIcon({ node }: { node: FileNode }) {
@@ -134,8 +124,6 @@ export default function FileExplorer() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
 
-  const filteredTree = useMemo(() => visibleNodes(tree), [tree]);
-
   const setExplorerCollapsed = useCallback((next: boolean) => {
     setCollapsed(next);
     localStorage.setItem('fileExplorerCollapsed', String(next));
@@ -145,7 +133,7 @@ export default function FileExplorer() {
     setLoadingTree(true);
     setTreeError('');
     try {
-      const res = await fetch('/api/files/tree?path=.&depth=5&showDotfiles=true');
+      const res = await fetch('/api/files/tree?path=.&depth=5&showDotfiles=true&maxItems=10000');
       const data = await res.json() as TreeResponse & { error?: string };
       if (!res.ok) throw new Error(data.error || 'Failed to load files');
       setTree(data.tree || []);
@@ -275,7 +263,7 @@ export default function FileExplorer() {
 
       <div className="file-tree">
         {treeError && <div className="file-explorer-error">{treeError}</div>}
-        {!treeError && filteredTree.map((node) => (
+        {!treeError && tree.map((node) => (
           <TreeNode
             key={node.path}
             node={node}
@@ -286,7 +274,7 @@ export default function FileExplorer() {
             onOpenFile={openFile}
           />
         ))}
-        {!treeError && filteredTree.length === 0 && (
+        {!treeError && tree.length === 0 && (
           <div className="file-explorer-empty">{loadingTree ? '正在加载文件...' : '没有可显示的文件'}</div>
         )}
       </div>

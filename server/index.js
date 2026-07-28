@@ -262,9 +262,11 @@ app.get('/api/files/tree', async (req, res) => {
     if (!targetPath) return res.status(403).json({ error: 'Access denied' });
     const depth = Math.min(parseInt(req.query.depth || '4', 10), 10);
     const showDotfiles = req.query.showDotfiles === 'true';
+    const requestedMaxItems = parseInt(req.query.maxItems || '800', 10);
+    const maxItems = Math.min(Math.max(Number.isFinite(requestedMaxItems) ? requestedMaxItems : 800, 100), 20000);
     const stat = await fs.stat(targetPath);
     if (!stat.isDirectory()) return res.status(400).json({ error: 'Not a directory' });
-    const tree = await buildTree(targetPath, { depth, showDotfiles });
+    const tree = await buildTree(targetPath, { depth, showDotfiles, maxItems });
     res.json({
       tree,
       root: path.relative(CWD, targetPath) || '.',

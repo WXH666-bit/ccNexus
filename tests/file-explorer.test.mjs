@@ -31,6 +31,14 @@ test('FileExplorer can load the project tree, open a file, edit it, and save cha
   assert.match(source, /className="file-editor-textarea"/);
 });
 
+test('FileExplorer shows the real project tree instead of hiding common workspace folders', () => {
+  const source = read('src/components/FileExplorer.tsx');
+
+  assert.doesNotMatch(source, /HIDDEN_TREE_NAMES/);
+  assert.doesNotMatch(source, /visibleNodes/);
+  assert.match(source, /maxItems=10000/);
+});
+
 test('file save API only writes workspace text files and protects config folders', () => {
   const source = read('server/index.js');
 
@@ -46,4 +54,12 @@ test('file tree includes current directory entries before spending the item budg
   assert.match(source, /const directoryNodes = \[\];/);
   assert.match(source, /directoryNodes\.push/);
   assert.match(source, /for \(const directoryNode of directoryNodes\)/);
+});
+
+test('file tree API allows the explorer to request a larger item budget', () => {
+  const source = read('server/index.js');
+
+  assert.match(source, /req\.query\.maxItems/);
+  assert.match(source, /maxItems/);
+  assert.match(source, /buildTree\(targetPath, \{ depth, showDotfiles, maxItems \}\)/);
 });
