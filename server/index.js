@@ -63,10 +63,26 @@ const BINARY_EXTS = new Set([
 await fs.mkdir(SESSIONS_DIR, { recursive: true });
 
 // ─── Security ─────────────────────────────────────────────────────
+function isPathInside(parentPath, targetPath) {
+  const relative = path.relative(parentPath, targetPath);
+  return relative === '' || Boolean(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 function safePath(requestedPath) {
-  const resolved = path.resolve(requestedPath || CWD);
-  if (!resolved.startsWith(CWD)) return null;
+  const resolved = path.resolve(CWD, requestedPath || '.');
+  if (!isPathInside(CWD, resolved)) return null;
   return resolved;
+}
+
+function isProtectedWorkspacePath(absPath) {
+  const relativePath = path.relative(CWD, absPath).replace(/\\/g, '/');
+  const segments = relativePath.split('/').filter(Boolean);
+  return (
+    segments.includes('.claude') ||
+    segments.includes('.codex') ||
+    segments.includes('.git') ||
+    segments.includes('node_modules')
+  );
 }
 
 function isDotfile(name) {
@@ -92,6 +108,7 @@ async function buildTree(dirPath, options = {}) {
     });
 
     const children = [];
+    const directoryNodes = [];
     for (const entry of entries) {
       if (count >= maxItems) break;
       if (!showDotfiles && isDotfile(entry.name)) continue;
@@ -100,13 +117,21 @@ async function buildTree(dirPath, options = {}) {
       const isDir = entry.isDirectory();
       count++;
 
-      if (isDir && nodeDepth < depth) {
-        const sub = await build(fullPath, nodeDepth + 1);
-        children.push({ name: entry.name, path: relativePath, isDirectory: true, children: sub || [] });
-      } else {
-        children.push({ name: entry.name, path: relativePath, isDirectory: false });
+      const child = { name: entry.name, path: relativePath, isDirectory: isDir };
+      if (isDir) {
+        child.children = [];
+        directoryNodes.push({ node: child, fullPath });
+      }
+      children.push(child);
+    }
+
+    if (nodeDepth < depth) {
+      for (const directoryNode of directoryNodes) {
+        if (count >= maxItems) break;
+        directoryNode.node.children = (await build(directoryNode.fullPath, nodeDepth + 1)) || [];
       }
     }
+
     return children;
   }
 
@@ -213,7 +238,12 @@ app.get('/api/files/tree', async (req, res) => {
     const stat = await fs.stat(targetPath);
     if (!stat.isDirectory()) return res.status(400).json({ error: 'Not a directory' });
     const tree = await buildTree(targetPath, { depth, showDotfiles });
-    res.json({ tree, root: path.relative(CWD, targetPath) || '.' });
+    res.json({
+      tree,
+      root: path.relative(CWD, targetPath) || '.',
+      cwd: CWD,
+      rootName: path.basename(CWD),
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -237,6 +267,46 @@ app.get('/api/files/content', async (req, res) => {
     }
     const content = await fs.readFile(filePath, 'utf-8');
     res.json({ content, isImage: false, isBinary: false, path: req.query.path, size: stat.size });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/files/content', async (req, res) => {
+  try {
+    const { path: requestedPath, content } = req.body || {};
+    if (typeof requestedPath !== 'string' || !requestedPath.trim()) {
+      return res.status(400).json({ error: 'Missing file path' });
+    }
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'Content must be text' });
+    }
+
+    const filePath = safePath(requestedPath);
+    if (!filePath) return res.status(403).json({ error: 'Access denied' });
+    if (isProtectedWorkspacePath(filePath)) {
+      return res.status(403).json({ error: 'Protected workspace files cannot be modified' });
+    }
+    if (Buffer.byteLength(content, 'utf8') > MAX_FILE_SIZE) {
+      return res.status(413).json({ error: `File too large (${(MAX_FILE_SIZE / 1024 / 1024).toFixed(1)} MB limit)` });
+    }
+
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) return res.status(400).json({ error: 'Not a file' });
+    const ext = path.extname(filePath).toLowerCase();
+    if (IMAGE_EXTS.has(ext) || BINARY_EXTS.has(ext)) {
+      return res.status(415).json({ error: 'Binary files cannot be edited' });
+    }
+
+    await fs.writeFile(filePath, content, 'utf-8');
+    const updatedStat = await fs.stat(filePath);
+    res.json({
+      ok: true,
+      path: path.relative(CWD, filePath),
+      size: updatedStat.size,
+      mtimeMs: updatedStat.mtimeMs,
+    });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
     res.status(500).json({ error: err.message });

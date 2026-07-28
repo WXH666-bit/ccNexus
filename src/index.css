@@ -143,16 +143,311 @@ html, body, #root {
 /* ─── Chat View Layout ──────────────────────────────────────── */
 .chat-view {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.chat-pane {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .chat-main {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ─── File Explorer ─────────────────────────────────────────────── */
+.file-explorer {
+  display: flex;
+  flex-direction: column;
+  width: 370px;
+  min-width: 300px;
+  max-width: 42vw;
+  height: 100%;
+  background: #242629;
+  border-right: 1px solid #151618;
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.file-explorer.collapsed {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  align-items: center;
+  background: #202124;
+}
+
+.file-explorer-rail-btn,
+.file-explorer-actions button,
+.file-editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.file-explorer-rail-btn {
+  margin-top: 10px;
+}
+
+.file-explorer-rail-btn:hover,
+.file-explorer-actions button:hover,
+.file-editor-actions button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-explorer-actions button:disabled,
+.file-editor-actions button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.file-explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-explorer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-explorer-title svg {
+  color: #c8cdd4;
+  flex-shrink: 0;
+}
+
+.file-explorer-title-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.file-explorer-title-text strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-title-text span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-actions,
+.file-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.file-tree {
+  flex: 1 1 46%;
+  min-height: 120px;
+  overflow: auto;
+  padding: 6px 6px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-tree::-webkit-scrollbar,
+.file-editor-textarea::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.file-tree::-webkit-scrollbar-thumb,
+.file-editor-textarea::-webkit-scrollbar-thumb {
+  background: #4b4f55;
+  border-radius: 4px;
+}
+
+.file-tree-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 27px;
+  gap: 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #d8dde5;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree-row:hover {
+  background: #33363b;
+}
+
+.file-tree-row.selected {
+  background: #3f4349;
+}
+
+.file-tree-caret {
+  display: inline-flex;
+  width: 14px;
+  color: #a9b0ba;
+  flex-shrink: 0;
+}
+
+.file-tree-icon {
+  display: inline-flex;
+  color: #93c47d;
+  flex-shrink: 0;
+}
+
+.file-tree-row svg {
+  stroke-width: 1.8;
+}
+
+.file-tree-name {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-editor {
+  display: flex;
+  flex: 1 1 54%;
+  min-height: 180px;
+  flex-direction: column;
+  overflow: hidden;
+  background: #1f2023;
+}
+
+.file-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-editor-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  color: var(--text-primary);
+}
+
+.file-editor-title span {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-editor-title em {
+  color: var(--accent-orange);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.file-editor-textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: #1f2023;
+  color: #d7dce3;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 12px 18px;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.file-editor-textarea:focus {
+  box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.42);
+}
+
+.file-editor-placeholder,
+.file-explorer-empty,
+.file-explorer-error,
+.file-explorer-notice {
+  padding: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.file-editor-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.file-explorer-error {
+  color: #ff8b8b;
+}
+
+.file-explorer-notice {
+  color: var(--accent-green);
+  padding-top: 8px;
+  padding-bottom: 4px;
+}
+
+.file-image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  flex: 1;
+  padding: 12px;
+}
+
+.file-image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ─── Welcome Screen ────────────────────────────────────────── */
@@ -2129,11 +2424,9 @@ html, body, #root {
 .anchor-system { background: var(--text-muted); color: white; }
 
 .anchor-tooltip {
-  position: absolute;
-  right: 100%;
-  top: 50%;
+  position: fixed;
+  right: 42px;
   transform: translateY(-50%);
-  margin-right: 8px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -2143,7 +2436,8 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  z-index: 10;
+  pointer-events: none;
+  z-index: 30;
 }
 .anchor-tooltip-label {
   font-size: 12px;

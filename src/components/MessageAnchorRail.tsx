@@ -1,10 +1,18 @@
 import { useMemo, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { MessageSquare, Bot, User, Code, Lightbulb, Info } from 'lucide-react';
 import type { ChatMessage, MessageAnchor } from '../types';
 
 interface Props {
   messages: ChatMessage[];
   onAnchorClick: (messageId: string) => void;
+}
+
+interface TooltipState {
+  idx: number;
+  top: number;
+  label: string;
+  timestamp: number;
 }
 
 function getAnchors(messages: ChatMessage[]): MessageAnchor[] {
@@ -85,10 +93,22 @@ function getAnchorIcon(kind: MessageAnchor['kind']) {
 }
 
 export default function MessageAnchorRail({ messages, onAnchorClick }: Props) {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [tooltipState, setTooltipState] = useState<TooltipState | null>(null);
   const anchors = useMemo(() => getAnchors(messages), [messages]);
 
   if (anchors.length === 0) return null;
+
+  const showTooltip = (anchor: MessageAnchor, idx: number, event: MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const centerY = rect.top + rect.height / 2;
+    const top = Math.min(Math.max(centerY, 28), window.innerHeight - 28);
+    setTooltipState({
+      idx,
+      top,
+      label: anchor.label,
+      timestamp: anchor.timestamp,
+    });
+  };
 
   return (
     <div className="anchor-rail">
@@ -96,24 +116,24 @@ export default function MessageAnchorRail({ messages, onAnchorClick }: Props) {
         {anchors.map((anchor, idx) => (
           <div
             key={`${anchor.messageId}-${idx}`}
-            className={`anchor-dot anchor-${anchor.kind} ${hoveredIdx === idx ? 'hovered' : ''}`}
-            onMouseEnter={() => setHoveredIdx(idx)}
-            onMouseLeave={() => setHoveredIdx(null)}
+            className={`anchor-dot anchor-${anchor.kind} ${tooltipState?.idx === idx ? 'hovered' : ''}`}
+            onMouseEnter={(event) => showTooltip(anchor, idx, event)}
+            onMouseLeave={() => setTooltipState(null)}
             onClick={() => onAnchorClick(anchor.messageId)}
-            title={anchor.label}
+            aria-label={anchor.label}
           >
             {getAnchorIcon(anchor.kind)}
-            {hoveredIdx === idx && (
-              <div className="anchor-tooltip">
-                <span className="anchor-tooltip-label">{anchor.label}</span>
-                <span className="anchor-tooltip-time">
-                  {new Date(anchor.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-            )}
           </div>
         ))}
       </div>
+      {tooltipState && (
+        <div className="anchor-tooltip" style={{ top: tooltipState.top }}>
+          <span className="anchor-tooltip-label">{tooltipState.label}</span>
+          <span className="anchor-tooltip-time">
+            {new Date(tooltipState.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

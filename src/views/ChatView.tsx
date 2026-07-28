@@ -12,6 +12,7 @@ import PlanApprovalDialog from '../components/PlanApprovalDialog';
 import MessageAnchorRail from '../components/MessageAnchorRail';
 import MessageQueue from '../components/MessageQueue';
 import type { QueuedMessage } from '../components/MessageQueue';
+import FileExplorer from '../components/FileExplorer';
 import { useWebSocket } from '../hooks/useWebSocket';
 import {
   createStreamingBlockState,
@@ -663,56 +664,59 @@ export default function ChatView() {
 
   return (
     <div className="chat-view">
-      <ChatHeader
-        sessionTitle={currentSession?.title || ''}
-        onNewSession={handleNewSession}
-        onRenameSession={handleRenameSession}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchResults={searchResults}
-        currentSearchIdx={currentSearchIdx}
-        onSearchNext={() => navigateSearch('next')}
-        onSearchPrev={() => navigateSearch('prev')}
-        onRewind={rewindTarget ? () => setRewindTarget(null) : undefined}
-      />
-      <div className="chat-main">
-        {messages.length === 0 ? (
-          <WelcomeScreen onSuggestion={handleSend} />
-        ) : (
-          <div className="chat-content-with-rail">
-            <MessageList 
-              messages={messages} 
-              isStreaming={isStreaming}
-              searchHighlight={searchHighlight}
-            />
-            <MessageAnchorRail 
-              messages={messages}
-              onAnchorClick={handleAnchorClick}
-            />
-          </div>
-        )}
+      <FileExplorer />
+      <div className="chat-pane">
+        <ChatHeader
+          sessionTitle={currentSession?.title || ''}
+          onNewSession={handleNewSession}
+          onRenameSession={handleRenameSession}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchResults={searchResults}
+          currentSearchIdx={currentSearchIdx}
+          onSearchNext={() => navigateSearch('next')}
+          onSearchPrev={() => navigateSearch('prev')}
+          onRewind={rewindTarget ? () => setRewindTarget(null) : undefined}
+        />
+        <div className="chat-main">
+          {messages.length === 0 ? (
+            <WelcomeScreen onSuggestion={handleSend} />
+          ) : (
+            <div className="chat-content-with-rail">
+              <MessageList 
+                messages={messages} 
+                isStreaming={isStreaming}
+                searchHighlight={searchHighlight}
+              />
+              <MessageAnchorRail 
+                messages={messages}
+                onAnchorClick={handleAnchorClick}
+              />
+            </div>
+          )}
+        </div>
+        {showStatusPanel && <StatusPanel status={status} onUndoFile={handleUndoFile} />}
+        <MessageQueue 
+          queue={messageQueue} 
+          onRemove={removeFromQueue} 
+          onClear={clearQueue} 
+        />
+        <ChatInputBox
+          onSend={handleSend}
+          onStop={handleStop}
+          isStreaming={isStreaming}
+          connected={connected}
+          mode={mode}
+          setMode={setMode}
+          model={model}
+          setModel={setModel}
+          reasoning={reasoning}
+          setReasoning={setReasoning}
+          showStatusPanel={showStatusPanel}
+          setShowStatusPanel={setShowStatusPanel}
+          usageUsedTokens={usageUsedTokens}
+        />
       </div>
-      {showStatusPanel && <StatusPanel status={status} onUndoFile={handleUndoFile} />}
-      <MessageQueue 
-        queue={messageQueue} 
-        onRemove={removeFromQueue} 
-        onClear={clearQueue} 
-      />
-      <ChatInputBox
-        onSend={handleSend}
-        onStop={handleStop}
-        isStreaming={isStreaming}
-        connected={connected}
-        mode={mode}
-        setMode={setMode}
-        model={model}
-        setModel={setModel}
-        reasoning={reasoning}
-        setReasoning={setReasoning}
-        showStatusPanel={showStatusPanel}
-        setShowStatusPanel={setShowStatusPanel}
-        usageUsedTokens={usageUsedTokens}
-      />
       {permission && (
         <PermissionDialog
           permission={permission}
