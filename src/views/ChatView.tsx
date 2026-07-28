@@ -13,6 +13,7 @@ import MessageAnchorRail from '../components/MessageAnchorRail';
 import MessageQueue from '../components/MessageQueue';
 import type { QueuedMessage } from '../components/MessageQueue';
 import FileExplorer from '../components/FileExplorer';
+import GeneratingResponseIndicator from '../components/GeneratingResponseIndicator';
 import { useWebSocket } from '../hooks/useWebSocket';
 import {
   createStreamingBlockState,
@@ -26,6 +27,7 @@ import {
 } from '../utils/streamWatchdog.js';
 import { findToolResultForBlock, isFileModifyToolName } from '../utils/toolRendering.js';
 import { normalizeToolInput } from '../utils/toolInputNormalization.js';
+import { estimateMessagesUsedTokens } from '../utils/contextUsage.js';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
@@ -67,6 +69,10 @@ export default function ChatView() {
   const [showStatusPanel, setShowStatusPanel] = useState(() => {
     const saved = localStorage.getItem('showStatusPanel');
     return saved !== null ? saved === 'true' : true;
+  });
+  const [showToolAnchors, setShowToolAnchors] = useState(() => {
+    const saved = localStorage.getItem('showToolAnchors');
+    return saved === 'true';
   });
 
   const streamingMsgRef = useRef<string | null>(null);
@@ -275,6 +281,7 @@ export default function ChatView() {
         send({ type: 'load_session', sessionId: urlSessionId });
       }
       setMessages([]);
+      setUsageUsedTokens(undefined);
       resetStreamingBlockState(streamingBlocksRef.current);
       streamingMsgRef.current = null;
     }
@@ -430,6 +437,7 @@ export default function ChatView() {
         streamingMsgRef.current = null;
         setIsStreaming(false);
         setMessages(msg.messages);
+        setUsageUsedTokens(estimateMessagesUsedTokens(msg.messages));
         setCurrentSession(prev => prev?.id === msg.sessionId
           ? prev
           : sessions.find(session => session.id === msg.sessionId) || {
@@ -494,6 +502,7 @@ export default function ChatView() {
 
       case 'rewind_complete': {
         setMessages(msg.messages);
+        setUsageUsedTokens(estimateMessagesUsedTokens(msg.messages));
         break;
       }
 
@@ -691,10 +700,12 @@ export default function ChatView() {
               <MessageAnchorRail 
                 messages={messages}
                 onAnchorClick={handleAnchorClick}
+                showToolAnchors={showToolAnchors}
               />
             </div>
           )}
         </div>
+        <GeneratingResponseIndicator isStreaming={isStreaming} />
         {showStatusPanel && <StatusPanel status={status} onUndoFile={handleUndoFile} />}
         <MessageQueue 
           queue={messageQueue} 
@@ -714,6 +725,8 @@ export default function ChatView() {
           setReasoning={setReasoning}
           showStatusPanel={showStatusPanel}
           setShowStatusPanel={setShowStatusPanel}
+          showToolAnchors={showToolAnchors}
+          setShowToolAnchors={setShowToolAnchors}
           usageUsedTokens={usageUsedTokens}
         />
       </div>

@@ -41,6 +41,11 @@ function getFileName(path: string): string {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).pop() || path;
 }
 
+function countLines(text: string): number {
+  if (!text) return 0;
+  return text.split(/\r?\n/).length;
+}
+
 function formatParamValue(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === null) return 'null';
@@ -81,6 +86,8 @@ export default function GenericToolBlock({ block, result }: Props) {
   const otherParams = Object.entries(block.input).filter(([key]) => !OMIT_SUMMARY_FIELDS.has(key));
   const hasBody = otherParams.length > 0 || Boolean(output);
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
+  const writeContent = isWriteTool && typeof normalizedInput.content === 'string' ? normalizedInput.content : '';
+  const writeLineCount = countLines(writeContent);
 
   return (
     <div className="tool-block generic-block">
@@ -88,6 +95,12 @@ export default function GenericToolBlock({ block, result }: Props) {
         <span className="tool-icon">{isWriteTool ? <Pencil size={14} /> : <Wrench size={14} />}</span>
         <span className="tool-label">{displayName}</span>
         {filePath && <span className="file-link">{getFileName(filePath)}</span>}
+        {isWriteTool && writeLineCount > 0 && (
+          <span className="diff-stats">
+            <span className="stat-add">+{writeLineCount}</span>
+            <span className="stat-del">-0</span>
+          </span>
+        )}
         <span className={`status-dot ${statusClass}`} />
         {hasBody && <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>}
       </div>

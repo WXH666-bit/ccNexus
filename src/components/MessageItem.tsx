@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, RotateCcw } from 'lucide-react';
 import type { ChatMessage, ContentBlock, SubAgentInfo, ToolResultBlock, ToolUseBlock } from '../types';
 import EditToolBlock from './toolBlocks/EditToolBlock';
@@ -63,6 +63,7 @@ function ToolCard({
   isStreaming: boolean;
 }) {
   if (!shouldRenderToolUse(block.name, isStreaming)) return null;
+  if (isStreaming && (!block.input || Object.keys(block.input).length === 0)) return null;
 
   if (isToolName(block.name, EDIT_TOOL_NAMES)) return <EditToolBlock block={block} result={result} />;
   if (isToolName(block.name, BASH_TOOL_NAMES)) return <BashToolBlock block={block} result={result} />;
@@ -164,7 +165,7 @@ export default function MessageItem({
     );
   }
 
-  const groupedBlocks = groupBlocks(message.content);
+  const groupedBlocks = useMemo(() => groupBlocks(message.content), [message.content]);
   const isMessageStreaming = Boolean(message.isStreaming && isLast);
 
   const toggleThinking = useCallback((blockIndex: number) => {

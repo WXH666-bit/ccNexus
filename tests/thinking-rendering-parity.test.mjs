@@ -37,6 +37,8 @@ test('thinking content renders markdown inside the ccgui left-rail content area'
 test('latest thinking block auto-expands while streaming and preserves manual toggles', () => {
   const messageItem = read('src/components/MessageItem.tsx');
 
+  assert.match(messageItem, /useMemo/);
+  assert.match(messageItem, /useMemo\(\(\) => groupBlocks\(message\.content\), \[message\.content\]\)/);
   assert.match(messageItem, /expandedThinking/);
   assert.match(messageItem, /manuallyExpandedThinking/);
   assert.match(messageItem, /lastAutoExpandedIndexRef/);

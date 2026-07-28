@@ -518,6 +518,7 @@ html, body, #root {
 .message-list {
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 24px;
   scroll-behavior: smooth;
 }
@@ -804,6 +805,73 @@ html, body, #root {
   border-top: 1px solid var(--border-color);
 }
 
+.bash-block {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 8px 0 12px;
+  overflow: visible;
+}
+
+.bash-block .tool-block-header {
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.bash-block .tool-block-header:hover {
+  background: var(--bg-hover);
+}
+
+.bash-block .tool-icon {
+  color: var(--text-muted);
+}
+
+.bash-block .tool-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.tool-summary {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bash-block .status-dot {
+  margin-left: auto;
+}
+
+.bash-block .tool-block-body {
+  margin-left: 18px;
+  padding: 10px 0 0 16px;
+  border-top: 0;
+  border-left: 1px solid var(--border-color);
+}
+
+.bash-block .command-text {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.bash-block .command-output {
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-top: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
 .command-text {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -890,6 +958,11 @@ html, body, #root {
   color: var(--text-secondary);
 }
 .tool-group-header:hover { background: var(--bg-hover); }
+.tool-group-header .expand-icon { margin-left: 0; }
+.tool-group-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
 .tool-group-count {
   background: var(--bg-active);
   padding: 1px 6px;
@@ -1092,8 +1165,33 @@ html, body, #root {
 .diff-context { color: var(--text-muted); display: block; }
 
 /* ─── Status Panel ──────────────────────────────────────────── */
-.status-panel {
+.generating-response-indicator {
   display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  margin: 0 20px 8px 20px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.generating-response-spinner {
+  color: var(--text-muted);
+  animation: spin 1s linear infinite;
+}
+
+.generating-response-text {
+  color: var(--text-secondary);
+}
+
+.generating-response-time {
+  color: var(--text-muted);
+}
+
+.status-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
   gap: 0;
   padding: 5px 8px;
@@ -1109,8 +1207,9 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1 0 auto;
-  gap: 4px;
+  min-width: 0;
+  min-height: 32px;
+  gap: 6px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
@@ -1124,6 +1223,24 @@ html, body, #root {
 .status-item:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+.status-item svg {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.status-item-label {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-item-count {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .status-popup {
@@ -1361,34 +1478,6 @@ html, body, #root {
   box-shadow: 0 0 0 1px var(--accent-blue);
 }
 
-.resize-handle {
-  position: absolute;
-  z-index: 10;
-  user-select: none;
-}
-
-.resize-handle--n {
-  top: -20px;
-  left: 50%;
-  width: 112px;
-  height: 14px;
-  transform: translateX(-50%);
-  cursor: ns-resize;
-}
-
-.resize-handle--n::before {
-  content: '';
-  position: absolute;
-  top: 7px;
-  left: 50%;
-  width: 60px;
-  height: 4px;
-  transform: translateX(-50%);
-  border-radius: 999px;
-  background: var(--text-muted);
-  opacity: 0.55;
-}
-
 .chat-input-box .context-bar {
   display: flex;
   flex-wrap: nowrap;
@@ -1457,6 +1546,7 @@ html, body, #root {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin: 0;
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1;
@@ -1466,6 +1556,9 @@ html, body, #root {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
 }
 
 .token-indicator-ring {
@@ -2376,6 +2469,7 @@ html, body, #root {
 }
 .chat-content-with-rail .message-list {
   flex: 1;
+  min-width: 0;
 }
 .anchor-rail {
   position: absolute;
@@ -2404,6 +2498,7 @@ html, body, #root {
 .anchor-dot {
   width: 16px;
   height: 16px;
+  border: 1px solid transparent;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -2415,7 +2510,8 @@ html, body, #root {
 }
 .anchor-dot:hover,
 .anchor-dot.hovered {
-  transform: scale(1.3);
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.45);
 }
 .anchor-user_message { background: var(--user-bubble); color: white; }
 .anchor-assistant_text { background: var(--accent-blue); color: white; }

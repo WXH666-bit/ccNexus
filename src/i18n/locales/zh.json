@@ -196,6 +196,7 @@
     "processes": "进程管理",
     "streaming": "流式传输",
     "thinking": "思考",
+    "showToolAnchors": "显示工具节点",
     "noAgent": "无智能体",
     "noProcesses": "暂无运行中的进程",
     "kill": "结束"

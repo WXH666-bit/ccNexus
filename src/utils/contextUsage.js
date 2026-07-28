@@ -69,6 +69,32 @@ export function extractUsedTokens(usage, provider = 'claude') {
     + finiteNumber(usage.cache_read_input_tokens);
 }
 
+function blockTextForEstimate(block) {
+  if (!block || typeof block !== 'object') return '';
+  if (block.type === 'text') return block.text || '';
+  if (block.type === 'thinking') return block.thinking || block.text || '';
+  if (block.type === 'tool_use') return `${block.name || ''} ${JSON.stringify(block.input || {})}`;
+  if (block.type === 'tool_result') {
+    return typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '');
+  }
+  if (block.type === 'task_notification') return `${block.summary || ''} ${block.detail || ''}`;
+  if (block.type === 'compact_notification') return JSON.stringify(block.items || []);
+  if (block.type === 'compact_summary') return `${block.title || ''} ${block.content || ''}`;
+  if (block.type === 'attachment') return block.fileName || '';
+  if (block.type === 'image') return block.alt || '';
+  return '';
+}
+
+export function estimateMessagesUsedTokens(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return 0;
+  const chars = messages.reduce((messageTotal, message) => {
+    const content = Array.isArray(message?.content) ? message.content : [];
+    const blockChars = content.reduce((blockTotal, block) => blockTotal + blockTextForEstimate(block).length, 0);
+    return messageTotal + blockChars + 12;
+  }, 0);
+  return chars > 0 ? Math.ceil(chars / 4) : 0;
+}
+
 function isCompleteUsage(usage) {
   if (!usage || typeof usage !== 'object') return false;
   return [

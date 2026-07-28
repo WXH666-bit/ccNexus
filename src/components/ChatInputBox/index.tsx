@@ -28,6 +28,8 @@ interface ChatInputBoxProps {
   setReasoning: (reasoning: string) => void;
   showStatusPanel: boolean;
   setShowStatusPanel: (visible: boolean) => void;
+  showToolAnchors: boolean;
+  setShowToolAnchors: (visible: boolean) => void;
   usageUsedTokens?: number;
 }
 
@@ -104,6 +106,8 @@ export default function ChatInputBox({
   setReasoning,
   showStatusPanel,
   setShowStatusPanel,
+  showToolAnchors,
+  setShowToolAnchors,
   usageUsedTokens,
 }: ChatInputBoxProps) {
   void TRIGGER_CONFIGS;
@@ -251,8 +255,6 @@ export default function ChatInputBox({
         }
       }}
     >
-      <div className="resize-handle resize-handle--n" />
-
       <ContextBar
         attachments={attachments}
         percentage={usagePercentage}
@@ -297,6 +299,8 @@ export default function ChatInputBox({
         setAlwaysThinking={setAlwaysThinking}
         longContextEnabled={longContextEnabled}
         setLongContextEnabled={setLongContextEnabled}
+        showToolAnchors={showToolAnchors}
+        setShowToolAnchors={setShowToolAnchors}
         onSubmit={submit}
         onStop={onStop}
       />

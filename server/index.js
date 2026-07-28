@@ -165,6 +165,7 @@ function forgetSessionState(sessionId) {
   sessionMessages.delete(sessionId);
   fileEditHistory.delete(sessionId);
   activeQueries.delete(sessionId);
+  activeQueryStartTimes.delete(sessionId);
 }
 
 async function syncPersistedSessionsWithClaude() {
@@ -207,6 +208,32 @@ function createPermissionHandler(ws) {
 
 // ─── Active queries ───────────────────────────────────────────────
 const activeQueries = new Map(); // sessionId → Query
+const activeQueryStartTimes = new Map(); // sessionId → timestamp
+
+function queryProcess(query) {
+  if (!query || typeof query !== 'object') return null;
+  for (const key of ['process', 'childProcess', 'subprocess']) {
+    const candidate = query[key];
+    if (candidate && typeof candidate.pid === 'number') return candidate;
+  }
+  return null;
+}
+
+function registerActiveQuery(sessionId, query) {
+  if (!sessionId || !query) return;
+  activeQueries.set(sessionId, query);
+  if (!activeQueryStartTimes.has(sessionId)) {
+    activeQueryStartTimes.set(sessionId, Date.now());
+  }
+}
+
+function unregisterActiveQuery(sessionId, query) {
+  if (!sessionId) return;
+  if (!query || activeQueries.get(sessionId) === query) {
+    activeQueries.delete(sessionId);
+    activeQueryStartTimes.delete(sessionId);
+  }
+}
 
 // ─── Message history per session (for Rewind) ────────────────────
 const sessionMessages = new Map(); // sessionId → ChatMessage[]
@@ -656,36 +683,60 @@ app.get('/api/agents', async (_req, res) => {
 // 获取进程列表
 app.get('/api/processes', (_req, res) => {
   const processes = [];
+  const snapshotAt = Date.now();
   
-  for (const [sessionId, session] of sessions.entries()) {
-    if (session.process) {
+  for (const [sessionId, query] of activeQueries.entries()) {
+    const processRef = queryProcess(query);
+    if (processRef) {
+      const startTime = activeQueryStartTimes.get(sessionId) || snapshotAt;
       processes.push({
-        pid: session.process.pid,
+        id: `channel-${sessionId}-${processRef.pid}`,
+        kind: 'CHANNEL',
+        provider: 'claude',
+        pid: processRef.pid,
+        alive: !processRef.killed,
         sessionId: sessionId,
-        startTime: session.startTime,
-        uptime: Date.now() - session.startTime,
+        startTime,
+        startedAt: startTime,
+        uptime: snapshotAt - startTime,
+        uptimeMs: snapshotAt - startTime,
+        activeRequestCount: 1,
+        orphan: false,
       });
     }
   }
   
-  res.json({ processes });
+  res.json({
+    snapshotAt,
+    totals: {
+      daemon: 0,
+      channel: processes.length,
+      orphan: 0,
+      all: processes.length,
+    },
+    processes,
+  });
 });
 
 // 结束进程
 app.post('/api/processes/:pid/kill', (req, res) => {
   const pid = parseInt(req.params.pid);
   
-  for (const [sessionId, session] of sessions.entries()) {
-    if (session.process && session.process.pid === pid) {
+  for (const [sessionId, query] of activeQueries.entries()) {
+    const processRef = queryProcess(query);
+    if (processRef && processRef.pid === pid) {
       try {
-        session.process.kill('SIGTERM');
+        try { query.interrupt?.(); } catch { /* ignore */ }
+        try { query.close?.(); } catch { /* ignore */ }
+        processRef.kill('SIGTERM');
         setTimeout(() => {
-          if (!session.process.killed) {
-            session.process.kill('SIGKILL');
+          if (!processRef.killed) {
+            processRef.kill('SIGKILL');
           }
         }, 5000);
+        unregisterActiveQuery(sessionId, query);
         
-        res.json({ ok: true, pid });
+        res.json({ ok: true, success: true, pid });
         return;
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -1087,13 +1138,14 @@ wss.on('connection', (ws) => {
                   if (latestRequestBySession.has(querySessionId)
                     && latestRequestBySession.get(querySessionId) !== requestOrder) {
                     try { q.close(); } catch { /* ignore */ }
+                    unregisterActiveQuery(querySessionId, q);
                     break queryEvents;
                   }
                   latestRequestBySession.set(querySessionId, requestOrder);
                   if (requestOrder === latestChatRequest) {
                     currentSessionId = querySessionId;
                   }
-                  activeQueries.set(querySessionId, q);
+                  registerActiveQuery(querySessionId, q);
                   ownedQueries.set(querySessionId, q);
                   await addSession(querySessionId, prompt.slice(0, 60));
                   ws.send(JSON.stringify(sessionEvent(querySessionId)));
@@ -1216,9 +1268,7 @@ wss.on('connection', (ws) => {
             : { type: 'error', message: err.message }));
           ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
         } finally {
-          if (querySessionId && activeQueries.get(querySessionId) === q) {
-            activeQueries.delete(querySessionId);
-          }
+          if (querySessionId) unregisterActiveQuery(querySessionId, q);
           if (querySessionId && ownedQueries.get(querySessionId) === q) {
             ownedQueries.delete(querySessionId);
           }
@@ -1245,7 +1295,7 @@ wss.on('connection', (ws) => {
         if (q) {
           try { await q.interrupt(); } catch { /* ignore */ }
           try { q.close(); } catch { /* ignore */ }
-          if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
+          unregisterActiveQuery(sessionId, q);
           if (ownedQueries.get(sessionId) === q) ownedQueries.delete(sessionId);
         }
         ws.send(JSON.stringify({ type: 'status', status: 'idle' }));
@@ -1323,7 +1373,7 @@ wss.on('connection', (ws) => {
     // Clean up active queries
     for (const [sessionId, q] of ownedQueries) {
       try { q.close(); } catch { /* ignore */ }
-      if (activeQueries.get(sessionId) === q) activeQueries.delete(sessionId);
+      unregisterActiveQuery(sessionId, q);
     }
     ownedQueries.clear();
     latestRequestBySession.clear();

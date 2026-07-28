@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   normalizeToolName,
   isToolName,
@@ -15,6 +18,12 @@ import {
   isFileModifyToolName,
 } from '../src/utils/toolRendering.js';
 import { normalizeToolInput } from '../src/utils/toolInputNormalization.js';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function read(path) {
+  return readFileSync(resolve(root, path), 'utf8');
+}
 
 test('normalizes tool names the same way ccgui does', () => {
   assert.equal(normalizeToolName('mcp__filesystem__read_file'), 'read_file');
@@ -49,6 +58,29 @@ test('groups tool blocks using ccgui structural rules', () => {
       { type: 'edit_group', count: 2 },
     ],
   );
+});
+
+test('keeps consecutive Read calls grouped when their results are interleaved', () => {
+  const blocks = [
+    { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'a.ts' } },
+    { type: 'tool_result', tool_use_id: 'read-1', content: 'a', is_error: false },
+    { type: 'tool_use', id: 'read-2', name: 'Read', input: { file_path: 'b.ts' } },
+    { type: 'tool_result', tool_use_id: 'read-2', content: 'b', is_error: false },
+  ];
+
+  assert.deepEqual(
+    groupBlocks(blocks).map((group) => ({
+      type: group.type,
+      count: group.blocks?.length ?? 1,
+    })),
+    [{ type: 'read_group', count: 2 }],
+  );
+});
+
+test('tool group headers keep their label on the left like other tool cards', () => {
+  const styles = read('src/index.css');
+
+  assert.match(styles, /\.tool-group-header \.expand-icon\s*\{[^}]*margin-left:\s*0;/s);
 });
 
 test('finds the nearest later tool result by tool id', () => {

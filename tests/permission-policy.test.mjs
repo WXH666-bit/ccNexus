@@ -30,6 +30,21 @@ test('always_allow remembers the tool for later permission checks', async () => 
   assert.equal(asked, 1);
 });
 
+test('Write asks the user instead of being silently allowed or denied', async () => {
+  let asked = 0;
+  const policy = createPermissionPolicy({
+    askUser: async (toolName, input) => {
+      asked += 1;
+      assert.equal(toolName, 'Write');
+      assert.deepEqual(input, { file_path: 'anime.html' });
+      return { behavior: 'allow' };
+    },
+  });
+
+  assert.deepEqual(await policy.canUseTool('Write', { file_path: 'anime.html' }), { behavior: 'allow' });
+  assert.equal(asked, 1);
+});
+
 test('deny stays a one-time denial and does not poison future checks', async () => {
   const answers = [{ behavior: 'deny', message: 'No' }, { behavior: 'allow' }];
   const policy = createPermissionPolicy({

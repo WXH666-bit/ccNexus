@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   calculateContextPercentage,
   createUsageUpdate,
+  estimateMessagesUsedTokens,
   extractUsageFromSdkEvent,
   extractUsedTokens,
   getModelContextLimit,
@@ -83,4 +84,28 @@ test('createUsageUpdate emits the websocket payload consumed by the context bar'
     usedTokens: 200,
     maxTokens: 1_000_000,
   });
+});
+
+test('estimateMessagesUsedTokens derives a non-zero initial context load from restored history', () => {
+  const messages = [
+    {
+      role: 'user',
+      content: [{ type: 'text', text: '请总结这个项目的结构。' }],
+    },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Need inspect files and summarize.' },
+        { type: 'tool_use', name: 'Bash', input: { command: 'ls -la' } },
+        { type: 'tool_result', content: 'src\nserver\ntests' },
+        { type: 'text', text: '这个项目包含 React 前端和 Express 后端。' },
+      ],
+    },
+  ];
+
+  const estimate = estimateMessagesUsedTokens(messages);
+
+  assert.ok(estimate > 20);
+  assert.ok(estimate < 500);
+  assert.equal(estimateMessagesUsedTokens([]), 0);
 });

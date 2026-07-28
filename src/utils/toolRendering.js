@@ -137,6 +137,8 @@ export function groupBlocks(blocks) {
       } else if (block.type === 'tool_use') {
         agentFollowingBlocks.push(block);
         return;
+      } else if (block.type === 'tool_result') {
+        return;
       } else {
         flushAgentGroup();
       }
@@ -170,6 +172,8 @@ export function groupBlocks(blocks) {
       flushBashGroup();
       if (currentSearchGroup.length === 0) searchGroupStartIndex = idx;
       currentSearchGroup.push(block);
+    } else if (block.type === 'tool_result') {
+      return;
     } else {
       flushToolGroups();
       groupedBlocks.push({ type: 'single', block, originalIndex: idx });

@@ -19,6 +19,7 @@ export interface UsageUpdatePayload {
 export function getModelContextLimit(model: string | undefined | null): number;
 export function calculateContextPercentage(usedTokens: number | undefined, maxTokens: number | undefined): number;
 export function extractUsedTokens(usage: TokenUsagePayload | undefined | null, provider?: string): number;
+export function estimateMessagesUsedTokens(messages: unknown[]): number;
 export function extractUsageFromSdkEvent(event: unknown): TokenUsagePayload | null;
 export function createUsageUpdate(options: {
   usage: TokenUsagePayload;

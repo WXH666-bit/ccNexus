@@ -83,6 +83,25 @@ test('ChatInputBox token indicator uses dynamic usage props instead of a hard-co
   assert.match(contextBar, /maxTokens/);
 });
 
+test('ChatInputBox token indicator is vertically centered in the context bar', () => {
+  const styles = read('src/index.css');
+  const tokenRule = styles.match(/\.token-indicator\s*\{[^}]*\}/g)?.at(-1) || '';
+  const wrapRule = styles.match(/\.token-indicator-wrap\s*\{[^}]*\}/s)?.[0] || '';
+
+  assert.match(tokenRule, /align-items:\s*center;/);
+  assert.match(tokenRule, /margin:\s*0;/);
+  assert.match(wrapRule, /width:\s*14px;/);
+  assert.match(wrapRule, /height:\s*14px;/);
+});
+
+test('ChatInputBox does not render the top resize slider', () => {
+  const source = read('src/components/ChatInputBox/index.tsx');
+  const styles = read('src/index.css');
+
+  assert.equal(source.includes('resize-handle'), false);
+  assert.equal(styles.includes('.resize-handle'), false);
+});
+
 test('ModeSelect uses ccgui custom dropdown instead of a native select popup', () => {
   const buttonArea = read('src/components/ChatInputBox/ButtonArea.tsx');
   const modeSelect = read('src/components/ChatInputBox/ModeSelect.tsx');

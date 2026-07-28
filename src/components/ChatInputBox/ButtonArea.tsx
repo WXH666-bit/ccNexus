@@ -21,6 +21,8 @@ interface Props {
   setAlwaysThinking: (thinking: boolean) => void;
   longContextEnabled: boolean;
   setLongContextEnabled: (enabled: boolean) => void;
+  showToolAnchors: boolean;
+  setShowToolAnchors: (visible: boolean) => void;
   onSubmit: (queue?: boolean) => void;
   onStop: () => void;
 }
@@ -61,6 +63,8 @@ export default function ButtonArea({
   setAlwaysThinking,
   longContextEnabled,
   setLongContextEnabled,
+  showToolAnchors,
+  setShowToolAnchors,
   onSubmit,
   onStop,
 }: Props) {
@@ -74,6 +78,8 @@ export default function ButtonArea({
           onStreamingChange={setStreaming}
           alwaysThinking={alwaysThinking}
           onAlwaysThinkingChange={setAlwaysThinking}
+          showToolAnchors={showToolAnchors}
+          onShowToolAnchorsChange={setShowToolAnchors}
         />
         <ModeSelect value={mode} onChange={setMode} />
         <ModelSelect

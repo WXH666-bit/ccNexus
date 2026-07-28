@@ -16,22 +16,20 @@ export default function StatusPanel({ status, onUndoFile }: Props) {
     <div className="status-panel">
       <div className="status-item" onClick={() => setOpenPanel(openPanel === 'tasks' ? null : 'tasks')}>
         <ListChecks size={14} />
-        <span>
-          {t('status.tasks')}{' '}
+        <span className="status-item-label">{t('status.tasks')}</span>
+        <span className="status-item-count">
           {status.tasks ? `${status.tasks.done}/${status.tasks.total}` : '0/0'}
         </span>
       </div>
       <div className="status-item" onClick={() => setOpenPanel(openPanel === 'subagents' ? null : 'subagents')}>
         <Bot size={14} />
-        <span>
-          {t('status.subagents')}{' '}
-          {status.subagents ? status.subagents.length : 0}
-        </span>
+        <span className="status-item-label">{t('status.subagents')}</span>
+        <span className="status-item-count">{status.subagents ? status.subagents.length : 0}</span>
       </div>
       <div className="status-item" onClick={() => setOpenPanel(openPanel === 'edits' ? null : 'edits')}>
         <Pencil size={14} />
-        <span>
-          {t('status.edits')}{' '}
+        <span className="status-item-label">{t('status.edits')}</span>
+        <span className="status-item-count">
           <span className="stat-add">+{status.edits?.additions || 0}</span>{' '}
           <span className="stat-del">-{status.edits?.deletions || 0}</span>
         </span>

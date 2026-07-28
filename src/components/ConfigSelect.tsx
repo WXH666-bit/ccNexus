@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings2, ChevronRight, User, Server, Cpu, Radio, Brain, X } from 'lucide-react';
+import { Settings2, ChevronRight, User, Server, Cpu, Radio, Brain, Wrench, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 interface Agent {
@@ -28,6 +28,8 @@ interface Props {
   onStreamingChange: (streaming: boolean) => void;
   alwaysThinking: boolean;
   onAlwaysThinkingChange: (thinking: boolean) => void;
+  showToolAnchors: boolean;
+  onShowToolAnchorsChange: (visible: boolean) => void;
 }
 
 type MenuState = 'closed' | 'main' | 'agents' | 'providers' | 'processes';
@@ -39,6 +41,8 @@ export default function ConfigSelect({
   onStreamingChange,
   alwaysThinking,
   onAlwaysThinkingChange,
+  showToolAnchors,
+  onShowToolAnchorsChange,
 }: Props) {
   const { t } = useTranslation();
   const [menuState, setMenuState] = useState<MenuState>('closed');
@@ -112,6 +116,11 @@ export default function ConfigSelect({
     setMenuState(menuState === 'closed' ? 'main' : 'closed');
   };
 
+  const handleToolAnchorsChange = (visible: boolean) => {
+    onShowToolAnchorsChange(visible);
+    localStorage.setItem('showToolAnchors', String(visible));
+  };
+
   return (
     <div className="config-select" ref={menuRef}>
       <button className="config-btn" onClick={toggleMenu} title={t('config.title')}>
@@ -164,6 +173,18 @@ export default function ConfigSelect({
                       type="checkbox"
                       checked={alwaysThinking}
                       onChange={e => onAlwaysThinkingChange(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+                <div className="config-menu-item toggle-item">
+                  <Wrench size={16} />
+                  <span>{t('config.showToolAnchors')}</span>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={showToolAnchors}
+                      onChange={e => handleToolAnchorsChange(e.target.checked)}
                     />
                     <span className="toggle-slider"></span>
                   </label>

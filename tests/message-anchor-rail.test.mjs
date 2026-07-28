@@ -29,3 +29,49 @@ test('message anchor tooltip uses a fixed non-interactive layer to avoid bottom 
   assert.match(styles, /\.anchor-tooltip\s*\{[^}]*pointer-events:\s*none;/s);
   assert.doesNotMatch(styles, /\.anchor-tooltip\s*\{[^}]*position:\s*absolute;/s);
 });
+
+test('message anchor hover does not resize the scrollable rail overflow area', () => {
+  const styles = read('src/index.css');
+  const dotRule = styles.match(/\.anchor-dot\s*\{[^}]*\}/s)?.[0] || '';
+  const hoverRule = styles.match(/\.anchor-dot:hover,\s*\.anchor-dot\.hovered\s*\{[^}]*\}/s)?.[0] || '';
+
+  assert.match(dotRule, /border:\s*1px solid transparent;/);
+  assert.match(hoverRule, /box-shadow:/);
+  assert.match(hoverRule, /border-color:/);
+  assert.doesNotMatch(hoverRule, /outline:/);
+  assert.doesNotMatch(hoverRule, /transform:/);
+  assert.doesNotMatch(hoverRule, /scale\(/);
+});
+
+test('chat message list hides page-level horizontal overflow above the status panel', () => {
+  const styles = read('src/index.css');
+
+  assert.match(styles, /\.message-list\s*\{[^}]*overflow-x:\s*hidden;/s);
+  assert.match(styles, /\.chat-content-with-rail \.message-list\s*\{[^}]*min-width:\s*0;/s);
+});
+
+test('message anchor rail defaults to conversation history nodes and hides tool detail nodes', () => {
+  const source = read('src/components/MessageAnchorRail.tsx');
+
+  assert.match(source, /showToolAnchors\?: boolean/);
+  assert.match(source, /showToolAnchors = false/);
+  assert.match(source, /getAnchors\(messages, showToolAnchors\)/);
+  assert.match(source, /if \(!showToolAnchors\) return;/);
+  assert.match(source, /block\.type === 'tool_use'/);
+  assert.match(source, /block\.type === 'thinking'/);
+});
+
+test('chat view stores the tool-node visibility preference and passes it to the rail and config menu', () => {
+  const chatView = read('src/views/ChatView.tsx');
+  const inputBox = read('src/components/ChatInputBox/index.tsx');
+  const buttonArea = read('src/components/ChatInputBox/ButtonArea.tsx');
+  const configSelect = read('src/components/ConfigSelect.tsx');
+
+  assert.match(chatView, /localStorage\.getItem\('showToolAnchors'\)/);
+  assert.match(chatView, /showToolAnchors=\{showToolAnchors\}/);
+  assert.match(chatView, /setShowToolAnchors=\{setShowToolAnchors\}/);
+  assert.match(inputBox, /showToolAnchors: boolean/);
+  assert.match(buttonArea, /showToolAnchors: boolean/);
+  assert.match(configSelect, /showToolAnchors: boolean/);
+  assert.match(configSelect, /config\.showToolAnchors/);
+});

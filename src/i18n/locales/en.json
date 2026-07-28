@@ -196,6 +196,7 @@
     "processes": "Process Management",
     "streaming": "Streaming",
     "thinking": "Thinking",
+    "showToolAnchors": "Show tool nodes",
     "noAgent": "No Agent",
     "noProcesses": "No running processes",
     "kill": "Kill"

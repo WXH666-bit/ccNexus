@@ -6,6 +6,7 @@ import type { ChatMessage, MessageAnchor } from '../types';
 interface Props {
   messages: ChatMessage[];
   onAnchorClick: (messageId: string) => void;
+  showToolAnchors?: boolean;
 }
 
 interface TooltipState {
@@ -15,7 +16,7 @@ interface TooltipState {
   timestamp: number;
 }
 
-function getAnchors(messages: ChatMessage[]): MessageAnchor[] {
+function getAnchors(messages: ChatMessage[], showToolAnchors: boolean): MessageAnchor[] {
   const anchors: MessageAnchor[] = [];
   
   messages.forEach((msg, idx) => {
@@ -46,6 +47,7 @@ function getAnchors(messages: ChatMessage[]): MessageAnchor[] {
       
       // Add anchors for tool calls
       msg.content.forEach(block => {
+        if (!showToolAnchors) return;
         if (block.type === 'tool_use') {
           const toolBlock = block as { type: 'tool_use'; name: string; id: string };
           anchors.push({
@@ -66,6 +68,7 @@ function getAnchors(messages: ChatMessage[]): MessageAnchor[] {
         }
       });
     } else if (msg.role === 'system') {
+      if (!showToolAnchors) return;
       const text = msg.content.find(b => b.type === 'text');
       const label = text ? (text as { type: 'text'; text: string }).text.slice(0, 30) : '系统消息';
       anchors.push({
@@ -92,9 +95,9 @@ function getAnchorIcon(kind: MessageAnchor['kind']) {
   }
 }
 
-export default function MessageAnchorRail({ messages, onAnchorClick }: Props) {
+export default function MessageAnchorRail({ messages, onAnchorClick, showToolAnchors = false }: Props) {
   const [tooltipState, setTooltipState] = useState<TooltipState | null>(null);
-  const anchors = useMemo(() => getAnchors(messages), [messages]);
+  const anchors = useMemo(() => getAnchors(messages, showToolAnchors), [messages, showToolAnchors]);
 
   if (anchors.length === 0) return null;
 
