@@ -27,7 +27,7 @@
   --accent-orange: #ff9800;
   --accent-yellow: #ffc107;
 
-  --user-bubble: #2b6cb0;
+  --user-bubble: #1f5f9f;
   --user-bubble-text: #ffffff;
 
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
@@ -238,22 +238,53 @@ html, body, #root {
 
 /* User message */
 .user-row { justify-content: flex-end; }
+.user-message-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(64%, 720px);
+}
 .user-bubble {
   background: var(--user-bubble);
   color: var(--user-bubble-text);
-  padding: 10px 16px;
-  border-radius: var(--radius-md);
-  max-width: 70%;
+  padding: 12px 16px 14px;
+  border: 1px solid rgba(122, 184, 255, 0.24);
+  border-radius: 9px;
+  max-width: 100%;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  box-shadow: 0 4px 14px rgba(5, 22, 43, 0.18);
 }
 .message-text { line-height: 1.5; word-break: break-word; }
+.user-message-text {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+}
+.user-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 1px;
+}
 .message-time {
   font-size: 11px;
-  opacity: 0.6;
-  align-self: flex-end;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+.copy-btn.user-copy-btn {
+  width: 22px;
+  height: 22px;
+  color: var(--text-secondary);
+  background: rgba(43, 45, 48, 0.76);
+  border: 1px solid rgba(78, 82, 84, 0.9);
+  opacity: 0.86;
+}
+.copy-btn.user-copy-btn:hover,
+.copy-btn.user-copy-btn:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  opacity: 1;
 }
 
 /* Assistant message */
@@ -298,6 +329,7 @@ html, body, #root {
   transition: color 0.15s;
 }
 .copy-btn:hover { color: var(--text-primary); }
+.user-row:hover .user-copy-btn { opacity: 1; }
 
 /* Waiting indicator */
 .waiting-indicator {
@@ -505,6 +537,36 @@ html, body, #root {
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
+}
+
+.task-field {
+  margin: 0 0 10px;
+}
+.task-field:last-child {
+  margin-bottom: 0;
+}
+.task-field-label {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.task-field-content {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .task-desc {
@@ -2985,8 +3047,25 @@ body {
   border-color: var(--accent-purple);
 }
 
+.reasoning-select-trigger.disabled,
+.reasoning-select-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.reasoning-select-trigger.disabled:hover,
+.reasoning-select-trigger:disabled:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
 .reasoning-select-trigger svg {
   color: var(--accent-purple);
+}
+
+.reasoning-select-trigger.disabled svg,
+.reasoning-select-trigger:disabled svg {
+  color: var(--text-tertiary);
 }
 
 .reasoning-select-dropdown {
@@ -3192,9 +3271,11 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: var(--border-color);
+  background-color: #3a3f45;
+  border: 1px solid #59616b;
   transition: 0.3s;
   border-radius: 22px;
+  box-sizing: border-box;
 }
 
 .toggle-slider:before {
@@ -3202,19 +3283,26 @@ body {
   content: "";
   height: 16px;
   width: 16px;
-  left: 3px;
-  bottom: 3px;
+  left: 2px;
+  bottom: 2px;
   background-color: white;
   transition: 0.3s;
   border-radius: 50%;
 }
 
 .toggle-switch input:checked + .toggle-slider {
-  background-color: var(--accent-color);
+  background-color: #0e8df5;
+  border-color: #34a8ff;
+  box-shadow: 0 0 0 1px rgba(52, 168, 255, 0.18);
 }
 
 .toggle-switch input:checked + .toggle-slider:before {
   transform: translateX(18px);
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid rgba(52, 168, 255, 0.7);
+  outline-offset: 2px;
 }
 
 .agent-info {

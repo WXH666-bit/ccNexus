@@ -13,6 +13,7 @@ test('builds ccgui-style SDK options from client dialogue controls', () => {
       model: 'claude-sonnet-5',
       streaming: true,
       reasoning: 'xhigh',
+      alwaysThinking: true,
     },
   });
 
@@ -51,6 +52,22 @@ test('omits default model and disables partial messages when streaming is false'
   assert.equal(options.allowDangerouslySkipPermissions, undefined);
   assert.equal(options.effort, undefined);
   assert.equal(options.maxThinkingTokens, 10000);
+});
+
+test('does not send reasoning effort when the thinking toggle is off', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6[1m]',
+      reasoning: 'high',
+      alwaysThinking: false,
+    },
+  });
+
+  assert.equal(Object.hasOwn(options, 'effort'), false);
+  assert.equal(Object.hasOwn(options, 'maxThinkingTokens'), false);
 });
 
 test('strips ccgui long context marker before passing model to SDK', () => {

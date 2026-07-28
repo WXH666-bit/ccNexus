@@ -89,6 +89,7 @@ export default function ButtonArea({
           effortSupportedModels={EFFORT_SUPPORTED_CLAUDE_MODELS}
           xhighEffortModels={XHIGH_EFFORT_CLAUDE_MODELS}
           maxEffortModels={MAX_EFFORT_CLAUDE_MODELS}
+          disabled={!alwaysThinking}
         />
       </div>
 

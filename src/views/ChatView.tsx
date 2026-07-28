@@ -23,6 +23,8 @@ import {
   STREAM_STALL_CHECK_INTERVAL_MS,
   shouldRecoverStalledStream,
 } from '../utils/streamWatchdog.js';
+import { findToolResultForBlock, isFileModifyToolName } from '../utils/toolRendering.js';
+import { normalizeToolInput } from '../utils/toolInputNormalization.js';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
@@ -626,16 +628,19 @@ export default function ChatView() {
     let deletions = 0;
     const files = new Set<string>();
 
-    messages.forEach(m => {
+    messages.forEach((m, messageIndex) => {
       m.content.forEach(block => {
-        if (block.type === 'tool_use' && block.name === 'Edit') {
-          const input = block.input;
+        if (block.type === 'tool_use' && isFileModifyToolName(block.name)) {
+          const result = findToolResultForBlock(messages, messageIndex, block.id);
+          if (!result || result.is_error) return;
+
+          const input = normalizeToolInput(block.name, block.input) ?? block.input;
           const filePath = input.file_path as string || input.path as string || '';
           if (filePath) files.add(filePath);
           const oldStr = input.old_string as string || '';
           const newStr = input.new_string as string || '';
-          deletions += oldStr.split('\n').length;
-          additions += newStr.split('\n').length;
+          if (oldStr) deletions += oldStr.split('\n').length;
+          if (newStr) additions += newStr.split('\n').length;
         }
       });
     });

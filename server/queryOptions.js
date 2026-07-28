@@ -30,6 +30,7 @@ export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = 
     env: { ...env },
     settingSources: ['user', 'project', 'local'],
     ...buildThinkingOptions(clientOptions.reasoning, {
+      thinkingEnabled: clientOptions.alwaysThinking === true,
       alwaysThinkingEnabled: clientOptions.alwaysThinking === true,
       maxThinkingTokens: clientOptions.maxThinkingTokens,
       disableThinking: clientOptions.disableThinking,

@@ -49,8 +49,17 @@ test('ChatInputBox supports ccgui trigger completions and toolbar controls', () 
   assert.match(buttonArea, /ModeSelect/);
   assert.match(buttonArea, /ModelSelect/);
   assert.match(buttonArea, /ReasoningSelect/);
+  assert.match(buttonArea, /disabled=\{!alwaysThinking\}/);
   assert.match(buttonArea, /longContextEnabled/);
   assert.equal(buttonArea.includes('<ProviderSelect'), false);
+});
+
+test('ChatInputBox config switches show distinct enabled and disabled states', () => {
+  const styles = read('src/index.css');
+
+  assert.match(styles, /\.toggle-slider\s*\{[^}]*background-color:\s*#3a3f45;/s);
+  assert.match(styles, /\.toggle-switch input:checked \+ \.toggle-slider\s*\{[^}]*background-color:\s*#0e8df5;/s);
+  assert.match(styles, /\.reasoning-select-trigger\.disabled/s);
 });
 
 test('ChatInputBox does not steal focus from selector controls', () => {

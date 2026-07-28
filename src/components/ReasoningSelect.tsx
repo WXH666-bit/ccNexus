@@ -16,6 +16,7 @@ interface ReasoningSelectProps {
   effortSupportedModels: Set<string>;
   xhighEffortModels: Set<string>;
   maxEffortModels: Set<string>;
+  disabled?: boolean;
 }
 
 export default function ReasoningSelect({
@@ -25,6 +26,7 @@ export default function ReasoningSelect({
   effortSupportedModels,
   xhighEffortModels,
   maxEffortModels,
+  disabled = false,
 }: ReasoningSelectProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -74,8 +76,11 @@ export default function ReasoningSelect({
   return (
     <div className="reasoning-select" ref={dropdownRef}>
       <button
-        className="reasoning-select-trigger"
-        onClick={() => setIsOpen(!isOpen)}
+        className={`reasoning-select-trigger ${disabled ? 'disabled' : ''}`}
+        onClick={() => {
+          if (!disabled) setIsOpen(!isOpen);
+        }}
+        disabled={disabled}
         title={t('chat.reasoning.title')}
       >
         <Brain size={14} />

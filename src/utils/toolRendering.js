@@ -1,5 +1,16 @@
 export const READ_TOOL_NAMES = new Set(['read', 'read_file', 'read_multiple_files']);
 export const EDIT_TOOL_NAMES = new Set(['edit', 'multiedit', 'edit_file', 'replace_string', 'write_to_file']);
+export const FILE_MODIFY_TOOL_NAMES = new Set([
+  'write',
+  'write_file',
+  'create_file',
+  'edit',
+  'multiedit',
+  'edit_file',
+  'replace_string',
+  'write_to_file',
+  'notebookedit',
+]);
 export const BASH_TOOL_NAMES = new Set(['bash', 'run_terminal_cmd', 'exec_command', 'execute_command', 'shell_command']);
 export const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'search', 'find', 'search_files']);
 export const AGENT_TOOL_NAMES = new Set(['task', 'agent', 'spawn_agent']);
@@ -27,6 +38,10 @@ export function isTransientInternalToolName(toolName) {
   if (!toolName) return false;
   const lower = String(toolName).toLowerCase();
   return TRANSIENT_INTERNAL_TOOL_NAMES.has(lower) || TRANSIENT_INTERNAL_TOOL_NAMES.has(normalizeToolName(lower));
+}
+
+export function isFileModifyToolName(toolName) {
+  return isToolName(toolName, FILE_MODIFY_TOOL_NAMES);
 }
 
 export function shouldRenderToolUse(toolName, isStreaming) {

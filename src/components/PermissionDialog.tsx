@@ -1,4 +1,4 @@
-import { Shield, Check, X, Clock } from 'lucide-react';
+import { Check, Clock, Shield, X } from 'lucide-react';
 import type { PermissionRequest } from '../types';
 
 interface Props {

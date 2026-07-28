@@ -12,6 +12,8 @@ function resolveConfiguredMaxThinkingTokens(configuredMaxThinkingTokens) {
 }
 
 export function buildThinkingOptions(requestedEffort, options = {}) {
+  if (options.thinkingEnabled !== true) return {};
+
   const reasoningEffort = normalizeReasoningEffort(requestedEffort);
   if (reasoningEffort) return { effort: reasoningEffort };
 

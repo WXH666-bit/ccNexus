@@ -8,10 +8,13 @@ import {
   BASH_TOOL_NAMES,
   SEARCH_TOOL_NAMES,
   AGENT_TOOL_NAMES,
+  FILE_MODIFY_TOOL_NAMES,
   groupBlocks,
   findToolResultForBlock,
   shouldRenderToolUse,
+  isFileModifyToolName,
 } from '../src/utils/toolRendering.js';
+import { normalizeToolInput } from '../src/utils/toolInputNormalization.js';
 
 test('normalizes tool names the same way ccgui does', () => {
   assert.equal(normalizeToolName('mcp__filesystem__read_file'), 'read_file');
@@ -21,6 +24,8 @@ test('normalizes tool names the same way ccgui does', () => {
   assert.equal(isToolName('shell_command', BASH_TOOL_NAMES), true);
   assert.equal(isToolName('Glob', SEARCH_TOOL_NAMES), true);
   assert.equal(isToolName('spawn_agent', AGENT_TOOL_NAMES), true);
+  assert.equal(isToolName('Write', FILE_MODIFY_TOOL_NAMES), true);
+  assert.equal(isFileModifyToolName('create_file'), true);
 });
 
 test('groups tool blocks using ccgui structural rules', () => {
@@ -78,4 +83,19 @@ test('hides ccgui transient and task-management tools after streaming', () => {
   assert.equal(shouldRenderToolUse('multi_tool_use.parallel', false), false);
   assert.equal(shouldRenderToolUse('multi_tool_use.parallel', true), true);
   assert.equal(shouldRenderToolUse('Bash', false), true);
+});
+
+test('normalizes Write input content like ccgui file modification handling', () => {
+  assert.deepEqual(
+    normalizeToolInput('Write', {
+      path: 'permission-check.html',
+      content: '<h1>ok</h1>\n<p>done</p>',
+    }),
+    {
+      path: 'permission-check.html',
+      content: '<h1>ok</h1>\n<p>done</p>',
+      file_path: 'permission-check.html',
+      new_string: '<h1>ok</h1>\n<p>done</p>',
+    },
+  );
 });

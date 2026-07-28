@@ -135,12 +135,16 @@ export default function MessageItem({
 
     return (
       <div className={`message-row user-row ${isCurrentSearchMatch ? 'search-match' : ''}`} id={`msg-${message.id}`}>
-        <div className="message-bubble user-bubble">
-          <span className="message-text" dangerouslySetInnerHTML={{ __html: highlightedText }} />
-          <span className="message-time">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          <button className="copy-btn" onClick={() => { navigator.clipboard.writeText(displayText); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-          </button>
+        <div className="user-message-stack">
+          <div className="user-message-actions">
+            <span className="message-time">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <button className="copy-btn user-copy-btn" onClick={() => { navigator.clipboard.writeText(displayText); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+          </div>
+          <div className="message-bubble user-bubble">
+            <span className="message-text user-message-text" dangerouslySetInnerHTML={{ __html: highlightedText }} />
+          </div>
         </div>
         {onRewind && (
           <button className="rewind-btn" onClick={() => onRewind(message.id)} title="Rewind to this message">
