@@ -88,6 +88,32 @@ test('reads Claude JSONL history as chat messages when ccnexus cache is empty', 
   });
 });
 
+test('history conversion keeps assistant usage for accurate restored context percentage', () => {
+  const message = convertClaudeHistoryEntry({
+    type: 'assistant',
+    uuid: 'assistant-with-usage',
+    timestamp: '2026-07-27T01:00:07.000Z',
+    message: {
+      role: 'assistant',
+      model: 'deepseek-v4-pro',
+      usage: {
+        input_tokens: 14_658,
+        output_tokens: 167,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+      content: [{ type: 'text', text: 'ok' }],
+    },
+  }, 'session-usage');
+
+  assert.deepEqual(message.usage, {
+    input_tokens: 14_658,
+    output_tokens: 167,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  });
+});
+
 test('history conversion mirrors ccgui content block normalization for thinking and command tags', () => {
   const assistant = convertClaudeHistoryEntry({
     type: 'assistant',

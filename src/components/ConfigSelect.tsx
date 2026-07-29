@@ -14,6 +14,14 @@ import {
   Square,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import {
+  getAgents,
+  getProcesses,
+  getProviders,
+  restartProcess,
+  stopProcess,
+  switchProvider,
+} from '../utils/desktopBridgeApi';
 
 interface Agent {
   id: string;
@@ -93,8 +101,7 @@ export default function ConfigSelect({
   // Load agents
   useEffect(() => {
     if (menuState === 'agents') {
-      fetch('/api/agents')
-        .then(r => r.json())
+      getAgents()
         .then(data => setAgents(data.agents || []))
         .catch(() => setAgents([]));
     }
@@ -103,8 +110,7 @@ export default function ConfigSelect({
   // Load providers
   useEffect(() => {
     if (menuState === 'providers') {
-      fetch('/api/providers')
-        .then(r => r.json())
+      getProviders()
         .then(data => setProviders(data.providers || []))
         .catch(() => setProviders([]));
     }
@@ -113,7 +119,7 @@ export default function ConfigSelect({
   const loadProcesses = async () => {
     setProcessesLoading(true);
     try {
-      const data = await fetch('/api/processes').then(r => r.json());
+      const data = await getProcesses() as { processes?: Process[]; totals?: ProcessTotals };
       setProcesses(data.processes || []);
       setProcessTotals(data.totals || { daemon: 0, channel: 0, orphan: 0, all: 0 });
     } catch {
@@ -133,11 +139,7 @@ export default function ConfigSelect({
 
   const handleKillProcess = async (proc: Process) => {
     try {
-      await fetch(`/api/processes/${proc.pid}/kill`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: proc.id }),
-      });
+      await stopProcess({ pid: proc.pid, id: proc.id });
       // Refresh process list
       await loadProcesses();
     } catch (err) {
@@ -147,11 +149,7 @@ export default function ConfigSelect({
 
   const handleRestartProcess = async (proc: Process) => {
     try {
-      await fetch(`/api/processes/${proc.pid}/restart`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: proc.id }),
-      });
+      await restartProcess({ pid: proc.pid, id: proc.id });
       await loadProcesses();
     } catch (err) {
       console.error('Failed to restart process:', err);
@@ -343,7 +341,7 @@ export default function ConfigSelect({
                     key={provider.id}
                     className="config-menu-item"
                     onClick={async () => {
-                      await fetch(`/api/providers/switch/${provider.id}`, { method: 'POST' });
+                      await switchProvider(provider.id);
                       setMenuState('closed');
                       window.location.reload();
                     }}

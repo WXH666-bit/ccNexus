@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, Check, Server } from 'lucide-react';
+import { getProviders, switchProvider } from '../utils/desktopBridgeApi';
 
 interface Provider {
   id: string;
@@ -28,8 +29,7 @@ export default function ProviderSelect({ currentProviderId, onProviderChange }: 
   const fetchProviders = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/providers');
-      const data = await res.json();
+      const data = await getProviders();
       setProviders(data.providers || []);
     } catch (err) {
       console.error('Failed to fetch providers:', err);
@@ -41,16 +41,9 @@ export default function ProviderSelect({ currentProviderId, onProviderChange }: 
 
   const handleSelect = async (providerId: string) => {
     try {
-      const res = await fetch('/api/providers/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId }),
-      });
-      
-      if (res.ok) {
-        onProviderChange?.(providerId);
-        setIsOpen(false);
-      }
+      await switchProvider(providerId);
+      onProviderChange?.(providerId);
+      setIsOpen(false);
     } catch (err) {
       console.error('Failed to switch provider:', err);
     }

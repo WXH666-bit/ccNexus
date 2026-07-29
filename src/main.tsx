@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import App from './App';
 import './i18n';
 import './index.css';
@@ -10,8 +10,10 @@ const savedFontSize = localStorage.getItem('fontSize') || '14';
 document.documentElement.setAttribute('data-theme', savedTheme);
 document.documentElement.style.setProperty('--base-font-size', `${savedFontSize}px`);
 
+const Router = window.ccNexusDesktop ? HashRouter : BrowserRouter;
+
 createRoot(document.getElementById('root')!).render(
-  <BrowserRouter>
+  <Router>
     <App />
-  </BrowserRouter>
+  </Router>
 );

@@ -15,7 +15,7 @@ test('ChatView mounts a collapsible PyCharm-style file explorer beside the chat 
   const styles = read('src/index.css');
 
   assert.match(source, /import FileExplorer from '\.\.\/components\/FileExplorer';/);
-  assert.match(source, /<FileExplorer \/>/);
+  assert.match(source, /<FileExplorer key=\{workspaceVersion\} \/>/);
   assert.match(source, /<div className="chat-pane">/);
   assert.match(styles, /\.chat-view\s*\{[^}]*flex-direction:\s*row;/s);
   assert.match(styles, /\.file-explorer\.collapsed\s*\{/s);

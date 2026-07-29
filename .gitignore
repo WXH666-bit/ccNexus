@@ -1,5 +1,8 @@
 node_modules
 dist
+release/
+release-verify/
+release-verify-*/
 .DS_Store
 *.swp
 .git/*

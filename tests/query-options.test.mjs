@@ -130,3 +130,19 @@ test('role-specific provider mapping beats the default fallback model', () => {
 
   assert.equal(options.model, 'deepseek-v4-flash');
 });
+
+test('Fable follows ccgui main model fallback instead of a private fable mapping', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      ANTHROPIC_MODEL: 'deepseek-v4-pro[1M]',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'wrong-fable-only',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-fable-5',
+    },
+  });
+
+  assert.equal(options.model, 'deepseek-v4-pro');
+});

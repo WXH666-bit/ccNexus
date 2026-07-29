@@ -30,7 +30,6 @@ test('resolveModelDisplay follows ccgui provider mapping before the fallback mod
     ANTHROPIC_MODEL: 'deepseek-v4-pro[1M]',
     ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro[1M]',
     ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro[1M]',
-    ANTHROPIC_DEFAULT_FABLE_MODEL: 'deepseek-v4-pro[1M]',
     ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
   };
 
@@ -42,6 +41,18 @@ test('resolveModelDisplay follows ccgui provider mapping before the fallback mod
   assert.equal(resolveModelDisplay('claude-fable-5', env).label, 'deepseek-v4-pro[1M]');
   assert.equal(resolveModelDisplay('claude-haiku-4-5', env).label, 'deepseek-v4-flash');
   assert.equal(resolveModelDisplay('claude-haiku-4-5', env).resolvedId, 'deepseek-v4-flash');
+});
+
+test('resolveModelDisplay maps Fable through ccgui main fallback instead of a private fable env key', () => {
+  const env = {
+    ANTHROPIC_MODEL: 'deepseek-v4-pro[1M]',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'wrong-fable-only',
+  };
+
+  const display = resolveModelDisplay('claude-fable-5', env);
+
+  assert.equal(display.label, 'deepseek-v4-pro[1M]');
+  assert.equal(display.resolvedId, 'deepseek-v4-pro[1M]');
 });
 
 test('resolveModelDisplay ignores *_MODEL_NAME aliases because ccgui shows the mapped model value', () => {

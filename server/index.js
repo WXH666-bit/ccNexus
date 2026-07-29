@@ -18,23 +18,11 @@ import { readClaudeSessionMessages } from './claudeHistory.js';
 import { createPermissionPolicy } from './permissionPolicy.js';
 import { buildClaudeQueryOptions } from './queryOptions.js';
 import { createUsageUpdate, extractUsageFromSdkEvent } from '../src/utils/contextUsage.js';
+import { createDesktopRuntime } from '../desktop/runtime/index.js';
+import { LocalConfigService } from '../desktop/runtime/localConfigService.js';
 
 const require = createRequire(import.meta.url);
 const { createTwoFilesPatch } = require('diff');
-
-// ─── Claude Agent SDK ──────────────────────────────────────────────
-let sdkQuery;
-try {
-  const sdk = require('@anthropic-ai/claude-agent-sdk');
-  sdkQuery = sdk.query;
-} catch (err) {
-  console.error(
-    '\n\x1b[31m[Claude Agent SDK] Failed to load.\x1b[0m\n' +
-    '  → Run: npm install\n' +
-    '  → Ensure claude CLI is installed: npm install -g @anthropic-ai/claude-code\n'
-  );
-  process.exit(1);
-}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // In dev mode, Vite runs on DEPLOY_RUN_PORT (5000) and proxies API to us.
@@ -43,12 +31,17 @@ const isDev = process.env.NODE_ENV !== 'production';
 const PORT = isDev
   ? parseInt(process.env.API_PORT || '3456', 10)
   : parseInt(process.env.DEPLOY_RUN_PORT || process.env.PORT || '3456', 10);
-const CWD = process.cwd();
+let workspaceRoot = process.cwd();
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 const HOME_DIR = process.env.HOME || os.homedir() || '/tmp';
 const SESSIONS_DIR = path.join(HOME_DIR, '.ccnexus', 'sessions');
-const CLAUDE_PROJECT_SESSIONS_DIR = claudeProjectSessionsDir({ homeDir: HOME_DIR, cwd: CWD });
 const sessionStore = createSessionStore(SESSIONS_DIR);
+const desktopRuntime = createDesktopRuntime({ cwd: workspaceRoot, provider: 'claude' });
+const localConfigService = new LocalConfigService({ homeDir: HOME_DIR });
+
+function currentClaudeProjectSessionsDir() {
+  return claudeProjectSessionsDir({ homeDir: HOME_DIR, cwd: workspaceRoot });
+}
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
 const BINARY_EXTS = new Set([
@@ -69,13 +62,13 @@ function isPathInside(parentPath, targetPath) {
 }
 
 function safePath(requestedPath) {
-  const resolved = path.resolve(CWD, requestedPath || '.');
-  if (!isPathInside(CWD, resolved)) return null;
+  const resolved = path.resolve(workspaceRoot, requestedPath || '.');
+  if (!isPathInside(workspaceRoot, resolved)) return null;
   return resolved;
 }
 
 function isProtectedWorkspacePath(absPath) {
-  const relativePath = path.relative(CWD, absPath).replace(/\\/g, '/');
+  const relativePath = path.relative(workspaceRoot, absPath).replace(/\\/g, '/');
   const segments = relativePath.split('/').filter(Boolean);
   return (
     segments.includes('.claude') ||
@@ -113,7 +106,7 @@ async function buildTree(dirPath, options = {}) {
       if (count >= maxItems) break;
       if (!showDotfiles && isDotfile(entry.name)) continue;
       const fullPath = path.join(nodePath, entry.name);
-      const relativePath = path.relative(CWD, fullPath);
+      const relativePath = path.relative(workspaceRoot, fullPath);
       const isDir = entry.isDirectory();
       count++;
 
@@ -165,13 +158,12 @@ function forgetSessionState(sessionId) {
   sessionMessages.delete(sessionId);
   fileEditHistory.delete(sessionId);
   activeQueries.delete(sessionId);
-  activeQueryStartTimes.delete(sessionId);
-  removeSessionDaemon(sessionId);
+  desktopRuntime.removeSessionDaemon(sessionId);
 }
 
 async function syncPersistedSessionsWithClaude() {
   return syncSessionStoreWithClaude(sessionStore, {
-    claudeProjectDir: CLAUDE_PROJECT_SESSIONS_DIR,
+    claudeProjectDir: currentClaudeProjectSessionsDir(),
     protectedSessionIds: activeQueries.keys(),
   });
 }
@@ -209,133 +201,18 @@ function createPermissionHandler(ws) {
 
 // ─── Active queries ───────────────────────────────────────────────
 const activeQueries = new Map(); // sessionId → Query
-const activeQueryStartTimes = new Map(); // sessionId → timestamp
-
-const sessionDaemons = new Map(); // sessionId -> ccGUI-style daemon descriptor
-let nextDaemonTabIndex = 1;
-
-function queryProcess(query) {
-  if (!query || typeof query !== 'object') return null;
-  for (const key of ['process', 'childProcess', 'subprocess']) {
-    const candidate = query[key];
-    if (candidate && typeof candidate.pid === 'number') return candidate;
-  }
-  return null;
-}
-
 function registerActiveQuery(sessionId, query) {
   if (!sessionId || !query) return;
   activeQueries.set(sessionId, query);
-  if (!activeQueryStartTimes.has(sessionId)) {
-    activeQueryStartTimes.set(sessionId, Date.now());
-  }
+  desktopRuntime.registerChannel({ sessionId, query });
 }
 
 function unregisterActiveQuery(sessionId, query) {
   if (!sessionId) return;
   if (!query || activeQueries.get(sessionId) === query) {
     activeQueries.delete(sessionId);
-    activeQueryStartTimes.delete(sessionId);
   }
-}
-
-function ensureSessionDaemon(sessionId, title) {
-  if (!sessionId) return null;
-  const existing = sessionDaemons.get(sessionId);
-  if (existing) {
-    if (title && !existing.title) existing.title = title;
-    return existing;
-  }
-
-  const daemon = {
-    id: `daemon-${process.pid}-${sessionId}`,
-    kind: 'DAEMON',
-    provider: 'claude',
-    pid: process.pid,
-    alive: true,
-    startedAt: Date.now(),
-    sessionId,
-    tabName: `AI${nextDaemonTabIndex++}`,
-    title: title || '',
-    command: process.argv.join(' '),
-  };
-  sessionDaemons.set(sessionId, daemon);
-  return daemon;
-}
-
-function removeSessionDaemon(sessionId) {
-  if (!sessionId) return;
-  sessionDaemons.delete(sessionId);
-}
-
-function buildProcessSnapshot() {
-  const snapshotAt = Date.now();
-  const processes = [];
-
-  for (const [sessionId, daemon] of sessionDaemons.entries()) {
-    const uptimeMs = Math.max(0, snapshotAt - daemon.startedAt);
-    processes.push({
-      ...daemon,
-      alive: true,
-      uptime: uptimeMs,
-      uptimeMs,
-      heapUsed: process.memoryUsage().heapUsed,
-      activeRequestCount: activeQueries.has(sessionId) ? 1 : 0,
-      orphan: false,
-    });
-  }
-
-  for (const [sessionId, query] of activeQueries.entries()) {
-    const processRef = queryProcess(query);
-    if (!processRef) continue;
-    const startTime = activeQueryStartTimes.get(sessionId) || snapshotAt;
-    processes.push({
-      id: `channel-${sessionId}-${processRef.pid}`,
-      kind: 'CHANNEL',
-      provider: 'claude',
-      pid: processRef.pid,
-      alive: !processRef.killed,
-      sessionId,
-      channelId: sessionId,
-      tabName: sessionDaemons.get(sessionId)?.tabName,
-      startTime,
-      startedAt: startTime,
-      uptime: snapshotAt - startTime,
-      uptimeMs: snapshotAt - startTime,
-      activeRequestCount: 1,
-      orphan: false,
-    });
-  }
-
-  const totals = processes.reduce((acc, item) => {
-    if (item.kind === 'DAEMON') acc.daemon += 1;
-    if (item.kind === 'CHANNEL') acc.channel += 1;
-    if (item.kind === 'ORPHAN') acc.orphan += 1;
-    acc.all += 1;
-    return acc;
-  }, { daemon: 0, channel: 0, orphan: 0, all: 0 });
-
-  return {
-    snapshotAt,
-    totals: {
-      daemon: totals.daemon,
-      channel: totals.channel,
-      orphan: totals.orphan,
-      all: totals.all,
-    },
-    processes,
-  };
-}
-
-function findOwnedProcess(pid) {
-  return buildProcessSnapshot().processes.find((item) => item.pid === pid) || null;
-}
-
-function findOwnedProcessById(id, pid) {
-  if (!id) return null;
-  return buildProcessSnapshot().processes.find((item) => (
-    item.id === id && (!pid || item.pid === pid)
-  )) || null;
+  desktopRuntime.unregisterChannel({ sessionId, query });
 }
 
 // ─── Message history per session (for Rewind) ────────────────────
@@ -358,10 +235,43 @@ const app = express();
 const server = createServer(app);
 app.use(express.json({ limit: '10mb' }));
 
+async function setWorkspaceRoot(nextPath) {
+  if (typeof nextPath !== 'string' || !nextPath.trim()) {
+    throw new Error('Workspace path is required');
+  }
+  const resolved = path.resolve(nextPath);
+  const stat = await fs.stat(resolved);
+  if (!stat.isDirectory()) throw new Error('Workspace path must be a directory');
+  workspaceRoot = resolved;
+  desktopRuntime.setCwd(workspaceRoot);
+  sessionMessages.clear();
+  fileEditHistory.clear();
+  return {
+    cwd: workspaceRoot,
+    rootName: path.basename(workspaceRoot),
+  };
+}
+
+app.get('/api/workspace', (_req, res) => {
+  res.json({
+    cwd: workspaceRoot,
+    rootName: path.basename(workspaceRoot),
+  });
+});
+
+app.post('/api/workspace', async (req, res) => {
+  try {
+    const result = await setWorkspaceRoot(req.body?.path);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // File tree API
 app.get('/api/files/tree', async (req, res) => {
   try {
-    const targetPath = safePath(req.query.path || CWD);
+    const targetPath = safePath(req.query.path || workspaceRoot);
     if (!targetPath) return res.status(403).json({ error: 'Access denied' });
     const depth = Math.min(parseInt(req.query.depth || '4', 10), 10);
     const showDotfiles = req.query.showDotfiles === 'true';
@@ -372,9 +282,9 @@ app.get('/api/files/tree', async (req, res) => {
     const tree = await buildTree(targetPath, { depth, showDotfiles, maxItems });
     res.json({
       tree,
-      root: path.relative(CWD, targetPath) || '.',
-      cwd: CWD,
-      rootName: path.basename(CWD),
+      root: path.relative(workspaceRoot, targetPath) || '.',
+      cwd: workspaceRoot,
+      rootName: path.basename(workspaceRoot),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -435,7 +345,7 @@ app.put('/api/files/content', async (req, res) => {
     const updatedStat = await fs.stat(filePath);
     res.json({
       ok: true,
-      path: path.relative(CWD, filePath),
+      path: path.relative(workspaceRoot, filePath),
       size: updatedStat.size,
       mtimeMs: updatedStat.mtimeMs,
     });
@@ -514,14 +424,14 @@ app.get('/api/sessions/:id/edits', async (req, res) => {
     const sessionId = req.params.id;
     const history = fileEditHistory.get(sessionId);
     if (!history) return res.json({ files: [] });
-    const files = Array.from(history.keys()).map(absPath => path.relative(CWD, absPath));
+    const files = Array.from(history.keys()).map(absPath => path.relative(workspaceRoot, absPath));
     res.json({ files });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─── Provider & Model Management ──────────────────────────────────
 const initSqlJs = require('sql.js');
-const CC_SWITCH_DB_PATH = path.join(HOME_DIR, '.cc-switch', 'data.db');
+const CC_SWITCH_DB_PATH = path.join(HOME_DIR, '.cc-switch', 'cc-switch.db');
 const CLAUDE_SETTINGS_PATH = path.join(HOME_DIR, '.claude', 'settings.json');
 
 // ccGUI 同款模型列表
@@ -610,7 +520,6 @@ function resolveModelFromSettings(modelId, env) {
   const aliasMap = {
     'claude-sonnet-5': env.ANTHROPIC_DEFAULT_SONNET_MODEL,
     'claude-sonnet-4-6': env.ANTHROPIC_DEFAULT_SONNET_MODEL,
-    'claude-fable-5': env.ANTHROPIC_DEFAULT_SONNET_MODEL,
     'claude-opus-4-8': env.ANTHROPIC_DEFAULT_OPUS_MODEL,
     'claude-opus-4-6': env.ANTHROPIC_DEFAULT_OPUS_MODEL,
     'claude-haiku-4-5': env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
@@ -627,15 +536,7 @@ function resolveModelFromSettings(modelId, env) {
 // 获取供应商列表 API
 app.get('/api/providers', async (_req, res) => {
   try {
-    const providers = await readCcSwitchProviders();
-    const settings = await readClaudeSettings();
-    const currentProviderId = settings.env?.CC_SWITCH_PROVIDER_ID || null;
-    
-    res.json({
-      providers,
-      currentProviderId,
-      currentEnv: settings.env || {},
-    });
+    res.json(await localConfigService.getProviders());
   } catch (err) {
     res.status(500).json({ error: err.message, providers: [] });
   }
@@ -645,6 +546,8 @@ app.get('/api/providers', async (_req, res) => {
 app.post('/api/providers/switch', async (req, res) => {
   try {
     const { providerId } = req.body;
+    res.json(await localConfigService.switchProvider(providerId));
+    return;
     
     if (!providerId) {
       return res.status(400).json({ error: 'Provider ID required' });
@@ -696,7 +599,8 @@ app.post('/api/providers/switch', async (req, res) => {
       env: settings.env,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err.message === 'Provider ID required' ? 400 : err.message === 'Provider not found' ? 404 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
@@ -704,8 +608,8 @@ app.post('/api/providers/switch', async (req, res) => {
 app.get('/api/models/resolve', async (req, res) => {
   try {
     const modelId = req.query.model || 'default';
-    const settings = await readClaudeSettings();
-    const env = settings.env || {};
+    const { currentEnv } = await localConfigService.getProviders();
+    const env = currentEnv || {};
     
     const resolvedModel = modelId === 'default' 
       ? (env.ANTHROPIC_MODEL || 'claude-sonnet-5')
@@ -725,8 +629,8 @@ app.get('/api/models/resolve', async (req, res) => {
 // 获取可用模型列表
 app.get('/api/models', async (_req, res) => {
   try {
-    const settings = await readClaudeSettings();
-    const env = settings.env || {};
+    const { currentEnv } = await localConfigService.getProviders();
+    const env = currentEnv || {};
     
     const modelsWithMapping = AVAILABLE_MODELS.map(m => ({
       ...m,
@@ -787,52 +691,21 @@ app.get('/api/agents', async (_req, res) => {
 
 // 获取进程列表
 app.get('/api/processes', (_req, res) => {
-  res.json(buildProcessSnapshot());
+  res.json(desktopRuntime.buildProcessSnapshot());
 });
 
 // 结束进程
 app.post('/api/processes/:pid/kill', (req, res) => {
   const pid = parseInt(req.params.pid);
   const requestedId = typeof req.body?.id === 'string' ? req.body.id : null;
-  const owned = findOwnedProcessById(requestedId, pid) || findOwnedProcess(pid);
-
-  if (!owned) {
-    res.status(404).json({ error: 'Process not found' });
-    return;
-  }
 
   try {
-    const { sessionId } = owned;
-    const query = sessionId ? activeQueries.get(sessionId) : null;
-
-    if (owned.kind === 'CHANNEL') {
-      const processRef = queryProcess(query);
-      if (!processRef || processRef.pid !== pid) {
-        res.status(404).json({ error: 'Process not found' });
-        return;
-      }
-      try { query.interrupt?.(); } catch { /* ignore */ }
-      try { query.close?.(); } catch { /* ignore */ }
-      processRef.kill('SIGTERM');
-      setTimeout(() => {
-        if (!processRef.killed) {
-          processRef.kill('SIGKILL');
-        }
-      }, 5000);
-      unregisterActiveQuery(sessionId, query);
-    } else if (owned.kind === 'DAEMON') {
-      if (query) {
-        try { query.interrupt?.(); } catch { /* ignore */ }
-        try { query.close?.(); } catch { /* ignore */ }
-        unregisterActiveQuery(sessionId, query);
-      }
-      removeSessionDaemon(sessionId);
-    } else {
-      res.status(404).json({ error: 'Process not found' });
+    const result = desktopRuntime.stopProcess({ pid, id: requestedId });
+    if (!result.ok) {
+      res.status(result.status || 500).json({ error: result.error || 'Process stop failed' });
       return;
     }
-
-    res.json({ ok: true, success: true, pid, id: owned.id, kind: owned.kind });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -841,24 +714,14 @@ app.post('/api/processes/:pid/kill', (req, res) => {
 app.post('/api/processes/:pid/restart', (req, res) => {
   const pid = parseInt(req.params.pid);
   const requestedId = typeof req.body?.id === 'string' ? req.body.id : null;
-  const owned = findOwnedProcessById(requestedId, pid) || findOwnedProcess(pid);
-
-  if (!owned || owned.kind !== 'DAEMON') {
-    res.status(404).json({ error: 'Daemon process not found' });
-    return;
-  }
 
   try {
-    const { sessionId } = owned;
-    const query = sessionId ? activeQueries.get(sessionId) : null;
-    if (query) {
-      try { query.interrupt?.(); } catch { /* ignore */ }
-      try { query.close?.(); } catch { /* ignore */ }
-      unregisterActiveQuery(sessionId, query);
+    const result = desktopRuntime.restartDaemon({ pid, id: requestedId });
+    if (!result.ok) {
+      res.status(result.status || 500).json({ error: result.error || 'Daemon restart failed' });
+      return;
     }
-    removeSessionDaemon(sessionId);
-    const daemon = ensureSessionDaemon(sessionId, owned.title || 'Restarted daemon');
-    res.json({ ok: true, success: true, restart: true, pid, id: daemon?.id });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -900,7 +763,7 @@ app.get('/api/files/scan', async (req, res) => {
       }
     }
     
-    await scanDir(CWD);
+    await scanDir(workspaceRoot);
     
     res.json({ files: files.slice(0, limit) });
   } catch (err) {
@@ -1144,7 +1007,7 @@ function startClaudeSessionMonitor() {
   timer.unref?.();
 
   try {
-    const watcher = watch(CLAUDE_PROJECT_SESSIONS_DIR, { persistent: false }, () => {
+    const watcher = watch(currentClaudeProjectSessionsDir(), { persistent: false }, () => {
       void syncAndBroadcastExternalSessionDeletes();
     });
     watcher.unref?.();
@@ -1168,7 +1031,7 @@ wss.on('connection', (ws) => {
     const sessionEventPayload = await dispatchSessionCommand(msg, sessionStore, {
       syncSessions: syncPersistedSessionsWithClaude,
       loadClaudeSessionMessages: (sessionId) => readClaudeSessionMessages({
-        claudeProjectDir: CLAUDE_PROJECT_SESSIONS_DIR,
+        claudeProjectDir: currentClaudeProjectSessionsDir(),
         sessionId,
       }),
     });
@@ -1179,7 +1042,7 @@ wss.on('connection', (ws) => {
       sendJson(ws, sessionEventPayload);
       if (sessionEventPayload.type === 'session_history') {
         currentSessionId = sessionEventPayload.sessionId;
-        ensureSessionDaemon(sessionEventPayload.sessionId, 'Loaded session');
+        desktopRuntime.ensureSessionDaemon({ sessionId: sessionEventPayload.sessionId, title: 'Loaded session' });
         sessionMessages.set(sessionEventPayload.sessionId, sessionEventPayload.messages);
       }
       return;
@@ -1203,12 +1066,11 @@ wss.on('connection', (ws) => {
         }
 
         const canUseTool = createPermissionHandler(ws);
-        const claudeSettings = await readClaudeSettings();
-        const queryEnv = { ...process.env, ...(claudeSettings.env || {}) };
+        const { currentEnv } = await localConfigService.getProviders();
+        const queryEnv = { ...process.env, ...(currentEnv || {}) };
         const queryOpts = buildClaudeQueryOptions({
-          cwd: CWD,
+          cwd: workspaceRoot,
           env: queryEnv,
-          canUseTool,
           clientOptions,
         });
         const modelForUsage = clientOptions?.model && clientOptions.model !== 'default'
@@ -1223,7 +1085,13 @@ wss.on('connection', (ws) => {
 
         let q;
         try {
-          q = sdkQuery({ prompt, options: queryOpts });
+          q = await desktopRuntime.queryClaude({
+            sessionId: querySessionId || `pending-${requestOrder}`,
+            title: prompt.slice(0, 60),
+            prompt,
+            options: queryOpts,
+            onPermissionRequest: (request) => canUseTool(request.toolName, request.input, request.options),
+          });
 
           // Track user message in history (will be updated with session_id after init)
           const userMsg = {
@@ -1240,6 +1108,7 @@ wss.on('connection', (ws) => {
 
             const usage = extractUsageFromSdkEvent(event);
             if (usage) {
+              assistantTurn.addUsage(usage);
               ws.send(JSON.stringify(createUsageUpdate({
                 usage,
                 provider: 'claude',
@@ -1263,7 +1132,12 @@ wss.on('connection', (ws) => {
                   if (requestOrder === latestChatRequest) {
                     currentSessionId = querySessionId;
                   }
-                  ensureSessionDaemon(querySessionId, prompt.slice(0, 60));
+                  desktopRuntime.adoptSessionDaemon({
+                    fromSessionId: q.daemonSessionId,
+                    toSessionId: querySessionId,
+                    title: prompt.slice(0, 60),
+                  });
+                  desktopRuntime.ensureSessionDaemon({ sessionId: querySessionId, title: prompt.slice(0, 60) });
                   registerActiveQuery(querySessionId, q);
                   ownedQueries.set(querySessionId, q);
                   await addSession(querySessionId, prompt.slice(0, 60));
@@ -1508,5 +1382,5 @@ server.listen(PORT, () => {
   console.log(`\x1b[36m╚══════════════════════════════════════════╝\x1b[0m`);
   console.log(`\n  Server   → http://localhost:${PORT}`);
   console.log(`  WS       → ws://localhost:${PORT}/ws`);
-  console.log(`  CWD      → ${CWD}\n`);
+  console.log(`  CWD      → ${workspaceRoot}\n`);
 });

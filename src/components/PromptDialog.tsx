@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Plus, Edit2, Trash2, Save } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { deletePrompt, getPrompts, savePrompt } from '../utils/desktopBridgeApi';
 
 interface Prompt {
   name: string;
@@ -31,8 +32,7 @@ export default function PromptDialog({ isOpen, onClose }: PromptDialogProps) {
   const loadPrompts = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/prompts');
-      const data = await res.json();
+      const data = await getPrompts();
       setPrompts(data.prompts || []);
     } catch (err) {
       console.error('Failed to load prompts:', err);
@@ -59,17 +59,10 @@ export default function PromptDialog({ isOpen, onClose }: PromptDialogProps) {
     if (!editName.trim() || !editContent.trim()) return;
 
     try {
-      const res = await fetch('/api/prompts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName, content: editContent }),
-      });
-
-      if (res.ok) {
-        await loadPrompts();
-        setEditMode(false);
-        setSelectedPrompt(null);
-      }
+      await savePrompt({ name: editName, content: editContent });
+      await loadPrompts();
+      setEditMode(false);
+      setSelectedPrompt(null);
     } catch (err) {
       console.error('Failed to save prompt:', err);
     }
@@ -79,15 +72,10 @@ export default function PromptDialog({ isOpen, onClose }: PromptDialogProps) {
     if (!confirm(t('prompt.confirmDelete', 'Are you sure you want to delete this prompt?'))) return;
 
     try {
-      const res = await fetch(`/api/prompts/${encodeURIComponent(name)}`, {
-        method: 'DELETE',
-      });
-
-      if (res.ok) {
-        await loadPrompts();
-        if (selectedPrompt?.name === name) {
-          setSelectedPrompt(null);
-        }
+      await deletePrompt(name);
+      await loadPrompts();
+      if (selectedPrompt?.name === name) {
+        setSelectedPrompt(null);
       }
     } catch (err) {
       console.error('Failed to delete prompt:', err);

@@ -50,6 +50,14 @@ test('chat message list hides page-level horizontal overflow above the status pa
   assert.match(styles, /\.chat-content-with-rail \.message-list\s*\{[^}]*min-width:\s*0;/s);
 });
 
+test('message anchor rail reserves right-side space so it cannot cover user message actions', () => {
+  const styles = read('src/index.css');
+
+  assert.match(styles, /--anchor-rail-gutter:\s*48px;/);
+  assert.match(styles, /\.chat-content-with-rail \.message-list\s*\{[^}]*padding-right:\s*var\(--anchor-rail-gutter\);/s);
+  assert.match(styles, /\.anchor-rail\s*\{[^}]*right:\s*12px;/s);
+});
+
 test('message anchor rail defaults to conversation history nodes and hides tool detail nodes', () => {
   const source = read('src/components/MessageAnchorRail.tsx');
 

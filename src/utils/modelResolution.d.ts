@@ -2,7 +2,7 @@ export interface ClaudeModelInfo {
   id: string;
   label: string;
   subtitle: string;
-  mappingKey: 'opus' | 'sonnet' | 'haiku';
+  mappingKey?: 'opus' | 'sonnet' | 'haiku';
 }
 
 export interface ModelDisplay {

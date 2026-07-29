@@ -22,6 +22,20 @@ test('complete returns null for an empty turn', () => {
   assert.equal(createAssistantTurn().complete({ id: 'final-id', sessionId: 'session-1' }), null);
 });
 
+test('complete preserves the latest usage payload for restored context percentage', () => {
+  const turn = createAssistantTurn();
+  const usage = {
+    input_tokens: 14_658,
+    output_tokens: 113,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  };
+  turn.add({ content: [{ type: 'text', text: 'ok' }] });
+  turn.addUsage(usage);
+
+  assert.deepEqual(turn.complete({ id: 'final-id', sessionId: 'session-1' }).usage, usage);
+});
+
 test('complete keeps thinking streamed before the terminal assistant event', () => {
   const turn = createAssistantTurn();
   turn.addStreamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });

@@ -95,6 +95,20 @@ export function estimateMessagesUsedTokens(messages) {
   return chars > 0 ? Math.ceil(chars / 4) : 0;
 }
 
+export function extractMessagesUsedTokens(messages, provider = 'claude') {
+  if (!Array.isArray(messages) || messages.length === 0) return undefined;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const usage = messages[index]?.usage;
+    if (isCompleteUsage(usage)) {
+      const usedTokens = extractUsedTokens(usage, provider);
+      return usedTokens > 0 ? usedTokens : undefined;
+    }
+  }
+
+  return undefined;
+}
+
 function isCompleteUsage(usage) {
   if (!usage || typeof usage !== 'object') return false;
   return [

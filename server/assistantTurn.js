@@ -12,6 +12,7 @@ export function createAssistantTurn() {
   };
   const toolResults = [];
   let model;
+  let usage;
 
   function interleaveToolResults(blocks) {
     if (toolResults.length === 0) return blocks;
@@ -57,10 +58,15 @@ export function createAssistantTurn() {
         content.push(...message.content);
       }
       if (message?.model !== undefined) model = message.model;
+      if (message?.usage !== undefined) usage = message.usage;
     },
 
     addToolResult(block) {
       if (block?.type === 'tool_result') toolResults.push(block);
+    },
+
+    addUsage(nextUsage) {
+      if (nextUsage && typeof nextUsage === 'object') usage = nextUsage;
     },
 
     addStreamEvent(event) {
@@ -126,6 +132,7 @@ export function createAssistantTurn() {
       if (contentWithToolResults.length === 0) return null;
       const message = { id, content: contentWithToolResults, sessionId };
       if (model !== undefined) message.model = model;
+      if (usage !== undefined) message.usage = usage;
       return message;
     },
   };

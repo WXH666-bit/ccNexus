@@ -6,14 +6,14 @@ export function streamEvent(event, sessionId, uuid) {
   return { type: 'stream_event', event, sessionId, uuid };
 }
 
-export function assistantEvent({ id, content, sessionId, model, cost, duration, turns }) {
+export function assistantEvent({ id, content, sessionId, model, usage, cost, duration, turns }) {
   const message = {
     id,
     content,
     sessionId,
   };
 
-  for (const [key, value] of Object.entries({ model, cost, duration, turns })) {
+  for (const [key, value] of Object.entries({ model, usage, cost, duration, turns })) {
     if (value !== undefined) message[key] = value;
   }
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Star, Trash2, Edit3, Download, MessageSquare } from 'lucide-react';
 import type { Session } from '../types';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { deleteSession, getSessions, renameSession } from '../utils/sessionBridgeApi';
 
 export default function HistoryView() {
   const navigate = useNavigate();
@@ -14,6 +15,12 @@ export default function HistoryView() {
   const [editValue, setEditValue] = useState('');
 
   useEffect(() => {
+    if (window.ccNexusDesktop?.getSessions) {
+      getSessions()
+        .then(event => setSessions(event.sessions))
+        .catch(() => send({ type: 'get_sessions' }));
+      return;
+    }
     send({ type: 'get_sessions' });
   }, [send]);
 
@@ -35,13 +42,23 @@ export default function HistoryView() {
     .filter(s => s.title.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    if (window.ccNexusDesktop?.deleteSession) {
+      await deleteSession(id);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      return;
+    }
     send({ type: 'delete_session', sessionId: id });
   };
 
-  const handleRename = (id: string) => {
+  const handleRename = async (id: string) => {
     if (editValue.trim()) {
-      send({ type: 'rename_session', session_id: id, title: editValue.trim() });
+      if (window.ccNexusDesktop?.renameSession) {
+        await renameSession(id, editValue.trim());
+        setSessions(prev => prev.map(s => s.id === id ? { ...s, title: editValue.trim() } : s));
+      } else {
+        send({ type: 'rename_session', session_id: id, title: editValue.trim() });
+      }
     }
     setEditingId(null);
   };

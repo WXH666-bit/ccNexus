@@ -1,0 +1,33 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('ccNexusDesktop', {
+  getRuntimeInfo: () => ipcRenderer.invoke('desktop:get-runtime-info'),
+  openProject: () => ipcRenderer.invoke('desktop:open-project'),
+  getWorkspace: () => ipcRenderer.invoke('desktop:get-workspace'),
+  setWorkspace: (path) => ipcRenderer.invoke('desktop:set-workspace', { path }),
+  listFiles: (options) => ipcRenderer.invoke('desktop:list-files', options),
+  readFile: (path) => ipcRenderer.invoke('desktop:read-file', { path }),
+  saveFile: (file) => ipcRenderer.invoke('desktop:save-file', file),
+  scanFiles: (options) => ipcRenderer.invoke('desktop:scan-files', options),
+  getProviders: () => ipcRenderer.invoke('desktop:get-providers'),
+  switchProvider: (providerId) => ipcRenderer.invoke('desktop:switch-provider', { providerId }),
+  getAgents: () => ipcRenderer.invoke('desktop:get-agents'),
+  getAgent: (name) => ipcRenderer.invoke('desktop:get-agent', { name }),
+  getCommands: () => ipcRenderer.invoke('desktop:get-commands'),
+  getPrompts: () => ipcRenderer.invoke('desktop:get-prompts'),
+  savePrompt: (prompt) => ipcRenderer.invoke('desktop:save-prompt', prompt),
+  deletePrompt: (name) => ipcRenderer.invoke('desktop:delete-prompt', { name }),
+  getSessions: () => ipcRenderer.invoke('desktop:get-sessions'),
+  loadSession: (sessionId) => ipcRenderer.invoke('desktop:load-session', { sessionId }),
+  renameSession: (sessionId, title) => ipcRenderer.invoke('desktop:rename-session', { sessionId, title }),
+  deleteSession: (sessionId) => ipcRenderer.invoke('desktop:delete-session', { sessionId }),
+  getProcesses: () => ipcRenderer.invoke('desktop:get-processes'),
+  stopProcess: (processRef) => ipcRenderer.invoke('desktop:stop-process', processRef),
+  restartProcess: (processRef) => ipcRenderer.invoke('desktop:restart-process', processRef),
+  sendChatCommand: (message) => ipcRenderer.send('desktop:chat-command', message),
+  onChatMessage: (callback) => {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('desktop:chat-message', listener);
+    return () => ipcRenderer.removeListener('desktop:chat-message', listener);
+  },
+});

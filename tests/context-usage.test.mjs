@@ -5,6 +5,7 @@ import {
   calculateContextPercentage,
   createUsageUpdate,
   estimateMessagesUsedTokens,
+  extractMessagesUsedTokens,
   extractUsageFromSdkEvent,
   extractUsedTokens,
   getModelContextLimit,
@@ -108,4 +109,21 @@ test('estimateMessagesUsedTokens derives a non-zero initial context load from re
   assert.ok(estimate > 20);
   assert.ok(estimate < 500);
   assert.equal(estimateMessagesUsedTokens([]), 0);
+});
+
+test('extractMessagesUsedTokens prefers restored Claude usage over rough text estimates', () => {
+  const messages = [
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Short visible text.' }],
+      usage: {
+        input_tokens: 14_658,
+        output_tokens: 167,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    },
+  ];
+
+  assert.equal(extractMessagesUsedTokens(messages), 14_825);
 });

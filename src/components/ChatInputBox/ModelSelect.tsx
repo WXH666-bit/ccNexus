@@ -7,6 +7,7 @@ import {
   resolveModelDisplay,
   stripLongContextSuffix,
 } from '../../utils/modelResolution';
+import { getProviders } from '../../utils/desktopBridgeApi';
 
 interface ProviderPayload {
   currentEnv?: Record<string, string | undefined>;
@@ -28,7 +29,7 @@ const MODEL_ICON_CLASS: Record<string, string> = {
 
 function iconClassFor(modelId: string) {
   const model = CLAUDE_MODELS.find(item => item.id === modelId);
-  return model ? MODEL_ICON_CLASS[model.mappingKey] : 'model-option-icon--default';
+  return model?.mappingKey ? MODEL_ICON_CLASS[model.mappingKey] : 'model-option-icon--default';
 }
 
 export default function ModelSelect({
@@ -52,8 +53,7 @@ export default function ModelSelect({
   const triggerLabel = `${currentDisplay.label}${longContextEnabled && canUseLongContext ? ' (1M上下文)' : ''}`;
 
   const refreshProviderEnv = useCallback(() => {
-    return fetch('/api/providers')
-      .then(response => response.json())
+    return getProviders()
       .then((data: ProviderPayload) => {
         setEnv(data.currentEnv || {});
       })

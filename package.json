@@ -3,9 +3,15 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
+  "main": "desktop/main.js",
   "description": "Self-hosted Claude Code visual client — chat-based UI with diff view, file tree, and session management",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"node --watch server/index.js\" \"vite --port 5000 --host 0.0.0.0\"",
+    "desktop:dev": "concurrently -n client,desktop -c green,magenta \"vite --port 5000 --host 0.0.0.0\" \"electron desktop/main.js\"",
+    "desktop:host": "electron desktop/main.js",
+    "desktop:daemon": "node desktop/daemon/ccnexus-daemon.js",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder",
     "build": "vite build",
     "test:protocol": "node --test \"tests/*.mjs\"",
     "test:session-store": "node --test tests/session-store.test.mjs",
@@ -32,10 +38,39 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.0.12",
     "highlight.js": "^11.10.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "com.ccnexus.app",
+    "productName": "ccNexus",
+    "files": [
+      "dist/**",
+      "desktop/**",
+      "server/assistantTurn.js",
+      "server/claudeHistory.js",
+      "server/permissionPolicy.js",
+      "server/protocol.js",
+      "server/queryOptions.js",
+      "server/sessionRecovery.js",
+      "server/sessionSync.js",
+      "server/thinkingOptions.js",
+      "server/toolResults.js",
+      "src/utils/contextUsage.js",
+      "src/utils/modelResolution.js",
+      "src/utils/streamDeltaNormalizer.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    }
   }
 }

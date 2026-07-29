@@ -86,6 +86,7 @@ export interface ChatMessage {
   timestamp: number;
   sessionId?: string;
   model?: string;
+  usage?: UsageStats;
   isStreaming?: boolean;
   cost?: number;
   duration?: number;
@@ -106,7 +107,7 @@ export interface Session {
 export type WSMessage =
   | { type: 'session'; sessionId: string }
   | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
-  | { type: 'assistant'; message: { id: string; content: ContentBlock[]; model?: string; sessionId?: string; cost?: number; duration?: number; turns?: number } }
+  | { type: 'assistant'; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; cost?: number; duration?: number; turns?: number } }
   | { type: 'usage_update'; sessionId?: string; percentage: number; totalTokens: number; limit: number; usedTokens: number; maxTokens: number }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
   | { type: 'tool_progress'; tool_name: string; tool_use_id: string; status: 'running' | 'completed' | 'error' }

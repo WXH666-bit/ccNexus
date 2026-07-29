@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Check, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { getAgents } from '../utils/desktopBridgeApi';
 
 interface Agent {
   name: string;
@@ -31,8 +32,7 @@ export default function AgentDialog({ isOpen, onClose, selectedAgent, onSelectAg
   const loadAgents = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/agents');
-      const data = await res.json();
+      const data = await getAgents();
       setAgents(data.agents || []);
     } catch (err) {
       console.error('Failed to load agents:', err);

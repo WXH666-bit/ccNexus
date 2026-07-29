@@ -29,6 +29,7 @@
 
   --user-bubble: #1f5f9f;
   --user-bubble-text: #ffffff;
+  --anchor-rail-gutter: 48px;
 
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -2470,10 +2471,11 @@ html, body, #root {
 .chat-content-with-rail .message-list {
   flex: 1;
   min-width: 0;
+  padding-right: var(--anchor-rail-gutter);
 }
 .anchor-rail {
   position: absolute;
-  right: 8px;
+  right: 12px;
   top: 16px;
   bottom: 16px;
   width: 24px;

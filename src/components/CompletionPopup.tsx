@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { FileText, Terminal, Sparkles, Command } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { getCommands, getPrompts, scanFiles } from '../utils/desktopBridgeApi';
 
 interface CompletionItem {
   label: string;
@@ -67,10 +68,7 @@ export function useCompletionTriggers() {
     abortControllerRef.current = new AbortController();
 
     try {
-      const res = await fetch(`/api/files/scan?q=${encodeURIComponent(query)}&limit=20`, {
-        signal: abortControllerRef.current.signal,
-      });
-      const data = await res.json();
+      const data = await scanFiles(query, 20);
       return data.files || [];
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
@@ -82,8 +80,7 @@ export function useCompletionTriggers() {
 
   const fetchCommands = useCallback(async () => {
     try {
-      const res = await fetch('/api/commands');
-      const data = await res.json();
+      const data = await getCommands();
       return data.commands || [];
     } catch (err) {
       console.error('Failed to fetch commands:', err);
@@ -93,8 +90,7 @@ export function useCompletionTriggers() {
 
   const fetchPrompts = useCallback(async () => {
     try {
-      const res = await fetch('/api/prompts');
-      const data = await res.json();
+      const data = await getPrompts();
       return data.prompts || [];
     } catch (err) {
       console.error('Failed to fetch prompts:', err);

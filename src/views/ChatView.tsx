@@ -27,7 +27,8 @@ import {
 } from '../utils/streamWatchdog.js';
 import { findToolResultForBlock, isFileModifyToolName } from '../utils/toolRendering.js';
 import { normalizeToolInput } from '../utils/toolInputNormalization.js';
-import { estimateMessagesUsedTokens } from '../utils/contextUsage.js';
+import { estimateMessagesUsedTokens, extractMessagesUsedTokens } from '../utils/contextUsage.js';
+import { getSessions, loadSession, renameSession } from '../utils/sessionBridgeApi';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
@@ -70,6 +71,7 @@ export default function ChatView() {
   const [model, setModelState] = useState(() => readStoredPreference('chatModel', 'default'));
   const [reasoning, setReasoningState] = useState(() => readStoredPreference('chatReasoning', 'high'));
   const [usageUsedTokens, setUsageUsedTokens] = useState<number | undefined>(undefined);
+  const [workspaceVersion, setWorkspaceVersion] = useState(0);
 
   // P1 features state
   const [rewindTarget, setRewindTarget] = useState<ChatMessage | null>(null);
@@ -262,6 +264,55 @@ export default function ChatView() {
     setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
   }, []);
 
+  const applySessionHistory = useCallback((history: { sessionId: string; messages: ChatMessage[] }) => {
+    if (urlSessionId && urlSessionId !== history.sessionId) return;
+    requestedHistorySessionRef.current = history.sessionId;
+    resetStreamingBlockState(streamingBlocksRef.current);
+    streamingMsgRef.current = null;
+    setIsStreaming(false);
+    setMessages(history.messages);
+    setUsageUsedTokens(extractMessagesUsedTokens(history.messages) ?? readStoredContextUsage(history.sessionId) ?? estimateMessagesUsedTokens(history.messages));
+    setCurrentSession(prev => prev?.id === history.sessionId
+      ? prev
+      : sessions.find(session => session.id === history.sessionId) || {
+        id: history.sessionId,
+        title: 'New Chat',
+        updatedAt: Date.now(),
+      });
+  }, [sessions, urlSessionId]);
+
+  const requestSessionHistory = useCallback((sessionId: string) => {
+    if (window.ccNexusDesktop?.loadSession) {
+      requestedHistorySessionRef.current = sessionId;
+      loadSession(sessionId)
+        .then(applySessionHistory)
+        .catch(() => send({ type: 'load_session', sessionId }));
+      return;
+    }
+    send({ type: 'load_session', sessionId });
+  }, [applySessionHistory, send]);
+
+  const applySessionList = useCallback((sessionList: Session[], deletedSessionIds: string[] = []) => {
+    setSessions(sessionList);
+    if (urlSessionId && deletedSessionIds.includes(urlSessionId)) {
+      setCurrentSession(null);
+      setMessages([]);
+      navigate('/chat', { replace: true });
+      return;
+    }
+    if (urlSessionId) {
+      const s = sessionList.find(x => x.id === urlSessionId);
+      if (s) setCurrentSession(s);
+    } else if (sessionList.length > 0) {
+      const latest = [...sessionList].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      setCurrentSession(latest);
+      if (requestedHistorySessionRef.current !== latest.id) {
+        requestedHistorySessionRef.current = latest.id;
+        requestSessionHistory(latest.id);
+      }
+    }
+  }, [navigate, requestSessionHistory, urlSessionId]);
+
   useEffect(() => {
     if (!isStreaming) {
       if (streamStallIntervalRef.current !== null) {
@@ -291,8 +342,14 @@ export default function ChatView() {
 
   // Initialize: request session list
   useEffect(() => {
+    if (window.ccNexusDesktop?.getSessions) {
+      getSessions()
+        .then(event => applySessionList(event.sessions, event.deletedSessionIds))
+        .catch(() => send({ type: 'get_sessions' }));
+      return;
+    }
     send({ type: 'get_sessions' });
-  }, [send]);
+  }, [applySessionList, send]);
 
   // Handle URL session change
   useEffect(() => {
@@ -312,14 +369,14 @@ export default function ChatView() {
       serverSessionNavigationRef.current = null;
       if (requestedHistorySessionRef.current !== urlSessionId) {
         requestedHistorySessionRef.current = urlSessionId;
-        send({ type: 'load_session', sessionId: urlSessionId });
+        requestSessionHistory(urlSessionId);
       }
       setMessages([]);
       setUsageUsedTokens(readStoredContextUsage(urlSessionId));
       resetStreamingBlockState(streamingBlocksRef.current);
       streamingMsgRef.current = null;
     }
-  }, [urlSessionId, send]);
+  }, [urlSessionId, requestSessionHistory]);
 
   // Handle WebSocket messages
   useEffect(() => {
@@ -353,24 +410,7 @@ export default function ChatView() {
         break;
       }
       case 'session_list': {
-        setSessions(msg.sessions);
-        if (urlSessionId && msg.deletedSessionIds?.includes(urlSessionId)) {
-          setCurrentSession(null);
-          setMessages([]);
-          navigate('/chat', { replace: true });
-          break;
-        }
-        if (urlSessionId) {
-          const s = msg.sessions.find(x => x.id === urlSessionId);
-          if (s) setCurrentSession(s);
-        } else if (msg.sessions.length > 0) {
-          const latest = [...msg.sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-          setCurrentSession(latest);
-          if (requestedHistorySessionRef.current !== latest.id) {
-            requestedHistorySessionRef.current = latest.id;
-            send({ type: 'load_session', sessionId: latest.id });
-          }
-        }
+        applySessionList(msg.sessions, msg.deletedSessionIds);
         break;
       }
       case 'session_created': {
@@ -423,6 +463,7 @@ export default function ChatView() {
           timestamp: Date.now(),
           sessionId: msg.message.sessionId,
           model: msg.message.model,
+          usage: msg.message.usage,
           isStreaming: false,
           cost: msg.message.cost,
           duration: msg.message.duration,
@@ -465,20 +506,7 @@ export default function ChatView() {
         break;
       }
       case 'session_history': {
-        if (urlSessionId && urlSessionId !== msg.sessionId) break;
-        requestedHistorySessionRef.current = msg.sessionId;
-        resetStreamingBlockState(streamingBlocksRef.current);
-        streamingMsgRef.current = null;
-        setIsStreaming(false);
-        setMessages(msg.messages);
-        setUsageUsedTokens(readStoredContextUsage(msg.sessionId) ?? estimateMessagesUsedTokens(msg.messages));
-        setCurrentSession(prev => prev?.id === msg.sessionId
-          ? prev
-          : sessions.find(session => session.id === msg.sessionId) || {
-            id: msg.sessionId,
-            title: 'New Chat',
-            updatedAt: Date.now(),
-          });
+        applySessionHistory({ sessionId: msg.sessionId, messages: msg.messages });
         break;
       }
 
@@ -538,7 +566,7 @@ export default function ChatView() {
 
       case 'rewind_complete': {
         setMessages(msg.messages);
-        setUsageUsedTokens(estimateMessagesUsedTokens(msg.messages));
+        setUsageUsedTokens(extractMessagesUsedTokens(msg.messages) ?? estimateMessagesUsedTokens(msg.messages));
         break;
       }
 
@@ -555,7 +583,7 @@ export default function ChatView() {
         }
       }
     }
-  }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage]);
+  }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage, applySessionList, applySessionHistory]);
 
   const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
     if (!text.trim() && attachments.length === 0) return;
@@ -659,6 +687,15 @@ export default function ChatView() {
 
   const handleRenameSession = useCallback((title: string) => {
     if (currentSession) {
+      if (window.ccNexusDesktop?.renameSession) {
+        renameSession(currentSession.id, title)
+          .then(event => {
+            setSessions(prev => prev.map(s => s.id === event.session_id ? { ...s, title: event.title } : s));
+            setCurrentSession(prev => prev ? { ...prev, title: event.title } : prev);
+          })
+          .catch(() => send({ type: 'rename_session', session_id: currentSession.id, title }));
+        return;
+      }
       send({ type: 'rename_session', session_id: currentSession.id, title });
     }
   }, [send, currentSession]);
@@ -707,9 +744,33 @@ export default function ChatView() {
     };
   }, [searchQuery, searchResults, currentSearchIdx]);
 
+  const handleOpenProject = useCallback(async () => {
+    if (!window.ccNexusDesktop?.openProject) return;
+    const project = await window.ccNexusDesktop.openProject();
+    if (!project || project.canceled || !project.path) return;
+    if (window.ccNexusDesktop?.setWorkspace) {
+      await window.ccNexusDesktop.setWorkspace(project.path);
+    }
+    requestedHistorySessionRef.current = null;
+    serverSessionNavigationRef.current = null;
+    setCurrentSession(null);
+    setMessages([]);
+    setSessions([]);
+    setUsageUsedTokens(undefined);
+    resetStreamingBlockState(streamingBlocksRef.current);
+    streamingMsgRef.current = null;
+    setIsStreaming(false);
+    setWorkspaceVersion((version) => version + 1);
+    send({ type: 'new_session' });
+    navigate('/chat', { replace: true });
+    getSessions()
+      .then(event => applySessionList(event.sessions, event.deletedSessionIds))
+      .catch(() => send({ type: 'get_sessions' }));
+  }, [applySessionList, navigate, send]);
+
   return (
     <div className="chat-view">
-      <FileExplorer />
+      <FileExplorer key={workspaceVersion} />
       <div className="chat-pane">
         <ChatHeader
           sessionTitle={currentSession?.title || ''}
@@ -722,6 +783,7 @@ export default function ChatView() {
           onSearchNext={() => navigateSearch('next')}
           onSearchPrev={() => navigateSearch('prev')}
           onRewind={rewindTarget ? () => setRewindTarget(null) : undefined}
+          onOpenProject={window.ccNexusDesktop?.openProject ? handleOpenProject : undefined}
         />
         <div className="chat-main">
           {messages.length === 0 ? (

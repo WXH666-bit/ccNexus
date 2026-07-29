@@ -6,6 +6,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -133,9 +134,19 @@ export default function FileExplorer() {
     setLoadingTree(true);
     setTreeError('');
     try {
-      const res = await fetch('/api/files/tree?path=.&depth=5&showDotfiles=true&maxItems=10000');
-      const data = await res.json() as TreeResponse & { error?: string };
-      if (!res.ok) throw new Error(data.error || 'Failed to load files');
+      let data: TreeResponse & { error?: string };
+      if (window.ccNexusDesktop?.listFiles) {
+        data = await window.ccNexusDesktop?.listFiles({
+          path: '.',
+          depth: 5,
+          showDotfiles: true,
+          maxItems: 10000,
+        }) as TreeResponse & { error?: string };
+      } else {
+        const res = await fetch('/api/files/tree?path=.&depth=5&showDotfiles=true&maxItems=10000');
+        data = await res.json() as TreeResponse & { error?: string };
+        if (!res.ok) throw new Error(data.error || 'Failed to load files');
+      }
       setTree(data.tree || []);
       setRootName(data.rootName || 'Project');
       setCwd(data.cwd || '');
@@ -149,6 +160,47 @@ export default function FileExplorer() {
   useEffect(() => {
     void loadTree();
   }, [loadTree]);
+
+  const openProject = useCallback(async () => {
+    if (dirty && !window.confirm('当前文件有未保存修改，确定切换项目吗？')) return;
+    if (!window.ccNexusDesktop?.openProject) {
+      setTreeError('打开项目只在桌面应用中可用');
+      return;
+    }
+
+    try {
+      const project = await window.ccNexusDesktop?.openProject();
+      if (!project || project.canceled || !project.path) return;
+      const desktopWorkspace = window.ccNexusDesktop?.setWorkspace
+        ? await window.ccNexusDesktop?.setWorkspace(project.path)
+        : undefined;
+      let brokerWorkspace: { cwd?: string; rootName?: string; error?: string } | undefined;
+      try {
+        const res = await fetch('/api/workspace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: project.path }),
+        });
+        brokerWorkspace = await res.json() as { cwd?: string; rootName?: string; error?: string };
+        if (!res.ok && !desktopWorkspace) throw new Error(brokerWorkspace.error || 'Failed to open project');
+      } catch (err) {
+        if (!desktopWorkspace) throw err;
+      }
+      const data = desktopWorkspace || brokerWorkspace || { cwd: project.path, rootName: project.rootName };
+
+      setSelectedFile(null);
+      setFileMeta(null);
+      setLoadedContent('');
+      setDraft('');
+      setDirty(false);
+      setExpanded(new Set(['.']));
+      setCwd(data.cwd || project.path);
+      setRootName(data.rootName || 'Project');
+      void loadTree();
+    } catch (err) {
+      setTreeError(err instanceof Error ? err.message : 'Failed to open project');
+    }
+  }, [dirty, loadTree]);
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -171,9 +223,14 @@ export default function FileExplorer() {
     setDirty(false);
 
     try {
-      const res = await fetch(`/api/files/content?path=${encodeURIComponent(node.path)}`);
-      const data = await res.json() as FileResponse & { error?: string };
-      if (!res.ok) throw new Error(data.error || 'Failed to open file');
+      let data: FileResponse & { error?: string };
+      if (window.ccNexusDesktop?.readFile) {
+        data = await window.ccNexusDesktop?.readFile(node.path) as FileResponse & { error?: string };
+      } else {
+        const res = await fetch(`/api/files/content?path=${encodeURIComponent(node.path)}`);
+        data = await res.json() as FileResponse & { error?: string };
+        if (!res.ok) throw new Error(data.error || 'Failed to open file');
+      }
       setFileMeta(data);
       if (!data.isBinary && !data.isImage && typeof data.content === 'string') {
         setLoadedContent(data.content);
@@ -196,13 +253,17 @@ export default function FileExplorer() {
     setFileError('');
     setNotice('');
     try {
-      const res = await fetch('/api/files/content', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedFile.path, content: draft }),
-      });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error || 'Failed to save file');
+      if (window.ccNexusDesktop?.saveFile) {
+        await window.ccNexusDesktop?.saveFile({ path: selectedFile.path, content: draft });
+      } else {
+        const res = await fetch('/api/files/content', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: selectedFile.path, content: draft }),
+        });
+        const data = await res.json() as { error?: string };
+        if (!res.ok) throw new Error(data.error || 'Failed to save file');
+      }
       setLoadedContent(draft);
       setDirty(false);
       setNotice('已保存');
@@ -252,6 +313,9 @@ export default function FileExplorer() {
           </div>
         </div>
         <div className="file-explorer-actions">
+          <button type="button" onClick={openProject} title="打开项目" aria-label="打开项目">
+            <FolderPlus size={15} />
+          </button>
           <button type="button" onClick={loadTree} title="刷新文件" aria-label="刷新文件" disabled={loadingTree}>
             <RefreshCw size={15} className={loadingTree ? 'spinning' : ''} />
           </button>

@@ -5,6 +5,7 @@ import CompletionDropdown, { type CompletionItem } from './CompletionDropdown';
 import ButtonArea from './ButtonArea';
 import { applyLongContextSuffix } from '../../utils/modelResolution';
 import { calculateContextPercentage, getModelContextLimit } from '../../utils/contextUsage';
+import { getAgents, getCommands, getFileTree, getPrompts } from '../../utils/desktopBridgeApi';
 
 interface ChatInputBoxProps {
   onSend: (
@@ -151,8 +152,7 @@ export default function ChatInputBox({
     if (!activeTrigger) return;
 
     if (activeTrigger.trigger === '@' && files.length === 0) {
-      fetch('/api/files/tree?path=.&depth=2&showDotfiles=false')
-        .then(response => response.json())
+      getFileTree({ path: '.', depth: 2, showDotfiles: false })
         .then(data => {
           const collected: FileEntry[] = [];
           const walk = (nodes: unknown[]) => {
@@ -162,29 +162,26 @@ export default function ChatInputBox({
               if (Array.isArray(node.children)) walk(node.children);
             });
           };
-          if (Array.isArray(data)) walk(data);
+          if (Array.isArray(data.tree)) walk(data.tree);
           setFiles(collected);
         })
         .catch(() => setFiles([]));
     }
 
     if (activeTrigger.trigger === '#' && agents.length === 0) {
-      fetch('/api/agents')
-        .then(response => response.json())
+      getAgents()
         .then(data => setAgents(data.agents || []))
         .catch(() => setAgents([]));
     }
 
     if (activeTrigger.trigger === '!' && prompts.length === 0) {
-      fetch('/api/prompts')
-        .then(response => response.json())
+      getPrompts()
         .then(data => setPrompts(data.prompts || []))
         .catch(() => setPrompts([]));
     }
 
     if (activeTrigger.trigger === '/' && commands.length === 0) {
-      fetch('/api/commands')
-        .then(response => response.json())
+      getCommands()
         .then(data => setCommands(data.commands || []))
         .catch(() => setCommands([]));
     }

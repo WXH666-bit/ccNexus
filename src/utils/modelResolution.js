@@ -15,7 +15,7 @@ export const CLAUDE_MODELS = [
     id: 'claude-fable-5',
     label: 'Fable 5',
     subtitle: 'Fable 5 · 最强大 · Mythos 级',
-    mappingKey: 'fable',
+    mappingKey: undefined,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -40,7 +40,6 @@ function clean(value) {
 const MODEL_MAPPING_ENV_KEYS = {
   opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  fable: 'ANTHROPIC_DEFAULT_FABLE_MODEL',
   haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 };
 

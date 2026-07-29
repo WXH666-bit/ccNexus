@@ -15,17 +15,20 @@ test('assistantEvent wraps the complete message under message', () => {
 });
 
 test('assistantEvent carries model and terminal metadata inside message', () => {
+  const usage = { input_tokens: 10, output_tokens: 2 };
   const event = assistantEvent({
     id: 'a1',
     content: [],
     sessionId: 's1',
     model: 'claude',
+    usage,
     cost: 0.01,
     duration: 12,
     turns: 1,
   });
 
   assert.equal(event.message.model, 'claude');
+  assert.equal(event.message.usage, usage);
   assert.equal(event.message.cost, 0.01);
   assert.equal(event.message.duration, 12);
   assert.equal(event.message.turns, 1);

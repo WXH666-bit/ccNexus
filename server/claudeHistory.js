@@ -170,6 +170,10 @@ export function convertClaudeHistoryEntry(entry, fallbackSessionId) {
     message.model = entry.message.model;
   }
 
+  if (role === 'assistant' && entry.message.usage && typeof entry.message.usage === 'object') {
+    message.usage = entry.message.usage;
+  }
+
   return message;
 }
 

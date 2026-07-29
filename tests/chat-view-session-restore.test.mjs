@@ -13,22 +13,25 @@ function read(path) {
 test('ChatView accepts restored history for the latest session when /chat has no session id', () => {
   const source = read('src/views/ChatView.tsx');
 
-  assert.match(source, /if\s*\(urlSessionId\s*&&\s*urlSessionId\s*!==\s*msg\.sessionId\)\s*break;/);
+  assert.match(source, /if\s*\(urlSessionId\s*&&\s*urlSessionId\s*!==\s*history\.sessionId\)\s*return;/);
 });
 
 test('ChatView requests the latest session history after restoring the session list', () => {
   const source = read('src/views/ChatView.tsx');
 
-  assert.match(source, /const latest = \[\.\.\.msg\.sessions\]\.sort/);
-  assert.match(source, /send\(\{\s*type:\s*'load_session',\s*sessionId:\s*latest\.id\s*\}\)/s);
+  assert.match(source, /const latest = \[\.\.\.sessionList\]\.sort/);
+  assert.match(source, /requestSessionHistory\(latest\.id\)/);
+  assert.match(source, /loadSession\(sessionId\)/);
+  assert.match(source, /send\(\{\s*type:\s*'load_session',\s*sessionId\s*\}\)/s);
 });
 
 test('ChatView seeds context usage from restored history before the next live usage update', () => {
   const source = read('src/views/ChatView.tsx');
 
   assert.match(source, /estimateMessagesUsedTokens/);
-  assert.match(source, /setMessages\(msg\.messages\);\s*setUsageUsedTokens\(readStoredContextUsage\(msg\.sessionId\) \?\? estimateMessagesUsedTokens\(msg\.messages\)\);/s);
-  assert.match(source, /case 'rewind_complete': \{[\s\S]*setUsageUsedTokens\(estimateMessagesUsedTokens\(msg\.messages\)\);/);
+  assert.match(source, /extractMessagesUsedTokens/);
+  assert.match(source, /setMessages\(history\.messages\);\s*setUsageUsedTokens\(extractMessagesUsedTokens\(history\.messages\) \?\? readStoredContextUsage\(history\.sessionId\) \?\? estimateMessagesUsedTokens\(history\.messages\)\);/s);
+  assert.match(source, /case 'rewind_complete': \{[\s\S]*setUsageUsedTokens\(extractMessagesUsedTokens\(msg\.messages\) \?\? estimateMessagesUsedTokens\(msg\.messages\)\);/);
   assert.match(source, /setMessages\(\[\]\);\s*setUsageUsedTokens\(readStoredContextUsage\(urlSessionId\)\);/s);
 });
 

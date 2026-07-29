@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Search, Plus, PlusSquare, History, Settings, ChevronLeft, Pencil, Check, X, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { Search, Plus, PlusSquare, History, Settings, ChevronLeft, Pencil, Check, X, ChevronDown, ChevronUp, RotateCcw, FolderPlus } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { SearchResult } from '../types';
 
@@ -14,12 +14,13 @@ interface ChatHeaderProps {
   onSearchNext?: () => void;
   onSearchPrev?: () => void;
   onRewind?: () => void;
+  onOpenProject?: () => void;
 }
 
 export default function ChatHeader({ 
   sessionTitle, onNewSession, onRenameSession,
   searchQuery, onSearchChange, searchResults, currentSearchIdx,
-  onSearchNext, onSearchPrev, onRewind
+  onSearchNext, onSearchPrev, onRewind, onOpenProject
 }: ChatHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -131,6 +132,11 @@ export default function ChatHeader({
         {onRewind && (
           <button className="header-btn" title="回溯会话" onClick={onRewind}>
             <RotateCcw size={18} />
+          </button>
+        )}
+        {onOpenProject && (
+          <button className="header-btn" title="打开项目" onClick={onOpenProject}>
+            <FolderPlus size={18} />
           </button>
         )}
         <button className="header-btn" title="新建会话" onClick={onNewSession}>

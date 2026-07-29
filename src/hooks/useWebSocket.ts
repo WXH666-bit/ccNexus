@@ -15,11 +15,16 @@ export function useWebSocket(): UseWebSocketReturn {
   const [lastMessage, setLastMessage] = useState<WSMessage | null>(null);
   const [incomingVersion, setIncomingVersion] = useState(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const desktopUnsubscribeRef = useRef<(() => void) | null>(null);
   const outboundQueueRef = useRef<ReturnType<typeof createOutboundMessageQueue> | null>(null);
   const inboundQueueRef = useRef<ReturnType<typeof createInboundMessageQueue<WSMessage>> | null>(null);
 
   if (!outboundQueueRef.current) {
     outboundQueueRef.current = createOutboundMessageQueue((message) => {
+      if (window.ccNexusDesktop?.sendChatCommand) {
+        window.ccNexusDesktop.sendChatCommand(message);
+        return;
+      }
       const socket = wsRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
@@ -31,6 +36,17 @@ export function useWebSocket(): UseWebSocketReturn {
   }
 
   const connect = useCallback(() => {
+    if (window.ccNexusDesktop?.onChatMessage) {
+      desktopUnsubscribeRef.current = window.ccNexusDesktop.onChatMessage((msg) => {
+        inboundQueueRef.current?.push(msg as WSMessage);
+        setLastMessage(msg as WSMessage);
+        setIncomingVersion((version) => version + 1);
+      });
+      setConnected(true);
+      outboundQueueRef.current?.flush();
+      return;
+    }
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${location.host}/ws`);
     wsRef.current = ws;
@@ -61,6 +77,8 @@ export function useWebSocket(): UseWebSocketReturn {
     connect();
     return () => {
       clearTimeout(reconnectTimer.current);
+      desktopUnsubscribeRef.current?.();
+      desktopUnsubscribeRef.current = null;
       outboundQueueRef.current?.clear();
       inboundQueueRef.current?.clear();
       wsRef.current?.close();
@@ -68,6 +86,10 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [connect]);
 
   const send = useCallback((msg: Record<string, unknown>) => {
+    if (window.ccNexusDesktop?.sendChatCommand) {
+      outboundQueueRef.current?.send(msg, true);
+      return;
+    }
     const isOpen = wsRef.current?.readyState === WebSocket.OPEN;
     outboundQueueRef.current?.send(msg, isOpen);
   }, []);
