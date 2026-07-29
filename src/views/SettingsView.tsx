@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { 
   Palette, Shield, Bot, Server, BarChart3, Globe, 
-  Code2, Zap, Settings as SettingsIcon, Sparkles
+  Code2, Zap, Settings as SettingsIcon, Sparkles, ChevronLeft
 } from 'lucide-react';
 import BasicConfigSection from '../components/settings/BasicConfigSection';
 import PermissionsSection from '../components/settings/PermissionsSection';
@@ -30,6 +31,7 @@ const sections = [
 
 export default function SettingsView() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('basic');
 
   const renderSection = () => {
@@ -62,7 +64,12 @@ export default function SettingsView() {
   return (
     <div className="settings-view">
       <div className="settings-sidebar">
-        <h2>{t('settings.title')}</h2>
+        <div className="settings-sidebar-header">
+          <button className="view-back-btn" onClick={() => navigate('/chat')} title="Back to chat" aria-label="Back to chat">
+            <ChevronLeft size={18} />
+          </button>
+          <h2>{t('settings.title')}</h2>
+        </div>
         <nav>
           {sections.map(s => (
             <button

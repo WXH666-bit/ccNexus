@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Star, Trash2, Edit3, Download, MessageSquare } from 'lucide-react';
+import { ChevronLeft, Search, Star, Trash2, Edit3, Download, MessageSquare } from 'lucide-react';
 import type { Session } from '../types';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { deleteSession, getSessions, renameSession } from '../utils/sessionBridgeApi';
@@ -84,7 +84,12 @@ export default function HistoryView() {
   return (
     <div className="history-view">
       <div className="history-header">
-        <h2>会话历史</h2>
+        <div className="history-header-main">
+          <button className="view-back-btn" onClick={() => navigate('/chat')} title="Back to chat" aria-label="Back to chat">
+            <ChevronLeft size={18} />
+          </button>
+          <h2>会话历史</h2>
+        </div>
         <div className="history-filters">
           <div className="search-box">
             <Search size={16} />

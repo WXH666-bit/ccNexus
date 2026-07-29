@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { WorkspaceFileService } from '../desktop/runtime/workspaceFiles.js';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
@@ -68,6 +72,27 @@ test('desktop workspace file service mirrors server file safety rules', () => {
   assert.match(service, /async readFile/);
   assert.match(service, /async saveFile/);
   assert.match(service, /async setWorkspace/);
+});
+
+test('desktop workspace service restores the last opened workspace after restart', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-workspace-'));
+  try {
+    const defaultDir = path.join(tempRoot, 'default');
+    const projectDir = path.join(tempRoot, 'project');
+    const stateFile = path.join(tempRoot, 'state', 'desktop-state.json');
+    await mkdir(defaultDir);
+    await mkdir(projectDir);
+
+    const firstRun = new WorkspaceFileService({ cwd: defaultDir, stateFile });
+    await firstRun.setWorkspace(projectDir);
+
+    const restarted = new WorkspaceFileService({ cwd: defaultDir, stateFile });
+    await restarted.restoreWorkspace();
+
+    assert.equal(restarted.getWorkspace().cwd, path.resolve(projectDir));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('server keeps a mutable workspace root for file APIs and Claude queries', () => {

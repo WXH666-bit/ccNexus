@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDesktopRuntime } from './runtime/index.js';
@@ -12,12 +13,13 @@ import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = path.join(__dirname, 'preload.cjs');
 const indexHtml = path.resolve(__dirname, '../dist/index.html');
+const desktopStateFile = path.join(process.env.HOME || os.homedir() || process.cwd(), '.ccnexus', 'desktop-state.json');
 
 const runtime = createDesktopRuntime({
   cwd: process.cwd(),
   provider: 'claude',
 });
-const workspaceFiles = new WorkspaceFileService({ cwd: process.cwd() });
+const workspaceFiles = new WorkspaceFileService({ cwd: process.cwd(), stateFile: desktopStateFile });
 const localConfig = new LocalConfigService();
 const desktopSessions = new DesktopSessionService({ cwd: process.cwd() });
 const sessionController = createDesktopSessionController({
@@ -146,8 +148,11 @@ ipcMain.on('desktop:chat-command', (event, message = {}) => {
   void chatController.handle(message, emit);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   hideDefaultApplicationMenu(Menu);
+  const workspace = await workspaceFiles.restoreWorkspace();
+  runtime.setCwd(workspace.cwd);
+  desktopSessions.setCwd(workspace.cwd);
   createMainWindow();
 
   app.on('activate', () => {

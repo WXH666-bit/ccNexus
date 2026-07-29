@@ -22,8 +22,9 @@ function isDotfile(name) {
 }
 
 export class WorkspaceFileService {
-  constructor({ cwd = process.cwd() } = {}) {
+  constructor({ cwd = process.cwd(), stateFile = null } = {}) {
     this.workspaceRoot = path.resolve(cwd);
+    this.stateFile = stateFile;
   }
 
   getWorkspace() {
@@ -41,7 +42,37 @@ export class WorkspaceFileService {
     const stat = await fs.stat(resolved);
     if (!stat.isDirectory()) throw new Error('Workspace path is not a directory');
     this.workspaceRoot = resolved;
+    await this.persistWorkspace();
     return this.getWorkspace();
+  }
+
+  async restoreWorkspace() {
+    if (!this.stateFile) return this.getWorkspace();
+    try {
+      const state = JSON.parse(await fs.readFile(this.stateFile, 'utf8'));
+      if (typeof state.lastWorkspace !== 'string' || !state.lastWorkspace.trim()) {
+        return this.getWorkspace();
+      }
+      const resolved = path.resolve(state.lastWorkspace);
+      const stat = await fs.stat(resolved);
+      if (stat.isDirectory()) this.workspaceRoot = resolved;
+    } catch {
+      // Missing or invalid app state should not block startup.
+    }
+    return this.getWorkspace();
+  }
+
+  async persistWorkspace() {
+    if (!this.stateFile) return;
+    try {
+      await fs.mkdir(path.dirname(this.stateFile), { recursive: true });
+      await fs.writeFile(this.stateFile, JSON.stringify({
+        lastWorkspace: this.workspaceRoot,
+        updatedAt: Date.now(),
+      }, null, 2), 'utf8');
+    } catch {
+      // Opening a project should still work if the app state file is unavailable.
+    }
   }
 
   safePath(requestedPath) {
