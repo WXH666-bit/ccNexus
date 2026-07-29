@@ -54,6 +54,27 @@ test('ChatInputBox supports ccgui trigger completions and toolbar controls', () 
   assert.equal(buttonArea.includes('<ProviderSelect'), false);
 });
 
+test('ChatInputBox persists chat toolbar preferences across app restarts', () => {
+  const chatView = read('src/views/ChatView.tsx');
+  const inputBox = read('src/components/ChatInputBox/index.tsx');
+
+  assert.match(chatView, /readStoredPreference\('chatMode', 'default'\)/);
+  assert.match(chatView, /localStorage\.setItem\('chatMode'/);
+  assert.match(chatView, /readStoredPreference\('chatModel', 'default'\)/);
+  assert.match(chatView, /localStorage\.setItem\('chatModel'/);
+  assert.match(chatView, /readStoredPreference\('chatReasoning', 'high'\)/);
+  assert.match(chatView, /localStorage\.setItem\('chatReasoning'/);
+
+  assert.match(inputBox, /setAlwaysThinking = useCallback/);
+  assert.match(inputBox, /localStorage\.setItem\('alwaysThinking'/);
+  assert.match(inputBox, /setStreaming = useCallback/);
+  assert.match(inputBox, /localStorage\.setItem\('streaming'/);
+  assert.match(inputBox, /setLongContextEnabled = useCallback/);
+  assert.match(inputBox, /localStorage\.setItem\('longContextEnabled'/);
+  assert.match(inputBox, /setSelectedAgent = useCallback/);
+  assert.match(inputBox, /localStorage\.setItem\('selectedAgent'/);
+});
+
 test('ChatInputBox config switches show distinct enabled and disabled states', () => {
   const styles = read('src/index.css');
 

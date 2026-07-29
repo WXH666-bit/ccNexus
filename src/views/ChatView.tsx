@@ -36,6 +36,11 @@ import type {
 let msgIdCounter = 0;
 function genId() { return `msg-${Date.now()}-${++msgIdCounter}`; }
 
+function readStoredPreference(key: string, fallback: string) {
+  const saved = localStorage.getItem(key);
+  return saved && saved.trim() ? saved : fallback;
+}
+
 export default function ChatView() {
   const { sessionId: urlSessionId } = useParams();
   const navigate = useNavigate();
@@ -47,9 +52,9 @@ export default function ChatView() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [status, setStatus] = useState<StatusData>({});
-  const [mode, setMode] = useState('default');
-  const [model, setModel] = useState('default');
-  const [reasoning, setReasoning] = useState('high');
+  const [mode, setModeState] = useState(() => readStoredPreference('chatMode', 'default'));
+  const [model, setModelState] = useState(() => readStoredPreference('chatModel', 'default'));
+  const [reasoning, setReasoningState] = useState(() => readStoredPreference('chatReasoning', 'high'));
   const [usageUsedTokens, setUsageUsedTokens] = useState<number | undefined>(undefined);
 
   // P1 features state
@@ -84,6 +89,21 @@ export default function ChatView() {
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
   const serverSessionNavigationRef = useRef<string | null>(null);
+
+  const setMode = useCallback((nextMode: string) => {
+    setModeState(nextMode);
+    localStorage.setItem('chatMode', nextMode);
+  }, []);
+
+  const setModel = useCallback((nextModel: string) => {
+    setModelState(nextModel);
+    localStorage.setItem('chatModel', nextModel);
+  }, []);
+
+  const setReasoning = useCallback((nextReasoning: string) => {
+    setReasoningState(nextReasoning);
+    localStorage.setItem('chatReasoning', nextReasoning);
+  }, []);
 
   // Search logic
   const performSearch = useCallback((query: string) => {

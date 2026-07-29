@@ -117,20 +117,35 @@ export default function ChatInputBox({
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);
   const [commands, setCommands] = useState<CommandEntry[]>([]);
   const [attachments, setAttachments] = useState<{ type: string; name: string; data: string }[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState(() => localStorage.getItem('selectedAgent') || '');
-  const [streaming, setStreaming] = useState(() => localStorage.getItem('streaming') !== 'false');
-  const [alwaysThinking, setAlwaysThinking] = useState(() => localStorage.getItem('alwaysThinking') === 'true');
-  const [longContextEnabled, setLongContextEnabled] = useState(() => localStorage.getItem('longContextEnabled') !== 'false');
+  const [selectedAgent, setSelectedAgentState] = useState(() => localStorage.getItem('selectedAgent') || '');
+  const [streaming, setStreamingState] = useState(() => localStorage.getItem('streaming') !== 'false');
+  const [alwaysThinking, setAlwaysThinkingState] = useState(() => localStorage.getItem('alwaysThinking') === 'true');
+  const [longContextEnabled, setLongContextEnabledState] = useState(() => localStorage.getItem('longContextEnabled') !== 'false');
 
   const activeTrigger = triggerFromText(text);
   const effectiveModel = applyLongContextSuffix(model === 'default' ? 'claude-sonnet-4-6' : model, longContextEnabled);
   const usageMaxTokens = getModelContextLimit(effectiveModel);
   const usagePercentage = calculateContextPercentage(usageUsedTokens ?? 0, usageMaxTokens);
 
-  useEffect(() => localStorage.setItem('selectedAgent', selectedAgent), [selectedAgent]);
-  useEffect(() => localStorage.setItem('streaming', String(streaming)), [streaming]);
-  useEffect(() => localStorage.setItem('alwaysThinking', String(alwaysThinking)), [alwaysThinking]);
-  useEffect(() => localStorage.setItem('longContextEnabled', String(longContextEnabled)), [longContextEnabled]);
+  const setSelectedAgent = useCallback((agent: string) => {
+    setSelectedAgentState(agent);
+    localStorage.setItem('selectedAgent', agent);
+  }, []);
+
+  const setStreaming = useCallback((enabled: boolean) => {
+    setStreamingState(enabled);
+    localStorage.setItem('streaming', String(enabled));
+  }, []);
+
+  const setAlwaysThinking = useCallback((enabled: boolean) => {
+    setAlwaysThinkingState(enabled);
+    localStorage.setItem('alwaysThinking', String(enabled));
+  }, []);
+
+  const setLongContextEnabled = useCallback((enabled: boolean) => {
+    setLongContextEnabledState(enabled);
+    localStorage.setItem('longContextEnabled', String(enabled));
+  }, []);
 
   useEffect(() => {
     if (!activeTrigger) return;
