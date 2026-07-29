@@ -51,8 +51,9 @@ test('desktop daemon runs Claude SDK query and asks the bridge for tool permissi
 
   assert.match(daemon, /@anthropic-ai\/claude-agent-sdk/);
   assert.match(daemon, /method === 'query'/);
-  assert.match(daemon, /activeQuery = sdkQuery\(\{/);
-  assert.match(daemon, /prompt,\n\s+options: \{/);
+  assert.match(daemon, /class AsyncStream/);
+  assert.match(daemon, /const query = sdkQuery\(\{[\s\S]*prompt:\s*inputStream/);
+  assert.match(daemon, /currentRuntime\.inputStream\.enqueue\(buildUserMessage/);
   assert.match(daemon, /async function canUseTool/);
   assert.match(daemon, /type:\s*'permission_request'/);
   assert.match(daemon, /pendingPermissions\.set\(requestId, resolve\)/);
