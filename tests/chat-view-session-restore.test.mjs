@@ -27,7 +27,22 @@ test('ChatView seeds context usage from restored history before the next live us
   const source = read('src/views/ChatView.tsx');
 
   assert.match(source, /estimateMessagesUsedTokens/);
-  assert.match(source, /setMessages\(msg\.messages\);\s*setUsageUsedTokens\(estimateMessagesUsedTokens\(msg\.messages\)\);/s);
+  assert.match(source, /setMessages\(msg\.messages\);\s*setUsageUsedTokens\(readStoredContextUsage\(msg\.sessionId\) \?\? estimateMessagesUsedTokens\(msg\.messages\)\);/s);
   assert.match(source, /case 'rewind_complete': \{[\s\S]*setUsageUsedTokens\(estimateMessagesUsedTokens\(msg\.messages\)\);/);
-  assert.match(source, /setMessages\(\[\]\);\s*setUsageUsedTokens\(undefined\);/s);
+  assert.match(source, /setMessages\(\[\]\);\s*setUsageUsedTokens\(readStoredContextUsage\(urlSessionId\)\);/s);
+});
+
+test('ChatView persists live usage updates per session so refresh does not fall back to a low estimate', () => {
+  const source = read('src/views/ChatView.tsx');
+  const types = read('src/types.ts');
+  const contextUsage = read('src/utils/contextUsage.js');
+  const server = read('server/index.js');
+
+  assert.match(source, /function readStoredContextUsage\(sessionId\?: string\)/);
+  assert.match(source, /function writeStoredContextUsage\(sessionId: string \| undefined, usedTokens: number\)/);
+  assert.match(source, /const usageSessionId = msg\.sessionId \?\? currentSession\?\.id \?\? urlSessionId;/);
+  assert.match(source, /writeStoredContextUsage\(usageSessionId, msg\.usedTokens\);/);
+  assert.match(types, /type: 'usage_update';[^}]*sessionId\?: string/s);
+  assert.match(contextUsage, /sessionId/);
+  assert.match(server, /sessionId: querySessionId/);
 });

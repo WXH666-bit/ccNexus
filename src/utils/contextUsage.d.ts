@@ -9,6 +9,7 @@ export interface TokenUsagePayload {
 
 export interface UsageUpdatePayload {
   type: 'usage_update';
+  sessionId?: string;
   percentage: number;
   totalTokens: number;
   limit: number;
@@ -25,4 +26,5 @@ export function createUsageUpdate(options: {
   usage: TokenUsagePayload;
   provider?: string;
   model?: string;
+  sessionId?: string;
 }): UsageUpdatePayload;

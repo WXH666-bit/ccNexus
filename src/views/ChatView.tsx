@@ -41,6 +41,20 @@ function readStoredPreference(key: string, fallback: string) {
   return saved && saved.trim() ? saved : fallback;
 }
 
+const CONTEXT_USAGE_STORAGE_PREFIX = 'chatContextUsage:';
+
+function readStoredContextUsage(sessionId?: string) {
+  if (!sessionId) return undefined;
+  const saved = localStorage.getItem(`${CONTEXT_USAGE_STORAGE_PREFIX}${sessionId}`);
+  const parsed = saved === null ? Number.NaN : Number.parseInt(saved, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function writeStoredContextUsage(sessionId: string | undefined, usedTokens: number) {
+  if (!sessionId || !Number.isFinite(usedTokens) || usedTokens < 0) return;
+  localStorage.setItem(`${CONTEXT_USAGE_STORAGE_PREFIX}${sessionId}`, String(Math.round(usedTokens)));
+}
+
 export default function ChatView() {
   const { sessionId: urlSessionId } = useParams();
   const navigate = useNavigate();
@@ -301,7 +315,7 @@ export default function ChatView() {
         send({ type: 'load_session', sessionId: urlSessionId });
       }
       setMessages([]);
-      setUsageUsedTokens(undefined);
+      setUsageUsedTokens(readStoredContextUsage(urlSessionId));
       resetStreamingBlockState(streamingBlocksRef.current);
       streamingMsgRef.current = null;
     }
@@ -457,7 +471,7 @@ export default function ChatView() {
         streamingMsgRef.current = null;
         setIsStreaming(false);
         setMessages(msg.messages);
-        setUsageUsedTokens(estimateMessagesUsedTokens(msg.messages));
+        setUsageUsedTokens(readStoredContextUsage(msg.sessionId) ?? estimateMessagesUsedTokens(msg.messages));
         setCurrentSession(prev => prev?.id === msg.sessionId
           ? prev
           : sessions.find(session => session.id === msg.sessionId) || {
@@ -477,6 +491,8 @@ export default function ChatView() {
 
       case 'usage_update': {
         setUsageUsedTokens(msg.usedTokens);
+        const usageSessionId = msg.sessionId ?? currentSession?.id ?? urlSessionId;
+        writeStoredContextUsage(usageSessionId, msg.usedTokens);
         break;
       }
 

@@ -166,6 +166,7 @@ function forgetSessionState(sessionId) {
   fileEditHistory.delete(sessionId);
   activeQueries.delete(sessionId);
   activeQueryStartTimes.delete(sessionId);
+  removeSessionDaemon(sessionId);
 }
 
 async function syncPersistedSessionsWithClaude() {
@@ -210,6 +211,9 @@ function createPermissionHandler(ws) {
 const activeQueries = new Map(); // sessionId → Query
 const activeQueryStartTimes = new Map(); // sessionId → timestamp
 
+const sessionDaemons = new Map(); // sessionId -> ccGUI-style daemon descriptor
+let nextDaemonTabIndex = 1;
+
 function queryProcess(query) {
   if (!query || typeof query !== 'object') return null;
   for (const key of ['process', 'childProcess', 'subprocess']) {
@@ -233,6 +237,105 @@ function unregisterActiveQuery(sessionId, query) {
     activeQueries.delete(sessionId);
     activeQueryStartTimes.delete(sessionId);
   }
+}
+
+function ensureSessionDaemon(sessionId, title) {
+  if (!sessionId) return null;
+  const existing = sessionDaemons.get(sessionId);
+  if (existing) {
+    if (title && !existing.title) existing.title = title;
+    return existing;
+  }
+
+  const daemon = {
+    id: `daemon-${process.pid}-${sessionId}`,
+    kind: 'DAEMON',
+    provider: 'claude',
+    pid: process.pid,
+    alive: true,
+    startedAt: Date.now(),
+    sessionId,
+    tabName: `AI${nextDaemonTabIndex++}`,
+    title: title || '',
+    command: process.argv.join(' '),
+  };
+  sessionDaemons.set(sessionId, daemon);
+  return daemon;
+}
+
+function removeSessionDaemon(sessionId) {
+  if (!sessionId) return;
+  sessionDaemons.delete(sessionId);
+}
+
+function buildProcessSnapshot() {
+  const snapshotAt = Date.now();
+  const processes = [];
+
+  for (const [sessionId, daemon] of sessionDaemons.entries()) {
+    const uptimeMs = Math.max(0, snapshotAt - daemon.startedAt);
+    processes.push({
+      ...daemon,
+      alive: true,
+      uptime: uptimeMs,
+      uptimeMs,
+      heapUsed: process.memoryUsage().heapUsed,
+      activeRequestCount: activeQueries.has(sessionId) ? 1 : 0,
+      orphan: false,
+    });
+  }
+
+  for (const [sessionId, query] of activeQueries.entries()) {
+    const processRef = queryProcess(query);
+    if (!processRef) continue;
+    const startTime = activeQueryStartTimes.get(sessionId) || snapshotAt;
+    processes.push({
+      id: `channel-${sessionId}-${processRef.pid}`,
+      kind: 'CHANNEL',
+      provider: 'claude',
+      pid: processRef.pid,
+      alive: !processRef.killed,
+      sessionId,
+      channelId: sessionId,
+      tabName: sessionDaemons.get(sessionId)?.tabName,
+      startTime,
+      startedAt: startTime,
+      uptime: snapshotAt - startTime,
+      uptimeMs: snapshotAt - startTime,
+      activeRequestCount: 1,
+      orphan: false,
+    });
+  }
+
+  const totals = processes.reduce((acc, item) => {
+    if (item.kind === 'DAEMON') acc.daemon += 1;
+    if (item.kind === 'CHANNEL') acc.channel += 1;
+    if (item.kind === 'ORPHAN') acc.orphan += 1;
+    acc.all += 1;
+    return acc;
+  }, { daemon: 0, channel: 0, orphan: 0, all: 0 });
+
+  return {
+    snapshotAt,
+    totals: {
+      daemon: totals.daemon,
+      channel: totals.channel,
+      orphan: totals.orphan,
+      all: totals.all,
+    },
+    processes,
+  };
+}
+
+function findOwnedProcess(pid) {
+  return buildProcessSnapshot().processes.find((item) => item.pid === pid) || null;
+}
+
+function findOwnedProcessById(id, pid) {
+  if (!id) return null;
+  return buildProcessSnapshot().processes.find((item) => (
+    item.id === id && (!pid || item.pid === pid)
+  )) || null;
 }
 
 // ─── Message history per session (for Rewind) ────────────────────
@@ -684,70 +787,81 @@ app.get('/api/agents', async (_req, res) => {
 
 // 获取进程列表
 app.get('/api/processes', (_req, res) => {
-  const processes = [];
-  const snapshotAt = Date.now();
-  
-  for (const [sessionId, query] of activeQueries.entries()) {
-    const processRef = queryProcess(query);
-    if (processRef) {
-      const startTime = activeQueryStartTimes.get(sessionId) || snapshotAt;
-      processes.push({
-        id: `channel-${sessionId}-${processRef.pid}`,
-        kind: 'CHANNEL',
-        provider: 'claude',
-        pid: processRef.pid,
-        alive: !processRef.killed,
-        sessionId: sessionId,
-        startTime,
-        startedAt: startTime,
-        uptime: snapshotAt - startTime,
-        uptimeMs: snapshotAt - startTime,
-        activeRequestCount: 1,
-        orphan: false,
-      });
-    }
-  }
-  
-  res.json({
-    snapshotAt,
-    totals: {
-      daemon: 0,
-      channel: processes.length,
-      orphan: 0,
-      all: processes.length,
-    },
-    processes,
-  });
+  res.json(buildProcessSnapshot());
 });
 
 // 结束进程
 app.post('/api/processes/:pid/kill', (req, res) => {
   const pid = parseInt(req.params.pid);
-  
-  for (const [sessionId, query] of activeQueries.entries()) {
-    const processRef = queryProcess(query);
-    if (processRef && processRef.pid === pid) {
-      try {
-        try { query.interrupt?.(); } catch { /* ignore */ }
-        try { query.close?.(); } catch { /* ignore */ }
-        processRef.kill('SIGTERM');
-        setTimeout(() => {
-          if (!processRef.killed) {
-            processRef.kill('SIGKILL');
-          }
-        }, 5000);
-        unregisterActiveQuery(sessionId, query);
-        
-        res.json({ ok: true, success: true, pid });
-        return;
-      } catch (err) {
-        res.status(500).json({ error: err.message });
+  const requestedId = typeof req.body?.id === 'string' ? req.body.id : null;
+  const owned = findOwnedProcessById(requestedId, pid) || findOwnedProcess(pid);
+
+  if (!owned) {
+    res.status(404).json({ error: 'Process not found' });
+    return;
+  }
+
+  try {
+    const { sessionId } = owned;
+    const query = sessionId ? activeQueries.get(sessionId) : null;
+
+    if (owned.kind === 'CHANNEL') {
+      const processRef = queryProcess(query);
+      if (!processRef || processRef.pid !== pid) {
+        res.status(404).json({ error: 'Process not found' });
         return;
       }
+      try { query.interrupt?.(); } catch { /* ignore */ }
+      try { query.close?.(); } catch { /* ignore */ }
+      processRef.kill('SIGTERM');
+      setTimeout(() => {
+        if (!processRef.killed) {
+          processRef.kill('SIGKILL');
+        }
+      }, 5000);
+      unregisterActiveQuery(sessionId, query);
+    } else if (owned.kind === 'DAEMON') {
+      if (query) {
+        try { query.interrupt?.(); } catch { /* ignore */ }
+        try { query.close?.(); } catch { /* ignore */ }
+        unregisterActiveQuery(sessionId, query);
+      }
+      removeSessionDaemon(sessionId);
+    } else {
+      res.status(404).json({ error: 'Process not found' });
+      return;
     }
+
+    res.json({ ok: true, success: true, pid, id: owned.id, kind: owned.kind });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  
-  res.status(404).json({ error: 'Process not found' });
+});
+
+app.post('/api/processes/:pid/restart', (req, res) => {
+  const pid = parseInt(req.params.pid);
+  const requestedId = typeof req.body?.id === 'string' ? req.body.id : null;
+  const owned = findOwnedProcessById(requestedId, pid) || findOwnedProcess(pid);
+
+  if (!owned || owned.kind !== 'DAEMON') {
+    res.status(404).json({ error: 'Daemon process not found' });
+    return;
+  }
+
+  try {
+    const { sessionId } = owned;
+    const query = sessionId ? activeQueries.get(sessionId) : null;
+    if (query) {
+      try { query.interrupt?.(); } catch { /* ignore */ }
+      try { query.close?.(); } catch { /* ignore */ }
+      unregisterActiveQuery(sessionId, query);
+    }
+    removeSessionDaemon(sessionId);
+    const daemon = ensureSessionDaemon(sessionId, owned.title || 'Restarted daemon');
+    res.json({ ok: true, success: true, restart: true, pid, id: daemon?.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 文件扫描 API（用于文件引用触发器）
@@ -1065,6 +1179,7 @@ wss.on('connection', (ws) => {
       sendJson(ws, sessionEventPayload);
       if (sessionEventPayload.type === 'session_history') {
         currentSessionId = sessionEventPayload.sessionId;
+        ensureSessionDaemon(sessionEventPayload.sessionId, 'Loaded session');
         sessionMessages.set(sessionEventPayload.sessionId, sessionEventPayload.messages);
       }
       return;
@@ -1129,6 +1244,7 @@ wss.on('connection', (ws) => {
                 usage,
                 provider: 'claude',
                 model: modelForUsage,
+                sessionId: querySessionId,
               })));
             }
 
@@ -1147,6 +1263,7 @@ wss.on('connection', (ws) => {
                   if (requestOrder === latestChatRequest) {
                     currentSessionId = querySessionId;
                   }
+                  ensureSessionDaemon(querySessionId, prompt.slice(0, 60));
                   registerActiveQuery(querySessionId, q);
                   ownedQueries.set(querySessionId, q);
                   await addSession(querySessionId, prompt.slice(0, 60));

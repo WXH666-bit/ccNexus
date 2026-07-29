@@ -114,11 +114,12 @@ export function extractUsageFromSdkEvent(event) {
   return candidates.find(isCompleteUsage) ?? null;
 }
 
-export function createUsageUpdate({ usage, provider = 'claude', model }) {
+export function createUsageUpdate({ usage, provider = 'claude', model, sessionId }) {
   const usedTokens = extractUsedTokens(usage, provider);
   const maxTokens = getModelContextLimit(model);
   return {
     type: 'usage_update',
+    ...(sessionId ? { sessionId } : {}),
     percentage: calculateContextPercentage(usedTokens, maxTokens),
     totalTokens: usedTokens,
     limit: maxTokens,

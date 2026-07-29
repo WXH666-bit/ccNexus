@@ -14,6 +14,13 @@ function formatTokens(value?: number) {
   return String(value);
 }
 
+function formatPercentageLabel(safePercentage: number) {
+  if (safePercentage <= 0) return '0%';
+  if (safePercentage < 1) return '<1%';
+  if (safePercentage < 10) return `${(Math.round(safePercentage * 10) / 10).toFixed(1)}%`;
+  return `${Math.round(safePercentage)}%`;
+}
+
 export default function TokenIndicator({
   percentage,
   size = 14,
@@ -25,7 +32,7 @@ export default function TokenIndicator({
   const center = size / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeOffset = circumference * (1 - safePercentage / 100);
-  const labelPercentage = `${Math.round(safePercentage)}%`;
+  const labelPercentage = formatPercentageLabel(safePercentage);
   const tooltipPercentage = `${(Math.round(safePercentage * 10) / 10).toFixed(1)}%`;
   const usedText = formatTokens(usedTokens);
   const maxText = formatTokens(maxTokens);

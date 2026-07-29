@@ -104,6 +104,14 @@ test('ChatInputBox token indicator uses dynamic usage props instead of a hard-co
   assert.match(contextBar, /maxTokens/);
 });
 
+test('ChatInputBox token indicator displays one decimal for small context percentages', () => {
+  const tokenIndicator = read('src/components/ChatInputBox/TokenIndicator.tsx');
+
+  assert.match(tokenIndicator, /function formatPercentageLabel/);
+  assert.match(tokenIndicator, /safePercentage < 10/);
+  assert.equal(/const labelPercentage = `\$\{Math\.round\(safePercentage\)\}%`;/.test(tokenIndicator), false);
+});
+
 test('ChatInputBox token indicator is vertically centered in the context bar', () => {
   const styles = read('src/index.css');
   const tokenRule = styles.match(/\.token-indicator\s*\{[^}]*\}/g)?.at(-1) || '';

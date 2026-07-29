@@ -1,5 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings2, ChevronRight, User, Server, Cpu, Radio, Brain, Wrench, X } from 'lucide-react';
+import {
+  Settings2,
+  ChevronRight,
+  User,
+  Server,
+  Cpu,
+  Radio,
+  Brain,
+  Wrench,
+  X,
+  RefreshCw,
+  RotateCcw,
+  Square,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 interface Agent {
@@ -15,10 +28,23 @@ interface Provider {
 }
 
 interface Process {
+  id: string;
+  kind: 'DAEMON' | 'CHANNEL' | 'ORPHAN';
+  provider?: string;
   pid: number;
-  sessionId: string;
-  startTime: number;
-  uptime: number;
+  sessionId?: string;
+  tabName?: string;
+  uptime?: number;
+  uptimeMs?: number;
+  heapUsed?: number;
+  activeRequestCount?: number;
+}
+
+interface ProcessTotals {
+  daemon: number;
+  channel: number;
+  orphan: number;
+  all: number;
 }
 
 interface Props {
@@ -49,6 +75,8 @@ export default function ConfigSelect({
   const [agents, setAgents] = useState<Agent[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [processes, setProcesses] = useState<Process[]>([]);
+  const [processTotals, setProcessTotals] = useState<ProcessTotals>({ daemon: 0, channel: 0, orphan: 0, all: 0 });
+  const [processesLoading, setProcessesLoading] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu on outside click
@@ -82,24 +110,51 @@ export default function ConfigSelect({
     }
   }, [menuState]);
 
+  const loadProcesses = async () => {
+    setProcessesLoading(true);
+    try {
+      const data = await fetch('/api/processes').then(r => r.json());
+      setProcesses(data.processes || []);
+      setProcessTotals(data.totals || { daemon: 0, channel: 0, orphan: 0, all: 0 });
+    } catch {
+      setProcesses([]);
+      setProcessTotals({ daemon: 0, channel: 0, orphan: 0, all: 0 });
+    } finally {
+      setProcessesLoading(false);
+    }
+  };
+
   // Load processes
   useEffect(() => {
-    if (menuState === 'processes') {
-      fetch('/api/processes')
-        .then(r => r.json())
-        .then(data => setProcesses(data.processes || []))
-        .catch(() => setProcesses([]));
+    if (menuState === 'main' || menuState === 'processes') {
+      void loadProcesses();
     }
   }, [menuState]);
 
-  const handleKillProcess = async (pid: number) => {
+  const handleKillProcess = async (proc: Process) => {
     try {
-      await fetch(`/api/processes/${pid}/kill`, { method: 'POST' });
+      await fetch(`/api/processes/${proc.pid}/kill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: proc.id }),
+      });
       // Refresh process list
-      const data = await fetch('/api/processes').then(r => r.json());
-      setProcesses(data.processes || []);
+      await loadProcesses();
     } catch (err) {
       console.error('Failed to kill process:', err);
+    }
+  };
+
+  const handleRestartProcess = async (proc: Process) => {
+    try {
+      await fetch(`/api/processes/${proc.pid}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: proc.id }),
+      });
+      await loadProcesses();
+    } catch (err) {
+      console.error('Failed to restart process:', err);
     }
   };
 
@@ -110,6 +165,55 @@ export default function ConfigSelect({
     if (hours > 0) return `${hours}h ${minutes % 60}m`;
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
+  };
+
+  const processGroups = {
+    DAEMON: processes.filter(proc => proc.kind === 'DAEMON'),
+    CHANNEL: processes.filter(proc => proc.kind === 'CHANNEL'),
+    ORPHAN: processes.filter(proc => proc.kind === 'ORPHAN'),
+  };
+
+  const processKindLabel = (kind: Process['kind']) => {
+    if (kind === 'DAEMON') return '守护进程';
+    if (kind === 'CHANNEL') return '进行中对话';
+    return '孤立进程';
+  };
+
+  const processTitle = (proc: Process) => {
+    const prefix = proc.kind === 'DAEMON' ? 'Daemon' : proc.kind === 'CHANNEL' ? 'Channel' : 'Orphan';
+    return proc.tabName ? `${prefix} · ${proc.tabName}` : prefix;
+  };
+
+  const renderProcessGroup = (kind: Process['kind'], items: Process[]) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="process-group" key={kind}>
+        <div className={`process-group-title ${kind === 'ORPHAN' ? 'danger' : ''}`}>
+          <Cpu size={13} />
+          <span>{processKindLabel(kind)} ({items.length})</span>
+        </div>
+        {items.map(proc => (
+          <div key={proc.id} className={`process-row ${proc.kind === 'ORPHAN' ? 'orphan' : ''}`}>
+            <Cpu size={15} className="process-row-icon" />
+            <div className="process-info">
+              <div className="process-title">{processTitle(proc)}</div>
+              <div className="process-meta">
+                PID {proc.pid} · {formatUptime(proc.uptimeMs ?? proc.uptime ?? 0)}
+                {proc.activeRequestCount ? ` · ${proc.activeRequestCount} active` : ''}
+              </div>
+            </div>
+            {proc.kind === 'DAEMON' && (
+              <button className="process-icon-btn" title="重启" onClick={() => handleRestartProcess(proc)}>
+                <RotateCcw size={14} />
+              </button>
+            )}
+            <button className="process-icon-btn danger" title={proc.kind === 'CHANNEL' ? '中断' : t('config.kill')} onClick={() => handleKillProcess(proc)}>
+              <Square size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const toggleMenu = () => {
@@ -151,6 +255,11 @@ export default function ConfigSelect({
                 <button className="config-menu-item" onClick={() => setMenuState('processes')}>
                   <Cpu size={16} />
                   <span>{t('config.processes')}</span>
+                  {processTotals.all > 0 && (
+                    <span className={`process-count-badge ${processTotals.orphan > 0 ? 'danger' : ''}`}>
+                      {processTotals.all} 个进程
+                    </span>
+                  )}
                   <ChevronRight size={14} />
                 </button>
                 <div className="config-menu-item toggle-item">
@@ -251,22 +360,20 @@ export default function ConfigSelect({
               <div className="config-menu-header">
                 <button className="back-btn" onClick={() => setMenuState('main')}>←</button>
                 <span>{t('config.processes')}</span>
+                <button className="process-refresh-btn" onClick={() => loadProcesses()} title="刷新">
+                  <RefreshCw size={14} className={processesLoading ? 'spin' : ''} />
+                </button>
               </div>
-              <div className="config-menu-items">
+              <div className="config-menu-items process-menu-items">
+                <div className="process-summary">共 {processTotals.all} 个 · 孤立 {processTotals.orphan} 个</div>
                 {processes.length === 0 ? (
                   <div className="empty-state">{t('config.noProcesses')}</div>
                 ) : (
-                  processes.map(proc => (
-                    <div key={proc.pid} className="config-menu-item process-item">
-                      <div className="process-info">
-                        <div className="process-pid">PID: {proc.pid}</div>
-                        <div className="process-uptime">{formatUptime(proc.uptime)}</div>
-                      </div>
-                      <button className="kill-btn" onClick={() => handleKillProcess(proc.pid)}>
-                        {t('config.kill')}
-                      </button>
-                    </div>
-                  ))
+                  <>
+                    {renderProcessGroup('DAEMON', processGroups.DAEMON)}
+                    {renderProcessGroup('CHANNEL', processGroups.CHANNEL)}
+                    {renderProcessGroup('ORPHAN', processGroups.ORPHAN)}
+                  </>
                 )}
               </div>
             </>

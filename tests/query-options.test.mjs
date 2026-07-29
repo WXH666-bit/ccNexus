@@ -70,7 +70,7 @@ test('does not send reasoning effort when the thinking toggle is off', () => {
   assert.equal(Object.hasOwn(options, 'maxThinkingTokens'), false);
 });
 
-test('strips ccgui long context marker before passing model to SDK', () => {
+test('preserves ccgui long context marker before passing model to SDK', () => {
   const options = buildClaudeQueryOptions({
     cwd: 'D:/repo',
     env: {},
@@ -80,7 +80,7 @@ test('strips ccgui long context marker before passing model to SDK', () => {
     },
   });
 
-  assert.equal(options.model, 'claude-opus-4-8');
+  assert.equal(options.model, 'claude-opus-4-8[1m]');
 });
 
 test('resolves ccgui provider model mapping before passing model to SDK', () => {
@@ -97,5 +97,36 @@ test('resolves ccgui provider model mapping before passing model to SDK', () => 
     },
   });
 
-  assert.equal(options.model, 'GLM-4.6-W8A8');
+  assert.equal(options.model, 'GLM-4.6-W8A8[1m]');
+});
+
+test('strips stale provider mapping suffix when the 1M toggle is off', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro[1M]',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6',
+    },
+  });
+
+  assert.equal(options.model, 'deepseek-v4-pro');
+});
+
+test('role-specific provider mapping beats the default fallback model', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      ANTHROPIC_MODEL: 'deepseek-v4-pro[1M]',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-haiku-4-5',
+    },
+  });
+
+  assert.equal(options.model, 'deepseek-v4-flash');
 });

@@ -22,6 +22,7 @@ interface Props {
 const MODEL_ICON_CLASS: Record<string, string> = {
   opus: 'model-option-icon--opus',
   sonnet: 'model-option-icon--sonnet',
+  fable: 'model-option-icon--sonnet',
   haiku: 'model-option-icon--haiku',
 };
 
