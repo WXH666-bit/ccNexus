@@ -15,7 +15,7 @@ test('ChatView mounts a collapsible PyCharm-style file explorer beside the chat 
   const styles = read('src/index.css');
 
   assert.match(source, /import FileExplorer from '\.\.\/components\/FileExplorer';/);
-  assert.match(source, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\} \/>/);
+  assert.match(source, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\} openFileRequest=\{fileOpenRequest\} \/>/);
   assert.match(source, /<div className="chat-pane">/);
   assert.match(styles, /\.chat-view\s*\{[^}]*flex-direction:\s*row;/s);
   assert.match(styles, /\.file-explorer\.collapsed\s*\{/s);
@@ -39,7 +39,7 @@ test('FileExplorer notifies ChatView so workspace changes reload the current pro
   assert.match(explorer, /onWorkspaceChange/);
   assert.match(explorer, /onWorkspaceChange\?\.\(data\)/);
   assert.match(chat, /handleWorkspaceChanged/);
-  assert.match(chat, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\} \/>/);
+  assert.match(chat, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\} openFileRequest=\{fileOpenRequest\} \/>/);
 });
 
 test('FileExplorer shows the real project tree instead of hiding common workspace folders', () => {

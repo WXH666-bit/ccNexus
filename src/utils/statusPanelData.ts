@@ -7,7 +7,7 @@ import type {
   ToolUseBlock,
   SubAgentInfo,
 } from '../types';
-import { computeDiff } from './diff';
+import { computeDiffStats } from './diff';
 import {
   findToolResultForBlock,
   isFileModifyToolName,
@@ -186,7 +186,7 @@ function deriveFileChanges(messages: ChatMessage[]): StatusData['edits'] {
       if (!path) return;
       const oldString = asText(input.old_string);
       const newString = asText(input.new_string);
-      const diff = computeDiff(oldString, newString);
+      const diff = computeDiffStats(oldString, newString);
       const existing = files.get(path);
       const next: StatusFileChange = existing || {
         path,

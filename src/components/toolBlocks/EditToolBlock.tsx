@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Pencil } from 'lucide-react';
 import type { ToolResultBlock, ToolUseBlock } from '../../types';
-import { computeDiff } from '../../utils/diff';
+import { computeDiff, computeDiffStats } from '../../utils/diff';
 
 interface Props {
   block: ToolUseBlock;
@@ -16,14 +16,11 @@ export default function EditToolBlock({ block, result }: Props) {
   const newStr = (input.new_string as string) || '';
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
 
-  let additions = 0, deletions = 0;
-  if (oldStr || newStr) {
-    const diff = computeDiff(oldStr, newStr);
-    additions = diff.additions;
-    deletions = diff.deletions;
-  }
-
-  const diffHtml = (oldStr || newStr) ? computeDiff(oldStr, newStr).html : '';
+  const diffStats = useMemo(() => computeDiffStats(oldStr, newStr), [oldStr, newStr]);
+  const diffPreview = useMemo(
+    () => expanded && (oldStr || newStr) ? computeDiff(oldStr, newStr) : null,
+    [expanded, oldStr, newStr],
+  );
 
   return (
     <div className="tool-block edit-block">
@@ -31,18 +28,22 @@ export default function EditToolBlock({ block, result }: Props) {
         <span className="tool-icon"><Pencil size={14} /></span>
         <span className="tool-label">编辑文件</span>
         <span className="file-link">{filePath}</span>
-        {(additions > 0 || deletions > 0) && (
+        {(diffStats.additions > 0 || diffStats.deletions > 0) && (
           <span className="diff-stats">
-            <span className="stat-add">+{additions}</span>
-            <span className="stat-del">-{deletions}</span>
+            <span className="stat-add">+{diffStats.additions}</span>
+            <span className="stat-del">-{diffStats.deletions}</span>
           </span>
         )}
         <span className={`status-dot ${statusClass}`} />
         <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
-      {expanded && diffHtml && (
+      {expanded && diffPreview && (
         <div className="tool-block-body">
-          <div className="diff-view" dangerouslySetInnerHTML={{ __html: diffHtml }} />
+          {diffPreview.truncated ? (
+            <div className="diff-preview-summary">Diff is too large to render here; open the file to inspect the full change.</div>
+          ) : (
+            <div className="diff-view" dangerouslySetInnerHTML={{ __html: diffPreview.html }} />
+          )}
         </div>
       )}
     </div>

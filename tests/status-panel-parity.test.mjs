@@ -26,7 +26,13 @@ test('status panel exposes ccgui-style structured actions', () => {
   assert.match(source, /status-panel-todo-item/);
   assert.match(source, /subagent-description/);
   assert.match(source, /status-file-diff/);
+  assert.match(source, /const diffPreviews = expanded && hasDiff/);
+  assert.match(source, /diff\.truncated/);
   assert.match(source, /onDiscardAllFiles/);
   assert.match(source, /onKeepAllFiles/);
   assert.match(source, /onUndoFile/);
+  assert.match(source, /loadSubagentHistory/);
+  assert.match(source, /onOpenFile/);
+  assert.match(source, /buildSubagentProcessModel/);
+  assert.match(source, /status-subagent-process-card/);
 });

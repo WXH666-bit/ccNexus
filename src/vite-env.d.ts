@@ -57,6 +57,14 @@ interface CcNexusDesktopApi {
   deletePrompt: (name: string) => Promise<unknown>;
   getSessions: () => Promise<{ type: 'session_list'; sessions: unknown[]; deletedSessionIds?: string[] }>;
   loadSession: (sessionId: string) => Promise<{ type: 'session_history'; sessionId: string; messages: unknown[] }>;
+  loadSubagentHistory: (args: { sessionId: string; agentId?: string; description?: string; toolUseId?: string }) => Promise<{
+    success: boolean;
+    toolUseId?: string;
+    agentId?: string;
+    sessionId?: string;
+    error?: string;
+    messages?: unknown[];
+  }>;
   renameSession: (sessionId: string, title: string) => Promise<{ type: 'session_renamed'; session_id: string; title: string }>;
   toggleFavoriteSession: (sessionId: string) => Promise<{ type: 'session_favorite_changed'; sessionId: string; isFavorite: boolean; favoritedAt?: number }>;
   exportSession: (sessionId: string, title?: string) => Promise<{ canceled: boolean; path?: string }>;

@@ -144,6 +144,8 @@ ipcMain.handle('desktop:get-sessions', async () => desktopSessions.getSessions({
 
 ipcMain.handle('desktop:load-session', async (_event, args = {}) => sessionController.loadSession(args.sessionId));
 
+ipcMain.handle('desktop:load-subagent-history', async (_event, args = {}) => desktopSessions.loadSubagentHistory(args));
+
 ipcMain.handle('desktop:rename-session', async (_event, args = {}) => desktopSessions.renameSession(args.sessionId, args.title));
 
 ipcMain.handle('desktop:toggle-favorite-session', async (_event, args = {}) => desktopSessions.toggleFavoriteSession(args.sessionId));

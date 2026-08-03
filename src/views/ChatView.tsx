@@ -33,7 +33,7 @@ import { getSessions, loadSession, renameSession } from '../utils/sessionBridgeA
 import { deriveStatusData } from '../utils/statusPanelData';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
-  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
+  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse
 } from '../types';
 
 let msgIdCounter = 0;
@@ -79,6 +79,7 @@ export default function ChatView() {
   const [contextUsageLoading, setContextUsageLoading] = useState(false);
   const [contextUsageError, setContextUsageError] = useState('');
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
+  const [fileOpenRequest, setFileOpenRequest] = useState<{ path: string; requestId: number } | null>(null);
 
   useEffect(() => {
     const handlePreferenceChange = () => {
@@ -98,6 +99,7 @@ export default function ChatView() {
   const [planApproval, setPlanApproval] = useState<PlanApprovalRequest | null>(null);
   const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
   const [subAgents, setSubAgents] = useState<SubAgentInfo[]>([]);
+  const [subagentHistories, setSubagentHistories] = useState<Record<string, SubagentHistoryResponse>>({});
 
   // P2: Message queue state
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
@@ -272,6 +274,17 @@ export default function ChatView() {
     });
   }, [currentSession, send]);
 
+  const handleOpenFile = useCallback((filePath: string) => {
+    setFileOpenRequest(previous => ({
+      path: filePath,
+      requestId: (previous?.requestId || 0) + 1,
+    }));
+  }, []);
+
+  const handleSubagentHistory = useCallback((key: string, history: SubagentHistoryResponse) => {
+    setSubagentHistories(previous => ({ ...previous, [key]: history }));
+  }, []);
+
   const handleKeepAllFiles = useCallback(() => {
     setStatus(prev => ({ ...prev, edits: undefined }));
   }, []);
@@ -342,6 +355,7 @@ export default function ChatView() {
     setAskQuestion(null);
     setRewindTarget(null);
     setSubAgents([]);
+    setSubagentHistories({});
     setStatus({});
     setMessageQueue([]);
     setStatus({});
@@ -782,6 +796,7 @@ export default function ChatView() {
       sessionId: currentSession?.id,
     };
     setSubAgents([]);
+    setSubagentHistories({});
     setMessages(prev => [...prev, userMsg]);
     setIsStreaming(true);
     streamActivityAtRef.current = Date.now();
@@ -881,6 +896,7 @@ export default function ChatView() {
 
   const handleWorkspaceChanged = useCallback(() => {
     beginSessionTransition(null);
+    setFileOpenRequest(null);
     serverSessionNavigationRef.current = null;
     setCurrentSession(null);
     setSessions([]);
@@ -902,7 +918,7 @@ export default function ChatView() {
 
   return (
     <div className="chat-view">
-      <FileExplorer key={workspaceVersion} onWorkspaceChange={handleWorkspaceChanged} />
+      <FileExplorer key={workspaceVersion} onWorkspaceChange={handleWorkspaceChanged} openFileRequest={fileOpenRequest} />
       <div className="chat-pane">
         <ChatHeader
           sessionTitle={currentSession?.title || ''}
@@ -941,8 +957,13 @@ export default function ChatView() {
           <StatusPanel
             status={status}
             onUndoFile={handleUndoFile}
+            onOpenFile={handleOpenFile}
             onDiscardAllFiles={handleDiscardAllFiles}
             onKeepAllFiles={handleKeepAllFiles}
+            subagentHistories={subagentHistories}
+            onSubagentHistory={handleSubagentHistory}
+            sessionId={currentSession?.id ?? urlSessionId ?? null}
+            isStreaming={isStreaming}
           />
         )}
         <MessageQueue 

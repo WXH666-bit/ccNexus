@@ -177,6 +177,15 @@ export interface StatusFileChange {
   operations?: StatusFileOperation[];
 }
 
+export interface SubagentHistoryResponse {
+  success: boolean;
+  toolUseId?: string;
+  agentId?: string;
+  sessionId?: string;
+  error?: string;
+  messages?: unknown[];
+}
+
 export interface StatusData {
   tasks?: { done: number; total: number; items?: Array<string | StatusTaskItem> };
   subagents?: SubAgentInfo[];
@@ -231,6 +240,7 @@ export interface SubAgentInfo {
   totalDurationMs?: number;
   totalTokens?: number;
   totalToolUseCount?: number;
+  toolStats?: Record<string, number>;
   resultText?: string;
 }
 

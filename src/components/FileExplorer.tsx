@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -42,8 +42,14 @@ interface WorkspaceChange {
   rootName?: string;
 }
 
+interface FileOpenRequest {
+  path: string;
+  requestId: number;
+}
+
 interface FileExplorerProps {
   onWorkspaceChange?: (workspace: WorkspaceChange) => void;
+  openFileRequest?: FileOpenRequest | null;
 }
 
 const CODE_EXTS = new Set(['js', 'jsx', 'ts', 'tsx', 'json', 'css', 'html', 'md', 'mjs', 'cjs']);
@@ -116,7 +122,7 @@ function TreeNode({
   );
 }
 
-export default function FileExplorer({ onWorkspaceChange }: FileExplorerProps) {
+export default function FileExplorer({ onWorkspaceChange, openFileRequest }: FileExplorerProps) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('fileExplorerCollapsed') === 'true');
   const [tree, setTree] = useState<FileNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['.']));
@@ -133,6 +139,7 @@ export default function FileExplorer({ onWorkspaceChange }: FileExplorerProps) {
   const [fileError, setFileError] = useState('');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const lastOpenRequestRef = useRef(0);
 
   const setExplorerCollapsed = useCallback((next: boolean) => {
     setCollapsed(next);
@@ -226,6 +233,24 @@ export default function FileExplorer({ onWorkspaceChange }: FileExplorerProps) {
       setFileError(err instanceof Error ? err.message : 'Failed to open file');
     }
   }, [dirty]);
+
+  useEffect(() => {
+    if (!openFileRequest || openFileRequest.requestId <= lastOpenRequestRef.current) return;
+    lastOpenRequestRef.current = openFileRequest.requestId;
+    const requestedPath = openFileRequest.path.trim();
+    if (!requestedPath) return;
+
+    const normalizedCwd = cwd.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+    const normalizedRequested = requestedPath.replace(/\\/g, '/');
+    const relativePath = normalizedCwd && normalizedRequested.toLowerCase().startsWith(`${normalizedCwd}/`)
+      ? normalizedRequested.slice(normalizedCwd.length + 1)
+      : normalizedRequested;
+    void openFile({
+      name: relativePath.split('/').filter(Boolean).pop() || relativePath,
+      path: relativePath,
+      isDirectory: false,
+    });
+  }, [cwd, openFile, openFileRequest]);
 
   const updateDraft = useCallback((value: string) => {
     setDraft(value);

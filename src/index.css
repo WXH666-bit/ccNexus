@@ -1164,6 +1164,11 @@ html, body, #root {
 .diff-del { color: var(--accent-red); display: block; }
 .diff-hunk { color: var(--accent-blue); display: block; font-weight: 600; }
 .diff-context { color: var(--text-muted); display: block; }
+.diff-preview-summary {
+  padding: 8px;
+  color: var(--text-muted);
+  white-space: normal;
+}
 
 /* ─── Status Panel ──────────────────────────────────────────── */
 .generating-response-indicator {
@@ -1451,6 +1456,111 @@ html, body, #root {
 .status-subagent-result.muted {
   color: var(--text-muted);
 }
+.status-subagent-process-card {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-color);
+}
+.status-subagent-process-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.status-subagent-process-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.status-subagent-process-subtitle,
+.status-subagent-process-stats {
+  color: var(--text-muted);
+  font-family: var(--idea-editor-font-family, monospace);
+  font-size: 10px;
+}
+.status-subagent-process-stats {
+  text-align: right;
+  white-space: nowrap;
+}
+.status-subagent-error {
+  margin-top: 6px;
+  color: var(--accent-red);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.status-subagent-process-sections {
+  display: grid;
+  gap: 7px;
+  margin-top: 7px;
+}
+.status-subagent-process-section {
+  display: grid;
+  gap: 4px;
+}
+.status-subagent-section-heading {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.status-subagent-note-card,
+.status-subagent-result-card {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.status-subagent-file-grid,
+.status-subagent-tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.status-subagent-file-chip,
+.status-subagent-tool-chip {
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--idea-editor-font-family, monospace);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-subagent-tool-chip {
+  display: inline-flex;
+  gap: 5px;
+  font-family: inherit;
+}
+.status-subagent-tool-chip small {
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-subagent-process-section details {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.status-subagent-process-section pre {
+  max-height: 140px;
+  margin: 5px 0 0;
+  padding: 6px;
+  overflow: auto;
+  background: var(--bg-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.status-subagent-loading {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
 .status-file-actions-bar {
   display: flex;
@@ -1532,6 +1642,20 @@ html, body, #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.status-file-change-open {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.status-file-change-open:hover {
+  color: var(--accent-blue);
+  text-decoration: underline;
+}
 .status-file-change-stats {
   display: inline-flex;
   gap: 4px;
@@ -1582,6 +1706,11 @@ html, body, #root {
 }
 .status-file-diff .diff-hunk {
   color: var(--accent-blue);
+}
+.status-file-diff-summary {
+  padding: 8px;
+  color: var(--text-muted);
+  white-space: normal;
 }
 
 @media (max-width: 640px) {

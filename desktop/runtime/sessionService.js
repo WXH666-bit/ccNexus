@@ -7,6 +7,8 @@ import { claudeProjectSessionsDir, encodeClaudeProjectPath } from '../../server/
 const PROJECT_INDEX_DIR = 'projects';
 const PROJECT_INDEX_VERSION = 1;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SUBAGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const MAX_SUBAGENT_JSONL_LINES = 50_000;
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const USAGE_SCOPE_CURRENT = 'current';
 const USAGE_SCOPE_ALL = 'all';
@@ -190,6 +192,64 @@ export class DesktopSessionService {
 
   claudeProjectDir() {
     return claudeProjectSessionsDir({ homeDir: this.homeDir, cwd: this.cwd });
+  }
+
+  async loadSubagentHistory({ sessionId, agentId, description, toolUseId } = {}) {
+    const response = { success: false, sessionId, toolUseId, agentId };
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
+      return { ...response, error: 'Invalid session id' };
+    }
+    if (agentId !== undefined && (typeof agentId !== 'string' || !SUBAGENT_ID_PATTERN.test(agentId))) {
+      return { ...response, error: 'Invalid agent id' };
+    }
+
+    const subagentsDir = path.join(this.claudeProjectDir(), sessionId, 'subagents');
+    let jsonlFile = agentId
+      ? path.join(subagentsDir, `agent-${agentId}.jsonl`)
+      : null;
+
+    if (!jsonlFile && typeof description === 'string' && description.trim()) {
+      try {
+        const entries = await fs.readdir(subagentsDir, { withFileTypes: true });
+        const candidates = [];
+        for (const entry of entries) {
+          if (!entry.isFile() || !entry.name.endsWith('.meta.json')) continue;
+          const metaFile = path.join(subagentsDir, entry.name);
+          try {
+            const meta = JSON.parse(await fs.readFile(metaFile, 'utf8'));
+            if (meta?.description !== description) continue;
+            const jsonlName = entry.name.replace(/\.meta\.json$/, '.jsonl');
+            const candidate = path.join(subagentsDir, jsonlName);
+            const stat = await fs.stat(candidate);
+            if (stat.isFile()) candidates.push({ candidate, mtimeMs: stat.mtimeMs });
+          } catch {
+            // Ignore malformed metadata and races with a running subagent.
+          }
+        }
+        candidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
+        jsonlFile = candidates[0]?.candidate || null;
+      } catch (error) {
+        if (error.code !== 'ENOENT') return { ...response, error: error.message };
+      }
+    }
+
+    if (!jsonlFile) return { ...response, error: 'Subagent log not found' };
+
+    try {
+      const raw = await fs.readFile(jsonlFile, 'utf8');
+      const messages = [];
+      for (const line of raw.split(/\r?\n/).filter(Boolean).slice(0, MAX_SUBAGENT_JSONL_LINES)) {
+        try { messages.push(JSON.parse(line)); } catch { /* skip a partial JSONL line */ }
+      }
+      const fileName = path.basename(jsonlFile);
+      const resolvedAgentId = fileName.startsWith('agent-') && fileName.endsWith('.jsonl')
+        ? fileName.slice('agent-'.length, -'.jsonl'.length)
+        : agentId;
+      return { success: true, sessionId, toolUseId, agentId: resolvedAgentId, messages };
+    } catch (error) {
+      if (error.code === 'ENOENT') return { ...response, error: 'Subagent log not found' };
+      return { ...response, error: error.message || 'Unable to read subagent log' };
+    }
   }
 
   async listClaudeProjectDirectories() {

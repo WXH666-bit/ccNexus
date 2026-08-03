@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   deletePrompt: (name) => ipcRenderer.invoke('desktop:delete-prompt', { name }),
   getSessions: () => ipcRenderer.invoke('desktop:get-sessions'),
   loadSession: (sessionId) => ipcRenderer.invoke('desktop:load-session', { sessionId }),
+  loadSubagentHistory: (args) => ipcRenderer.invoke('desktop:load-subagent-history', args),
   renameSession: (sessionId, title) => ipcRenderer.invoke('desktop:rename-session', { sessionId, title }),
   toggleFavoriteSession: (sessionId) => ipcRenderer.invoke('desktop:toggle-favorite-session', { sessionId }),
   exportSession: (sessionId, title) => ipcRenderer.invoke('desktop:export-session', { sessionId, title }),
