@@ -14,7 +14,7 @@ const styles = read('../src/index.css');
 
 test('ChatView shows a ccgui-style generating response indicator above the status panel while streaming', () => {
   assert.match(chatView, /<GeneratingResponseIndicator isStreaming=\{isStreaming\} \/>/);
-  assert.match(chatView, /<GeneratingResponseIndicator isStreaming=\{isStreaming\} \/>[\s\S]*\{showStatusPanel && <StatusPanel/);
+  assert.match(chatView, /<GeneratingResponseIndicator isStreaming=\{isStreaming\} \/>[\s\S]*\{showStatusPanel && \([\s\S]*<StatusPanel/);
   assert.match(indicator, /useElapsedStreamingSeconds/);
   assert.match(indicator, /className="generating-response-indicator"/);
   assert.match(indicator, /正在生成响应/);
@@ -28,12 +28,11 @@ test('generating response indicator is a quiet row above the status panel', () =
 });
 
 test('status panel separates labels from counts and aligns three equal columns', () => {
-  assert.match(statusPanel, /<span className="status-item-label">\{t\('status\.tasks'\)\}<\/span>/);
-  assert.match(statusPanel, /<span className="status-item-count">/);
-  assert.match(statusPanel, /<span className="status-item-label">\{t\('status\.subagents'\)\}<\/span>/);
-  assert.match(statusPanel, /<span className="status-item-label">\{t\('status\.edits'\)\}<\/span>/);
-  assert.match(styles, /\.status-panel\s*\{[^}]*display:\s*grid;/s);
+  assert.match(statusPanel, /className="status-panel-tab/);
+  assert.match(statusPanel, /className="tab-progress"/);
+  assert.match(statusPanel, /className="tab-stats"/);
+  assert.match(styles, /\.status-panel-tabs\s*\{[^}]*display:\s*grid;/s);
   assert.match(styles, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s);
-  assert.match(styles, /\.status-item\s*\{[^}]*min-height:\s*32px;/s);
-  assert.match(styles, /\.status-item-count\s*\{[^}]*font-variant-numeric:\s*tabular-nums;/s);
+  assert.match(styles, /\.status-panel-tab\s*\{[^}]*min-height:\s*32px;/s);
+  assert.match(styles, /\.status-panel-tab \.tab-progress[\s\S]*font-variant-numeric:\s*tabular-nums;/s);
 });

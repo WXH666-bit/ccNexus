@@ -155,10 +155,32 @@ export interface TaskExecutionData {
 }
 
 // ─── Status panel data ──────────────────────────────────────────
+export interface StatusTaskItem {
+  id?: string;
+  content: string;
+  status?: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  blockedBy?: string[];
+}
+
+export interface StatusFileOperation {
+  oldString: string;
+  newString: string;
+  replaceAll?: boolean;
+}
+
+export interface StatusFileChange {
+  path: string;
+  name: string;
+  status?: 'A' | 'M';
+  additions: number;
+  deletions: number;
+  operations?: StatusFileOperation[];
+}
+
 export interface StatusData {
-  tasks?: { done: number; total: number; items?: string[] };
-  subagents?: { name: string; status: string }[];
-  edits?: { additions: number; deletions: number; files: string[] };
+  tasks?: { done: number; total: number; items?: Array<string | StatusTaskItem> };
+  subagents?: SubAgentInfo[];
+  edits?: { additions: number; deletions: number; files: Array<string | StatusFileChange> };
 }
 
 // ─── Permission ──────────────────────────────────────────────────
@@ -200,9 +222,16 @@ export interface SubAgentInfo {
   id: string;
   name: string;
   status: 'running' | 'completed' | 'error' | 'idle';
+  type?: string;
   description?: string;
+  prompt?: string;
   progress?: number;
   toolUseId?: string;
+  agentId?: string;
+  totalDurationMs?: number;
+  totalTokens?: number;
+  totalToolUseCount?: number;
+  resultText?: string;
 }
 
 export interface AgentGroupData {

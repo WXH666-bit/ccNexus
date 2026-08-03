@@ -26,12 +26,11 @@ import {
   STREAM_STALL_CHECK_INTERVAL_MS,
   shouldRecoverStalledStream,
 } from '../utils/streamWatchdog.js';
-import { findToolResultForBlock, isFileModifyToolName } from '../utils/toolRendering.js';
-import { normalizeToolInput } from '../utils/toolInputNormalization.js';
 import { estimateMessagesUsedTokens, extractMessagesUsedTokens } from '../utils/contextUsage.js';
 import { getDesktopEventSessionId, normalizeDesktopChatEvent } from '../utils/desktopChatEvents.js';
 import { getContextUsage as loadContextUsage } from '../utils/desktopBridgeApi';
 import { getSessions, loadSession, renameSession } from '../utils/sessionBridgeApi';
+import { deriveStatusData } from '../utils/statusPanelData';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo
@@ -262,6 +261,21 @@ export default function ChatView() {
     });
   }, [currentSession, send]);
 
+  const handleDiscardAllFiles = useCallback((filePaths: string[]) => {
+    if (!currentSession) return;
+    filePaths.forEach(filePath => {
+      send({
+        type: 'undo_file',
+        filePath,
+        sessionId: currentSession.id,
+      });
+    });
+  }, [currentSession, send]);
+
+  const handleKeepAllFiles = useCallback(() => {
+    setStatus(prev => ({ ...prev, edits: undefined }));
+  }, []);
+
   // Plan approval handlers
   const handlePlanApprove = useCallback(() => {
     if (!planApproval) return;
@@ -328,6 +342,7 @@ export default function ChatView() {
     setAskQuestion(null);
     setRewindTarget(null);
     setSubAgents([]);
+    setStatus({});
     setMessageQueue([]);
     setStatus({});
   }, []);
@@ -688,7 +703,10 @@ export default function ChatView() {
           // Refresh status
           setStatus(prev => {
             if (!prev.edits) return prev;
-            const newFiles = prev.edits.files.filter(f => f !== msg.filePath);
+            const newFiles = prev.edits.files.filter(file => {
+              const filePath = typeof file === 'string' ? file : file.path;
+              return filePath !== msg.filePath;
+            });
             return { ...prev, edits: { ...prev.edits, files: newFiles } };
           });
         }
@@ -763,6 +781,7 @@ export default function ChatView() {
       timestamp: Date.now(),
       sessionId: currentSession?.id,
     };
+    setSubAgents([]);
     setMessages(prev => [...prev, userMsg]);
     setIsStreaming(true);
     streamActivityAtRef.current = Date.now();
@@ -838,33 +857,16 @@ export default function ChatView() {
     setPermission(null);
   }, [send]);
 
-  // Compute status data from messages
+  // Keep the bottom status panel derived from the active session messages.
   useEffect(() => {
-    let additions = 0;
-    let deletions = 0;
-    const files = new Set<string>();
-
-    messages.forEach((m, messageIndex) => {
-      m.content.forEach(block => {
-        if (block.type === 'tool_use' && isFileModifyToolName(block.name)) {
-          const result = findToolResultForBlock(messages, messageIndex, block.id);
-          if (!result || result.is_error) return;
-
-          const input = normalizeToolInput(block.name, block.input) ?? block.input;
-          const filePath = input.file_path as string || input.path as string || '';
-          if (filePath) files.add(filePath);
-          const oldStr = input.old_string as string || '';
-          const newStr = input.new_string as string || '';
-          if (oldStr) deletions += oldStr.split('\n').length;
-          if (newStr) additions += newStr.split('\n').length;
-        }
-      });
-    });
-
-    if (additions > 0 || deletions > 0 || files.size > 0) {
-      setStatus(prev => ({ ...prev, edits: { additions, deletions, files: Array.from(files) } }));
-    }
-  }, [messages]);
+    const derived = deriveStatusData(messages);
+    setStatus(prev => ({
+      ...prev,
+      tasks: derived.tasks,
+      edits: derived.edits,
+      subagents: subAgents.length > 0 ? subAgents : derived.subagents,
+    }));
+  }, [messages, subAgents]);
 
   // Search highlight prop
   const searchHighlight = useMemo(() => {
@@ -935,7 +937,14 @@ export default function ChatView() {
           )}
         </div>
         <GeneratingResponseIndicator isStreaming={isStreaming} />
-        {showStatusPanel && <StatusPanel status={status} onUndoFile={handleUndoFile} />}
+        {showStatusPanel && (
+          <StatusPanel
+            status={status}
+            onUndoFile={handleUndoFile}
+            onDiscardAllFiles={handleDiscardAllFiles}
+            onKeepAllFiles={handleKeepAllFiles}
+          />
+        )}
         <MessageQueue 
           queue={messageQueue} 
           onRemove={removeFromQueue} 

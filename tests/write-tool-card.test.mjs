@@ -38,7 +38,7 @@ test('streaming tools wait for parsed input before rendering an empty card', () 
 });
 
 test('edit status counts Write only after a successful tool result', () => {
-  const source = read('src/views/ChatView.tsx');
+  const source = read('src/utils/statusPanelData.ts');
 
   assert.match(source, /findToolResultForBlock\(messages, messageIndex, block\.id\)/);
   assert.match(source, /if \(!result \|\| result\.is_error\) return;/);

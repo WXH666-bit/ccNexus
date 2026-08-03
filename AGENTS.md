@@ -11,6 +11,7 @@
 - Keep history search, selection, batch deletion, favorites, export, and rename scoped to the active workspace. Stale session responses must not mutate the active chat.
 - Keep the chat input aligned with ccgui: persist bounded local input history, restore the draft when navigating with ArrowUp/ArrowDown, and handle `/new`, `/clear`, `/reset`, `/resume`, `/continue`, and `/plan` as local commands before sending a prompt.
 - Node process management should follow ccgui's live snapshot behavior: refresh while the submenu is open, confirm daemon/channel termination or restart, and allow orphan cleanup directly.
+- Keep the bottom status panel aligned with ccgui: one tabbed popover anchored above the full status bar, structured task/subagent/file rows, outside-click dismissal, and file actions scoped to the active workspace session.
 
 ## Claude Configuration Safety
 
