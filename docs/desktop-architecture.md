@@ -1,17 +1,28 @@
 # Desktop Architecture
 
-ccNexus is moving toward a desktop-first runtime while keeping the Web UI as the renderer layer.
+ccNexus is a desktop-only Electron application. The React/Vite code remains as
+the renderer implementation, but it is loaded and controlled by Electron rather
+than exposed as a standalone web product.
 
-- `desktop/main.js` owns the Electron app window.
-- In development, the desktop host loads `CCNEXUS_WEB_URL` or `http://localhost:5000/chat`.
-- In packaged mode, the desktop host loads `dist/index.html` with the `#/chat` route.
-- `desktop/preload.cjs` exposes the narrow `window.ccNexusDesktop` IPC API. The UI does not get Node access.
-- The preload IPC API includes runtime info, project files, local configuration, sessions, chat commands, chat events, process management, and opening a project directory through the native system dialog.
-- `desktop/runtime/daemonBridge.js` mirrors ccgui's long-running daemon bridge pattern with NDJSON requests over stdin/stdout.
-- `desktop/runtime/processRegistry.js` owns daemon/channel process snapshots, stop, and restart behavior.
-- `desktop/runtime/chatController.js` owns the desktop chat event stream, permission prompts, active query registration, abort handling, and session persistence.
-- `desktop/daemon/ccnexus-daemon.js` runs the Claude Agent SDK query process and asks the host for tool permission through the bridge.
-- `server/index.js` remains available for pure browser development, but `desktop:dev` does not start it. Desktop mode uses Vite only for the retained Web UI renderer and sends app behavior through preload IPC.
-- `electron-builder` is configured for Windows packaging through `desktop:pack` and `desktop:dist`.
+- `desktop/main.js` owns the Electron window and application lifecycle.
+- During development, Electron loads `http://127.0.0.1:5000/chat` from the local
+  Vite renderer server. Packaged builds load `dist/index.html`.
+- `desktop/preload.cjs` exposes the narrow `window.ccNexusDesktop` IPC API. The
+  renderer does not receive Node access and does not call HTTP endpoints.
+- The preload API covers runtime information, project files, read-only local
+  configuration, sessions, chat commands/events, process management, and native
+  project-directory selection.
+- `desktop/runtime/daemonBridge.js` follows ccgui's long-running daemon bridge
+  pattern with NDJSON requests over stdin/stdout.
+- `desktop/runtime/processRegistry.js` owns daemon/channel process snapshots,
+  stop, and restart behavior.
+- `desktop/runtime/chatController.js` owns chat events, permission prompts,
+  active query registration, abort handling, and session persistence.
+- `desktop/daemon/ccnexus-daemon.js` runs the Claude Agent SDK query process and
+  asks the host for tool permission through the bridge.
+- `server/` contains shared Claude/session/protocol helpers needed by the
+  desktop runtime. It is not a web server entry point.
+- `electron-builder` packages the app through `desktop:pack` and `desktop:dist`.
 
-The remaining cleanup is to keep reducing pure-browser fallback code once desktop parity is stable.
+All renderer capabilities go through preload IPC. There is no browser fallback,
+Express broker, WebSocket broker, or standalone web runtime.

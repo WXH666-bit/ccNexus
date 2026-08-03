@@ -14,7 +14,7 @@ import MessageQueue from '../components/MessageQueue';
 import type { QueuedMessage } from '../components/MessageQueue';
 import FileExplorer from '../components/FileExplorer';
 import GeneratingResponseIndicator from '../components/GeneratingResponseIndicator';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useDesktopChat } from '../hooks/useDesktopChat';
 import {
   createStreamingBlockState,
   applyStreamEventToBlocks,
@@ -59,7 +59,7 @@ function writeStoredContextUsage(sessionId: string | undefined, usedTokens: numb
 export default function ChatView() {
   const { sessionId: urlSessionId } = useParams();
   const navigate = useNavigate();
-  const { send, incomingMessages, connected } = useWebSocket();
+  const { send, incomingMessages, connected } = useDesktopChat();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -282,15 +282,13 @@ export default function ChatView() {
   }, [sessions, urlSessionId]);
 
   const requestSessionHistory = useCallback((sessionId: string) => {
-    if (window.ccNexusDesktop?.loadSession) {
-      requestedHistorySessionRef.current = sessionId;
-      loadSession(sessionId)
-        .then(applySessionHistory)
-        .catch(() => send({ type: 'load_session', sessionId }));
-      return;
-    }
-    send({ type: 'load_session', sessionId });
-  }, [applySessionHistory, send]);
+    requestedHistorySessionRef.current = sessionId;
+    void loadSession(sessionId)
+      .then(applySessionHistory)
+      .catch(() => {
+        requestedHistorySessionRef.current = null;
+      });
+  }, [applySessionHistory]);
 
   const applySessionList = useCallback((sessionList: Session[], deletedSessionIds: string[] = []) => {
     setSessions(sessionList);
@@ -342,14 +340,10 @@ export default function ChatView() {
 
   // Initialize: request session list
   useEffect(() => {
-    if (window.ccNexusDesktop?.getSessions) {
-      getSessions()
-        .then(event => applySessionList(event.sessions, event.deletedSessionIds))
-        .catch(() => send({ type: 'get_sessions' }));
-      return;
-    }
-    send({ type: 'get_sessions' });
-  }, [applySessionList, send]);
+    void getSessions()
+      .then(event => applySessionList(event.sessions, event.deletedSessionIds))
+      .catch(() => applySessionList([]));
+  }, [applySessionList]);
 
   // Handle URL session change
   useEffect(() => {
@@ -378,7 +372,7 @@ export default function ChatView() {
     }
   }, [urlSessionId, requestSessionHistory]);
 
-  // Handle WebSocket messages
+  // Handle desktop chat events
   useEffect(() => {
     const nextMessages = incomingMessages.slice(processedIncomingMessageCountRef.current);
     processedIncomingMessageCountRef.current = incomingMessages.length;
@@ -687,18 +681,13 @@ export default function ChatView() {
 
   const handleRenameSession = useCallback((title: string) => {
     if (currentSession) {
-      if (window.ccNexusDesktop?.renameSession) {
-        renameSession(currentSession.id, title)
-          .then(event => {
-            setSessions(prev => prev.map(s => s.id === event.session_id ? { ...s, title: event.title } : s));
-            setCurrentSession(prev => prev ? { ...prev, title: event.title } : prev);
-          })
-          .catch(() => send({ type: 'rename_session', session_id: currentSession.id, title }));
-        return;
-      }
-      send({ type: 'rename_session', session_id: currentSession.id, title });
+      void renameSession(currentSession.id, title)
+        .then(event => {
+          setSessions(prev => prev.map(s => s.id === event.session_id ? { ...s, title: event.title } : s));
+          setCurrentSession(prev => prev ? { ...prev, title: event.title } : prev);
+        });
     }
-  }, [send, currentSession]);
+  }, [currentSession]);
 
   const handlePermission = useCallback((permissionId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
     send({ type: 'permission_response', requestId: permissionId, behavior, allow: behavior !== 'deny' });
@@ -744,13 +733,7 @@ export default function ChatView() {
     };
   }, [searchQuery, searchResults, currentSearchIdx]);
 
-  const handleOpenProject = useCallback(async () => {
-    if (!window.ccNexusDesktop?.openProject) return;
-    const project = await window.ccNexusDesktop.openProject();
-    if (!project || project.canceled || !project.path) return;
-    if (window.ccNexusDesktop?.setWorkspace) {
-      await window.ccNexusDesktop.setWorkspace(project.path);
-    }
+  const handleWorkspaceChanged = useCallback(() => {
     requestedHistorySessionRef.current = null;
     serverSessionNavigationRef.current = null;
     setCurrentSession(null);
@@ -763,14 +746,23 @@ export default function ChatView() {
     setWorkspaceVersion((version) => version + 1);
     send({ type: 'new_session' });
     navigate('/chat', { replace: true });
-    getSessions()
+    void getSessions()
       .then(event => applySessionList(event.sessions, event.deletedSessionIds))
-      .catch(() => send({ type: 'get_sessions' }));
+      .catch(() => applySessionList([]));
   }, [applySessionList, navigate, send]);
+
+  const handleOpenProject = useCallback(async () => {
+    const desktopApi = window.ccNexusDesktop;
+    if (!desktopApi?.openProject || !desktopApi.setWorkspace) return;
+    const project = await desktopApi.openProject();
+    if (!project || project.canceled || !project.path) return;
+    await desktopApi.setWorkspace(project.path);
+    handleWorkspaceChanged();
+  }, [handleWorkspaceChanged]);
 
   return (
     <div className="chat-view">
-      <FileExplorer key={workspaceVersion} />
+      <FileExplorer key={workspaceVersion} onWorkspaceChange={handleWorkspaceChanged} />
       <div className="chat-pane">
         <ChatHeader
           sessionTitle={currentSession?.title || ''}
@@ -783,7 +775,7 @@ export default function ChatView() {
           onSearchNext={() => navigateSearch('next')}
           onSearchPrev={() => navigateSearch('prev')}
           onRewind={rewindTarget ? () => setRewindTarget(null) : undefined}
-          onOpenProject={window.ccNexusDesktop?.openProject ? handleOpenProject : undefined}
+          onOpenProject={handleOpenProject}
         />
         <div className="chat-main">
           {messages.length === 0 ? (

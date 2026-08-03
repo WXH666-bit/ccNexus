@@ -4,7 +4,7 @@ export function isMissingClaudeConversationError(message) {
     && /no conversation found with session id/i.test(message);
 }
 
-/** Keeps invalidation data and the visible error in one WebSocket message. */
+/** Keeps invalidation data and the visible error in one desktop chat event. */
 export function staleSessionErrorEvent(message, invalidSessionId) {
   return { type: 'error', message, invalidSessionId };
 }

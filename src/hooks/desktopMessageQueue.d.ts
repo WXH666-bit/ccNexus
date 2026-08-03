@@ -1,5 +1,5 @@
 export interface OutboundMessageQueue {
-  send(message: Record<string, unknown>, isOpen: boolean): void;
+  send(message: Record<string, unknown>, isReady: boolean): void;
   flush(): void;
   clear(): void;
   size(): number;

@@ -1,4 +1,4 @@
-/** Converts Claude SDK user tool-result blocks into the WebSocket UI protocol. */
+/** Converts Claude SDK user tool-result blocks into the desktop chat protocol. */
 export function extractToolResults(message) {
   if (!Array.isArray(message?.content)) return [];
 

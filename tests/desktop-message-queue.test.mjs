@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInboundMessageQueue, createOutboundMessageQueue } from '../src/hooks/websocketQueue.js';
+import { createInboundMessageQueue, createOutboundMessageQueue } from '../src/hooks/desktopMessageQueue.js';
 
-test('queues messages sent before WebSocket open and flushes them in order', () => {
+test('queues commands sent before the desktop event channel is ready and flushes them in order', () => {
   const delivered = [];
   const queue = createOutboundMessageQueue((message) => delivered.push(message));
 
@@ -21,7 +21,7 @@ test('queues messages sent before WebSocket open and flushes them in order', () 
   assert.equal(queue.size(), 0);
 });
 
-test('sends immediately after the socket is open', () => {
+test('sends immediately after the desktop event channel is ready', () => {
   const delivered = [];
   const queue = createOutboundMessageQueue((message) => delivered.push(message));
 
@@ -31,7 +31,7 @@ test('sends immediately after the socket is open', () => {
   assert.equal(queue.size(), 0);
 });
 
-test('keeps rapid incoming messages in order until the view consumes them', () => {
+test('keeps rapid incoming desktop events in order until the view consumes them', () => {
   const queue = createInboundMessageQueue();
 
   queue.push({ type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: 'done' }] } });

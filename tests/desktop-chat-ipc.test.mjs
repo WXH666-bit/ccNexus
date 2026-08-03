@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const mainSource = await readFile(new URL('../desktop/main.js', import.meta.url), 'utf8');
 const preloadSource = await readFile(new URL('../desktop/preload.cjs', import.meta.url), 'utf8');
-const hookSource = await readFile(new URL('../src/hooks/useWebSocket.ts', import.meta.url), 'utf8');
+const hookSource = await readFile(new URL('../src/hooks/useDesktopChat.ts', import.meta.url), 'utf8');
 const typingsSource = await readFile(new URL('../src/vite-env.d.ts', import.meta.url), 'utf8');
 
 test('desktop preload exposes chat command and event stream APIs', () => {
@@ -21,10 +21,12 @@ test('main process routes chat commands through the desktop chat controller', ()
   assert.match(mainSource, /desktop:chat-message/);
 });
 
-test('renderer websocket hook prefers desktop IPC before local broker websocket', () => {
+test('renderer chat hook uses desktop IPC without a browser transport fallback', () => {
   assert.match(hookSource, /window\.ccNexusDesktop\?\.sendChatCommand/);
-  assert.match(hookSource, /window\.ccNexusDesktop\?\.onChatMessage/);
-  assert.match(hookSource, /new WebSocket/);
+  assert.match(hookSource, /onChatMessage/);
+  assert.match(hookSource, /useDesktopChat/);
+  assert.doesNotMatch(hookSource, /WebSocket/);
+  assert.doesNotMatch(hookSource, /location\.host/);
 });
 
 test('desktop API typings include chat command and event stream', () => {

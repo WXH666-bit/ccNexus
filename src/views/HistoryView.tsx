@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Search, Star, Trash2, Edit3, Download, MessageSquare } from 'lucide-react';
 import type { Session } from '../types';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useDesktopChat } from '../hooks/useDesktopChat';
 import { deleteSession, getSessions, renameSession } from '../utils/sessionBridgeApi';
 
 export default function HistoryView() {
   const navigate = useNavigate();
-  const { send, lastMessage } = useWebSocket();
+  const { lastMessage } = useDesktopChat();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [search, setSearch] = useState('');
   const [showFavorites, setShowFavorites] = useState(false);
@@ -15,14 +15,10 @@ export default function HistoryView() {
   const [editValue, setEditValue] = useState('');
 
   useEffect(() => {
-    if (window.ccNexusDesktop?.getSessions) {
-      getSessions()
-        .then(event => setSessions(event.sessions))
-        .catch(() => send({ type: 'get_sessions' }));
-      return;
-    }
-    send({ type: 'get_sessions' });
-  }, [send]);
+    void getSessions()
+      .then(event => setSessions(event.sessions))
+      .catch(() => setSessions([]));
+  }, []);
 
   useEffect(() => {
     if (lastMessage?.type === 'session_list') {
@@ -43,22 +39,14 @@ export default function HistoryView() {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const handleDelete = async (id: string) => {
-    if (window.ccNexusDesktop?.deleteSession) {
-      await deleteSession(id);
-      setSessions(prev => prev.filter(s => s.id !== id));
-      return;
-    }
-    send({ type: 'delete_session', sessionId: id });
+    await deleteSession(id);
+    setSessions(prev => prev.filter(s => s.id !== id));
   };
 
   const handleRename = async (id: string) => {
     if (editValue.trim()) {
-      if (window.ccNexusDesktop?.renameSession) {
-        await renameSession(id, editValue.trim());
-        setSessions(prev => prev.map(s => s.id === id ? { ...s, title: editValue.trim() } : s));
-      } else {
-        send({ type: 'rename_session', session_id: id, title: editValue.trim() });
-      }
+      await renameSession(id, editValue.trim());
+      setSessions(prev => prev.map(s => s.id === id ? { ...s, title: editValue.trim() } : s));
     }
     setEditingId(null);
   };

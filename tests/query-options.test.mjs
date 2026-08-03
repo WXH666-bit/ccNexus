@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildClaudeQueryOptions } from '../server/queryOptions.js';
+import { buildClaudeClientOptions } from '../server/claudeRequestContext.js';
 
 test('builds ccgui-style SDK options from client dialogue controls', () => {
   const canUseTool = async () => ({ behavior: 'allow' });
@@ -19,7 +20,7 @@ test('builds ccgui-style SDK options from client dialogue controls', () => {
 
   assert.equal(options.cwd, 'D:/repo');
   assert.equal(options.permissionMode, 'bypassPermissions');
-  assert.equal(options.model, 'claude-sonnet-5');
+  assert.equal(options.model, 'sonnet');
   assert.equal(options.maxTurns, 100);
   assert.equal(options.enableFileCheckpointing, true);
   assert.equal(options.includePartialMessages, true);
@@ -80,7 +81,7 @@ test('preserves ccgui long context marker before passing model to SDK', () => {
     },
   });
 
-  assert.equal(options.model, 'claude-opus-4-8[1m]');
+  assert.equal(options.model, 'opus');
 });
 
 test('resolves ccgui provider model mapping before passing model to SDK', () => {
@@ -97,7 +98,8 @@ test('resolves ccgui provider model mapping before passing model to SDK', () => 
     },
   });
 
-  assert.equal(options.model, 'GLM-4.6-W8A8[1m]');
+  assert.equal(options.model, 'sonnet');
+  assert.equal(options.env.ANTHROPIC_MODEL, 'GLM-4.6-W8A8[1m]');
 });
 
 test('strips stale provider mapping suffix when the 1M toggle is off', () => {
@@ -112,7 +114,8 @@ test('strips stale provider mapping suffix when the 1M toggle is off', () => {
     },
   });
 
-  assert.equal(options.model, 'deepseek-v4-pro');
+  assert.equal(options.model, 'sonnet');
+  assert.equal(options.env.ANTHROPIC_MODEL, 'deepseek-v4-pro');
 });
 
 test('role-specific provider mapping beats the default fallback model', () => {
@@ -128,7 +131,8 @@ test('role-specific provider mapping beats the default fallback model', () => {
     },
   });
 
-  assert.equal(options.model, 'deepseek-v4-flash');
+  assert.equal(options.model, 'haiku');
+  assert.equal(options.env.ANTHROPIC_MODEL, 'deepseek-v4-flash');
 });
 
 test('Fable follows ccgui main model fallback instead of a private fable mapping', () => {
@@ -144,5 +148,132 @@ test('Fable follows ccgui main model fallback instead of a private fable mapping
     },
   });
 
-  assert.equal(options.model, 'deepseek-v4-pro');
+  assert.equal(options.model, 'sonnet');
+  assert.equal(options.env.ANTHROPIC_MODEL, 'deepseek-v4-pro');
+});
+
+test('includes ccgui cache-critical Claude Code preset and settings override', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      EXISTING: '1',
+      CLAUDE_CODE_DISABLE_1M_CONTEXT: 'stale',
+      MAX_THINKING_TOKENS: 'stale',
+      CLAUDE_AGENT_SDK_VERSION: 'sdk-marker',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6[1m]',
+      streaming: true,
+    },
+  });
+
+  assert.equal(options.systemPrompt.type, 'preset');
+  assert.equal(options.systemPrompt.preset, 'claude_code');
+  assert.match(options.systemPrompt.append, /File Path Format Requirement/);
+  assert.deepEqual(options.settings, {
+    env: {
+      CLAUDE_CODE_EFFORT_LEVEL: '',
+      MAX_THINKING_TOKENS: '',
+      CLAUDE_CODE_DISABLE_1M_CONTEXT: '',
+    },
+  });
+  assert.deepEqual(options.additionalDirectories, ['D:/repo']);
+  assert.equal(options.env.EXISTING, '1');
+  assert.equal(options.env.CLAUDE_CODE_ENTRYPOINT, 'cli');
+  assert.equal(options.env.USER_TYPE, 'external');
+  assert.equal('CLAUDE_AGENT_SDK_VERSION' in options.env, false);
+  assert.equal('CLAUDE_CODE_DISABLE_1M_CONTEXT' in options.env, false);
+  assert.equal('MAX_THINKING_TOKENS' in options.env, false);
+});
+
+test('disables 1M context through ccgui inline settings when long context is off', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6',
+    },
+  });
+
+  assert.equal(options.settings.env.CLAUDE_CODE_DISABLE_1M_CONTEXT, '1');
+});
+
+test('uses ccgui SDK model selector and request-scoped model routing env', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      ANTHROPIC_MODEL: 'stale-global-model',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'provider-sonnet',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6[1m]',
+    },
+  });
+
+  assert.equal(options.model, 'sonnet');
+  assert.equal(options.env.ANTHROPIC_MODEL, 'provider-sonnet[1m]');
+  assert.equal(options.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'provider-sonnet[1m]');
+  assert.equal(options.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '1');
+});
+
+test('keeps ccgui cache prefix inputs stable in the SDK options', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      IDEA_PROJECT_PATH: 'D:/workspace',
+      PROJECT_PATH: 'D:/repo',
+    },
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6',
+      systemPromptAppend: '\\n\\n## Stable IDE context',
+      additionalDirectories: ['D:/repo', 'D:/workspace', 'D:/repo'],
+      mcpServers: {
+        docs: { command: 'node', args: ['docs-server.mjs'] },
+      },
+    },
+  });
+
+  assert.deepEqual(options.additionalDirectories, ['D:/repo', 'D:/workspace']);
+  assert.deepEqual(options.mcpServers, {
+    docs: { command: 'node', args: ['docs-server.mjs'] },
+  });
+  assert.deepEqual(options.systemPrompt, {
+    type: 'preset',
+    preset: 'claude_code',
+    append: '\\n\\n## Stable IDE context',
+  });
+});
+
+test('includes ccgui agent instructions in the stable system prompt append', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: {
+      model: 'claude-sonnet-4-6',
+      agentPrompt: 'Review the implementation as a release engineer.',
+    },
+  });
+
+  assert.match(options.systemPrompt.append, /Agent Role and Instructions/);
+  assert.match(options.systemPrompt.append, /release engineer/);
+  assert.match(options.systemPrompt.append, /File Path Format Requirement/);
+});
+
+test('builds one ccgui-style request context from agent and MCP state', async () => {
+  const clientOptions = await buildClaudeClientOptions({
+    cwd: 'D:/repo',
+    clientOptions: { model: 'claude-sonnet-4-6', agent: 'release-reviewer' },
+    loadAgent: async (name) => ({ name, content: 'Review release risks.' }),
+    loadMcpServers: async (cwd) => ({ docs: { command: 'node', args: [cwd] } }),
+  });
+
+  assert.equal(clientOptions.agentPrompt, 'Review release risks.');
+  assert.deepEqual(clientOptions.mcpServers, {
+    docs: { command: 'node', args: ['D:/repo'] },
+  });
 });

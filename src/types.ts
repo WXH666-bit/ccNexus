@@ -103,8 +103,8 @@ export interface Session {
   summary?: string;
 }
 
-// ─── WebSocket message types ─────────────────────────────────────
-export type WSMessage =
+// ─── Desktop chat event types ────────────────────────────────────
+export type DesktopChatEvent =
   | { type: 'session'; sessionId: string }
   | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
   | { type: 'assistant'; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; cost?: number; duration?: number; turns?: number } }
@@ -237,6 +237,6 @@ export interface FileEditRecord {
   deletions: number;
 }
 
-// ─── Extended WSMessage ──────────────────────────────────────────
+// ─── Extended desktop chat event types ───────────────────────────
 // ─── View routes ─────────────────────────────────────────────────
 export type ViewRoute = 'chat' | 'history' | 'settings';

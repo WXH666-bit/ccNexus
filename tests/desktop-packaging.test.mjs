@@ -15,7 +15,10 @@ test('package has desktop packaging scripts and electron-builder config', () => 
   assert.ok(pkg.build.files.includes('desktop/**'));
   assert.ok(pkg.build.files.includes('server/claudeHistory.js'));
   assert.ok(pkg.build.files.includes('server/protocol.js'));
-  assert.ok(pkg.build.files.includes('server/sessionSync.js'));
+  assert.ok(pkg.build.files.includes('server/claudeProjectPaths.js'));
+  assert.ok(!pkg.build.files.includes('server/index.js'));
+  assert.equal(pkg.dependencies?.express, undefined);
+  assert.equal(pkg.dependencies?.ws, undefined);
   assert.ok(pkg.build.files.includes('src/utils/contextUsage.js'));
   assert.ok(pkg.build.files.includes('package.json'));
 });

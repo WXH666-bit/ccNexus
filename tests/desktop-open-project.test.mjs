@@ -31,8 +31,8 @@ test('desktop main exposes an open project dialog through IPC', () => {
 test('file explorer can open a desktop-selected project and refresh the tree', () => {
   const source = read('src/components/FileExplorer.tsx');
 
-  assert.match(source, /window\.ccNexusDesktop\?\.openProject/);
-  assert.match(source, /window\.ccNexusDesktop\?\.setWorkspace/);
+  assert.match(source, /desktopApi\.openProject/);
+  assert.match(source, /desktopApi\.setWorkspace/);
   assert.match(source, /void loadTree\(\)/);
   assert.match(source, /FolderPlus/);
 });
@@ -44,20 +44,19 @@ test('chat header exposes a top-level desktop open project action', () => {
   assert.match(header, /FolderPlus/);
   assert.match(header, /onOpenProject/);
   assert.match(chat, /handleOpenProject/);
-  assert.match(chat, /window\.ccNexusDesktop\?\.openProject/);
+  assert.match(chat, /desktopApi\.openProject/);
   assert.match(chat, /setWorkspace\(project\.path\)/);
-  assert.match(chat, /<FileExplorer key=\{workspaceVersion\}/);
-  assert.match(chat, /onOpenProject=\{window\.ccNexusDesktop\?\.openProject \? handleOpenProject : undefined\}/);
+  assert.match(chat, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\}/);
+  assert.match(chat, /onOpenProject=\{handleOpenProject\}/);
 });
 
-test('file explorer uses desktop file IPC first and keeps fetch as browser fallback', () => {
+test('file explorer uses desktop file IPC without a browser fallback', () => {
   const source = read('src/components/FileExplorer.tsx');
 
-  assert.match(source, /window\.ccNexusDesktop\?\.listFiles/);
-  assert.match(source, /window\.ccNexusDesktop\?\.readFile/);
-  assert.match(source, /window\.ccNexusDesktop\?\.saveFile/);
-  assert.match(source, /fetch\('\/api\/files\/tree/);
-  assert.match(source, /fetch\('\/api\/files\/content'/);
+  assert.match(source, /desktopApi\.listFiles/);
+  assert.match(source, /desktopApi\.readFile/);
+  assert.match(source, /desktopApi\.saveFile/);
+  assert.doesNotMatch(source, /fetch\(/);
 });
 
 test('desktop workspace file service mirrors server file safety rules', () => {
@@ -95,17 +94,13 @@ test('desktop workspace service restores the last opened workspace after restart
   }
 });
 
-test('server keeps a mutable workspace root for file APIs and Claude queries', () => {
-  const server = read('server/index.js');
+test('desktop main keeps the workspace root in the Electron host', () => {
+  const main = read('desktop/main.js');
 
-  assert.match(server, /let workspaceRoot = process\.cwd\(\)/);
-  assert.match(server, /function currentClaudeProjectSessionsDir\(\)/);
-  assert.match(server, /app\.get\('\/api\/workspace'/);
-  assert.match(server, /app\.post\('\/api\/workspace'/);
-  assert.match(server, /setWorkspaceRoot/);
-  assert.match(server, /desktopRuntime\.setCwd\(workspaceRoot\)/);
-  assert.match(server, /cwd:\s*workspaceRoot/);
-  assert.doesNotMatch(server, /const CWD = process\.cwd\(\)/);
+  assert.match(main, /workspaceFiles\.setWorkspace/);
+  assert.match(main, /runtime\.setCwd\(workspace\.cwd\)/);
+  assert.match(main, /desktopSessions\.setCwd\(workspace\.cwd\)/);
+  assert.match(main, /workspaceFiles\.restoreWorkspace/);
 });
 
 test('desktop runtime can switch cwd and retire old daemons before new work starts', () => {

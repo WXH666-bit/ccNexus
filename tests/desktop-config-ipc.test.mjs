@@ -34,22 +34,18 @@ test('desktop main and preload expose local config and completion IPC', () => {
   assert.match(preload, /scanFiles:/);
 });
 
-test('client data api uses desktop IPC first and keeps broker fetch fallback', () => {
+test('client data api uses desktop IPC without broker fetch fallback', () => {
   const api = read('src/utils/desktopBridgeApi.ts');
 
-  assert.match(api, /window\.ccNexusDesktop\?\.getProviders/);
-  assert.match(api, /window\.ccNexusDesktop\?\.switchProvider/);
-  assert.match(api, /window\.ccNexusDesktop\?\.getAgents/);
-  assert.match(api, /window\.ccNexusDesktop\?\.getCommands/);
-  assert.match(api, /window\.ccNexusDesktop\?\.getPrompts/);
-  assert.match(api, /window\.ccNexusDesktop\?\.savePrompt/);
-  assert.match(api, /window\.ccNexusDesktop\?\.deletePrompt/);
-  assert.match(api, /window\.ccNexusDesktop\?\.scanFiles/);
-  assert.match(api, /fetch\('\/api\/providers'/);
-  assert.match(api, /fetch\('\/api\/agents'/);
-  assert.match(api, /fetch\('\/api\/commands'/);
-  assert.match(api, /fetch\('\/api\/prompts'/);
-  assert.match(api, /fetch\(`\/api\/files\/scan/);
+  assert.match(api, /requireDesktopApi\(\)\.getProviders/);
+  assert.match(api, /requireDesktopApi\(\)\.switchProvider/);
+  assert.match(api, /requireDesktopApi\(\)\.getAgents/);
+  assert.match(api, /requireDesktopApi\(\)\.getCommands/);
+  assert.match(api, /requireDesktopApi\(\)\.getPrompts/);
+  assert.match(api, /requireDesktopApi\(\)\.savePrompt/);
+  assert.match(api, /requireDesktopApi\(\)\.deletePrompt/);
+  assert.match(api, /requireDesktopApi\(\)\.scanFiles/);
+  assert.doesNotMatch(api, /fetch\(/);
 });
 
 test('desktop local config service mirrors existing Claude-side readers without touching the real home', async () => {
@@ -154,14 +150,14 @@ test('desktop local config follows ccgui cc-switch database filename and setting
   assert.match(serviceSource, /settings_config/);
 });
 
-test('browser fallback provider endpoints reuse the desktop ccgui-style config service', () => {
-  const serverSource = read('server/index.js');
+test('desktop main owns provider and prompt operations through LocalConfigService', () => {
+  const mainSource = read('desktop/main.js');
 
-  assert.match(serverSource, /LocalConfigService/);
-  assert.match(serverSource, /localConfigService\.getProviders\(\)/);
-  assert.match(serverSource, /localConfigService\.switchProvider\(providerId\)/);
-  assert.match(serverSource, /cc-switch\.db/);
-  assert.doesNotMatch(serverSource, /data\.db/);
+  assert.match(mainSource, /localConfig\.getProviders\(\)/);
+  assert.match(mainSource, /localConfig\.switchProvider\(args\.providerId\)/);
+  assert.match(mainSource, /localConfig\.listPrompts\(\)/);
+  assert.match(mainSource, /localConfig\.savePrompt\(args\)/);
+  assert.match(mainSource, /localConfig\.deletePrompt\(args\.name\)/);
 });
 
 test('desktop workspace file service scans files for completion through the same workspace root', async () => {

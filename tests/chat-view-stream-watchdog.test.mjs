@@ -28,11 +28,11 @@ test('ChatView has a ccgui-style stream stall watchdog for missing result events
   assert.match(source, /finishStreamingMessage\(\)/);
 });
 
-test('ChatView consumes queued websocket messages instead of only the latest packet', () => {
+test('ChatView consumes queued desktop chat events instead of only the latest packet', () => {
   const source = read('src/views/ChatView.tsx');
 
   assert.match(source, /incomingMessages/);
   assert.match(source, /processedIncomingMessageCountRef/);
   assert.match(source, /incomingMessages\.slice\(processedIncomingMessageCountRef\.current\)/);
-  assert.doesNotMatch(source, /const \{ send, lastMessage, connected \} = useWebSocket/);
+  assert.doesNotMatch(source, /const \{ send, lastMessage, connected \} = useDesktopChat/);
 });

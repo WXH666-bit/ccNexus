@@ -2,32 +2,25 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const serverSource = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+const mainSource = readFileSync(new URL('../desktop/main.js', import.meta.url), 'utf8');
+const controllerSource = readFileSync(new URL('../desktop/runtime/chatController.js', import.meta.url), 'utf8');
 const registrySource = readFileSync(new URL('../desktop/runtime/processRegistry.js', import.meta.url), 'utf8');
 
-test('server delegates process management to the desktop runtime', () => {
-  assert.match(serverSource, /createDesktopRuntime/);
-  assert.match(serverSource, /const desktopRuntime = createDesktopRuntime/);
-  assert.doesNotMatch(serverSource, /const sessionDaemons = new Map\(\)/);
-  assert.doesNotMatch(serverSource, /function queryProcess/);
-  assert.match(serverSource, /desktopRuntime\.registerChannel\(\{ sessionId, query \}\)/);
-  assert.match(serverSource, /desktopRuntime\.unregisterChannel\(\{ sessionId, query \}\)/);
-  assert.match(serverSource, /desktopRuntime\.buildProcessSnapshot\(\)/);
-  assert.match(serverSource, /desktopRuntime\.stopProcess\(\{ pid, id: requestedId \}\)/);
-  assert.match(serverSource, /desktopRuntime\.restartDaemon\(\{ pid, id: requestedId \}\)/);
+test('Electron host delegates process management to the desktop runtime', () => {
+  assert.match(mainSource, /createDesktopRuntime/);
+  assert.match(mainSource, /runtime\.buildProcessSnapshot/);
+  assert.match(mainSource, /runtime\.stopProcess/);
+  assert.match(mainSource, /runtime\.restartDaemon/);
+  assert.match(controllerSource, /runtime\.registerChannel\(\{ sessionId, query \}\)/);
+  assert.match(controllerSource, /runtime\.unregisterChannel\(\{ sessionId, query \}\)/);
 });
 
 test('idle session daemon remains visible after the active query is unregistered', () => {
-  const chatRoute = serverSource.slice(
-    serverSource.indexOf("case 'chat':"),
-    serverSource.indexOf("case 'permission_response':"),
-  );
+  assert.match(controllerSource, /runtime\.ensureSessionDaemon\(\{ sessionId: querySessionId/);
 
-  assert.match(chatRoute, /desktopRuntime\.ensureSessionDaemon\(\{ sessionId: querySessionId/);
-
-  const finallyBlock = chatRoute.slice(chatRoute.indexOf('finally {'));
-  assert.match(finallyBlock, /unregisterActiveQuery\(querySessionId, q\)/);
-  assert.doesNotMatch(finallyBlock, /desktopRuntime\.removeSessionDaemon\(querySessionId\)/);
+  const finallyBlock = controllerSource.slice(controllerSource.indexOf('finally {'));
+  assert.match(finallyBlock, /unregisterActiveQuery\(querySessionId, query\)/);
+  assert.doesNotMatch(finallyBlock, /runtime\.removeSessionDaemon\(querySessionId\)/);
 });
 
 test('desktop registry produces ccgui-style daemon and channel process snapshots', () => {

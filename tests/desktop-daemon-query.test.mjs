@@ -6,15 +6,11 @@ const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
 test('chat route uses desktop daemon query channel instead of calling SDK directly', () => {
-  const server = read('server/index.js');
-  const chatRoute = server.slice(
-    server.indexOf("case 'chat':"),
-    server.indexOf("case 'permission_response':"),
-  );
+  const controller = read('desktop/runtime/chatController.js');
 
-  assert.match(chatRoute, /desktopRuntime\.queryClaude\(/);
-  assert.doesNotMatch(chatRoute, /sdkQuery\(\{ prompt, options: queryOpts \}\)/);
-  assert.doesNotMatch(server, /@anthropic-ai\/claude-agent-sdk/);
+  assert.match(controller, /runtime\.queryClaude\(/);
+  assert.match(controller, /sessionId:\s*querySessionId/);
+  assert.doesNotMatch(controller, /sdkQuery\(\{ prompt, options: queryOpts \}\)/);
 });
 
 test('desktop runtime exposes a Claude query stream backed by a session daemon', () => {

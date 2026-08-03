@@ -5,7 +5,7 @@ import test from 'node:test';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
-test('package exposes desktop-first development entry points while keeping web UI build', () => {
+test('package exposes desktop-only development and packaging entry points', () => {
   const pkg = JSON.parse(read('package.json'));
 
   assert.equal(pkg.scripts.build, 'vite build');
@@ -14,15 +14,19 @@ test('package exposes desktop-first development entry points while keeping web U
   assert.match(pkg.scripts['desktop:dev'], /vite --port 5000/);
   assert.doesNotMatch(pkg.scripts['desktop:dev'], /node server\/index\.js/);
   assert.match(pkg.scripts['desktop:dev'], /electron desktop\/main\.js/);
+  assert.equal(pkg.scripts.dev, undefined);
+  assert.equal(pkg.scripts.start, undefined);
+  assert.equal(pkg.dependencies.express, undefined);
+  assert.equal(pkg.dependencies.ws, undefined);
 });
 
-test('desktop host owns the app shell and loads the retained local web UI', () => {
+test('desktop host owns the app shell and loads the local renderer only', () => {
   assert.equal(existsSync(new URL('desktop/main.js', root)), true);
   const host = read('desktop/main.js');
 
   assert.match(host, /BrowserWindow/);
-  assert.match(host, /CCNEXUS_WEB_URL/);
-  assert.match(host, /http:\/\/localhost:5000\/chat/);
+  assert.doesNotMatch(host, /CCNEXUS_WEB_URL/);
+  assert.match(host, /http:\/\/127\.0\.0\.1:5000\/chat/);
   assert.match(host, /createDesktopRuntime/);
 });
 
@@ -49,12 +53,19 @@ test('desktop host wires a preload IPC boundary instead of exposing node to the 
   assert.match(preload, /ipcRenderer\.invoke\('desktop:get-processes'/);
 });
 
-test('desktop packaged UI uses hash routing while browser dev keeps browser routing', () => {
+test('desktop renderer uses hash routing without a browser route', () => {
   const main = read('src/main.tsx');
 
   assert.match(main, /HashRouter/);
-  assert.match(main, /BrowserRouter/);
-  assert.match(main, /window\.ccNexusDesktop/);
+  assert.doesNotMatch(main, /BrowserRouter/);
+});
+
+test('desktop-only build has no standalone broker entry point or Vite transport proxy', () => {
+  const vite = read('vite.config.ts');
+
+  assert.equal(existsSync(new URL('server/index.js', root)), false);
+  assert.doesNotMatch(vite, /\/api/);
+  assert.doesNotMatch(vite, /\/ws/);
 });
 
 test('daemon bridge mirrors ccgui NDJSON lifecycle over a child process', () => {

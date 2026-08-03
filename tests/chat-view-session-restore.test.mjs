@@ -22,7 +22,7 @@ test('ChatView requests the latest session history after restoring the session l
   assert.match(source, /const latest = \[\.\.\.sessionList\]\.sort/);
   assert.match(source, /requestSessionHistory\(latest\.id\)/);
   assert.match(source, /loadSession\(sessionId\)/);
-  assert.match(source, /send\(\{\s*type:\s*'load_session',\s*sessionId\s*\}\)/s);
+  assert.doesNotMatch(source, /send\(\{\s*type:\s*'load_session',\s*sessionId\s*\}\)/s);
 });
 
 test('ChatView seeds context usage from restored history before the next live usage update', () => {
@@ -39,7 +39,7 @@ test('ChatView persists live usage updates per session so refresh does not fall 
   const source = read('src/views/ChatView.tsx');
   const types = read('src/types.ts');
   const contextUsage = read('src/utils/contextUsage.js');
-  const server = read('server/index.js');
+  const controller = read('desktop/runtime/chatController.js');
 
   assert.match(source, /function readStoredContextUsage\(sessionId\?: string\)/);
   assert.match(source, /function writeStoredContextUsage\(sessionId: string \| undefined, usedTokens: number\)/);
@@ -47,5 +47,5 @@ test('ChatView persists live usage updates per session so refresh does not fall 
   assert.match(source, /writeStoredContextUsage\(usageSessionId, msg\.usedTokens\);/);
   assert.match(types, /type: 'usage_update';[^}]*sessionId\?: string/s);
   assert.match(contextUsage, /sessionId/);
-  assert.match(server, /sessionId: querySessionId/);
+  assert.match(controller, /sessionId: querySessionId/);
 });

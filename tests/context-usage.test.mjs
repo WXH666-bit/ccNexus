@@ -67,6 +67,20 @@ test('extractUsageFromSdkEvent reads complete assistant usage payloads', () => {
   );
 });
 
+test('extractUsageFromSdkEvent ignores aggregate result usage during tool loops', () => {
+  assert.equal(
+    extractUsageFromSdkEvent({
+      type: 'result',
+      usage: {
+        input_tokens: 75_000,
+        cache_read_input_tokens: 180_000,
+        output_tokens: 400,
+      },
+    }),
+    null,
+  );
+});
+
 test('createUsageUpdate emits the websocket payload consumed by the context bar', () => {
   assert.deepEqual(createUsageUpdate({
     usage: {

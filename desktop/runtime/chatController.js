@@ -6,6 +6,7 @@ import { createPermissionPolicy } from '../../server/permissionPolicy.js';
 import { isMissingClaudeConversationError, staleSessionErrorEvent } from '../../server/sessionRecovery.js';
 import { extractToolResults } from '../../server/toolResults.js';
 import { createUsageUpdate, extractUsageFromSdkEvent } from '../../src/utils/contextUsage.js';
+import { buildClaudeClientOptions } from '../../server/claudeRequestContext.js';
 
 function promptTitle(prompt) {
   return (prompt || '').slice(0, 60) || 'Untitled chat';
@@ -147,6 +148,11 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     const canUseTool = createPermissionHandler(emit);
     const { currentEnv } = await localConfig.getProviders();
     const queryEnv = { ...process.env, ...(currentEnv || {}) };
+    const effectiveClientOptions = await buildClaudeClientOptions({
+      cwd: workspaceFiles.getWorkspace().cwd,
+      clientOptions,
+      loadAgent: (name) => localConfig.getAgent(name),
+    });
     const modelForUsage = clientOptions?.model && clientOptions.model !== 'default'
       ? clientOptions.model
       : 'claude-sonnet-4-6';
@@ -154,7 +160,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       cwd: workspaceFiles.getWorkspace().cwd,
       env: queryEnv,
       canUseTool,
-      clientOptions,
+      clientOptions: effectiveClientOptions,
     });
     if (querySessionId) queryOpts.resume = querySessionId;
 

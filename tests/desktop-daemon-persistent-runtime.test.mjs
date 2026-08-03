@@ -28,7 +28,14 @@ test('desktop daemon follows ccgui runtime signature rules for cache-preserving 
   assert.doesNotMatch(daemon, /permissionMode:\s*options\.permissionMode/);
   assert.doesNotMatch(daemon, /maxThinkingTokens:\s*options\.maxThinkingTokens/);
   assert.match(daemon, /bypassPermissions:\s*options\.permissionMode === 'bypassPermissions'/);
-  assert.match(daemon, /contextWindow1M:\s*\(options\.model \|\| ''\)\.includes\('\[1m\]'\)/);
+  assert.match(daemon, /contextWindow1M:[\s\S]*CLAUDE_CODE_DISABLE_1M_CONTEXT/);
   assert.match(daemon, /setPermissionMode/);
   assert.match(daemon, /setMaxThinkingTokens/);
+});
+
+test('desktop daemon includes ccgui cache prefix inputs in runtime identity', () => {
+  assert.match(daemon, /additionalDirectories/);
+  assert.match(daemon, /systemPromptAppend/);
+  assert.match(daemon, /streamingEnabled/);
+  assert.match(daemon, /runtimeSessionEpoch/);
 });

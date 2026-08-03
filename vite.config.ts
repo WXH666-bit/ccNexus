@@ -12,14 +12,10 @@ export default defineConfig({
   },
   server: {
     port: 5000,
-    host: '0.0.0.0',
-    proxy: {
-      '/api': { target: 'http://localhost:3456', changeOrigin: true },
-      '/ws': { target: 'ws://localhost:3456', ws: true },
-    },
+    host: '127.0.0.1',
   },
   preview: {
     port: 5000,
-    host: '0.0.0.0',
+    host: '127.0.0.1',
   },
 });

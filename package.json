@@ -6,16 +6,14 @@
   "main": "desktop/main.js",
   "description": "Self-hosted Claude Code visual client — chat-based UI with diff view, file tree, and session management",
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"node --watch server/index.js\" \"vite --port 5000 --host 0.0.0.0\"",
-    "desktop:dev": "concurrently -n client,desktop -c green,magenta \"vite --port 5000 --host 0.0.0.0\" \"electron desktop/main.js\"",
+    "desktop:dev": "concurrently -n renderer,desktop -c green,magenta \"vite --port 5000 --host 127.0.0.1\" \"electron desktop/main.js\"",
     "desktop:host": "electron desktop/main.js",
     "desktop:daemon": "node desktop/daemon/ccnexus-daemon.js",
     "desktop:pack": "npm run build && electron-builder --dir",
     "desktop:dist": "npm run build && electron-builder",
     "build": "vite build",
     "test:protocol": "node --test \"tests/*.mjs\"",
-    "test:session-store": "node --test tests/session-store.test.mjs",
-    "start": "NODE_ENV=production node server/index.js"
+    "desktop:run": "electron desktop/main.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.218",
@@ -23,15 +21,13 @@
     "diff": "^7.0.0",
     "diff2html": "^3.4.48",
     "dompurify": "^3.4.12",
-    "express": "^4.21.0",
     "i18next": "^26.3.6",
     "lucide-react": "^1.26.0",
     "marked": "^18.0.7",
     "mermaid": "^11.16.0",
     "react-i18next": "^17.0.11",
     "react-router-dom": "^7.18.1",
-    "sql.js": "^1.14.1",
-    "ws": "^8.18.0"
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@types/diff": "^6.0.0",
@@ -53,12 +49,15 @@
       "dist/**",
       "desktop/**",
       "server/assistantTurn.js",
+      "server/claudeMcp.js",
+      "server/claudeRequestContext.js",
       "server/claudeHistory.js",
       "server/permissionPolicy.js",
       "server/protocol.js",
       "server/queryOptions.js",
       "server/sessionRecovery.js",
-      "server/sessionSync.js",
+      "server/claudeProjectPaths.js",
+      "server/systemPrompt.js",
       "server/thinkingOptions.js",
       "server/toolResults.js",
       "src/utils/contextUsage.js",

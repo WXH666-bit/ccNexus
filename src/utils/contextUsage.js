@@ -119,13 +119,10 @@ function isCompleteUsage(usage) {
 }
 
 export function extractUsageFromSdkEvent(event) {
-  const candidates = [
-    event?.message?.usage,
-    event?.usage,
-    event?.event?.message?.usage,
-    event?.event?.usage,
-  ];
-  return candidates.find(isCompleteUsage) ?? null;
+  // Claude's result usage aggregates every API call in a tool loop. The
+  // assistant message is the ccgui-authoritative per-turn context snapshot.
+  if (event?.type !== 'assistant') return null;
+  return isCompleteUsage(event.message?.usage) ? event.message.usage : null;
 }
 
 export function createUsageUpdate({ usage, provider = 'claude', model, sessionId }) {

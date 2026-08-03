@@ -4,9 +4,21 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { encodeClaudeProjectPath } from '../server/claudeProjectPaths.js';
 
 const root = new URL('../', import.meta.url);
 const read = (filePath) => readFileSync(new URL(filePath, root), 'utf8');
+const projectIndexPath = (sessionsDir, cwd) => path.join(
+  sessionsDir,
+  'projects',
+  `${encodeClaudeProjectPath(cwd)}.json`,
+);
+
+async function writeProjectIndex(sessionsDir, cwd, sessions) {
+  const filePath = projectIndexPath(sessionsDir, cwd);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify({ version: 1, projectPath: cwd, sessions }), 'utf8');
+}
 
 test('desktop main and preload expose session history IPC', () => {
   const main = read('desktop/main.js');
@@ -23,16 +35,16 @@ test('desktop main and preload expose session history IPC', () => {
   assert.match(preload, /deleteSession:/);
 });
 
-test('client session api uses desktop IPC first and keeps HTTP fallback where available', () => {
+test('client session api uses desktop IPC without a browser fallback', () => {
   const api = read('src/utils/sessionBridgeApi.ts');
   const chat = read('src/views/ChatView.tsx');
   const history = read('src/views/HistoryView.tsx');
 
-  assert.match(api, /window\.ccNexusDesktop\?\.getSessions/);
-  assert.match(api, /window\.ccNexusDesktop\?\.loadSession/);
-  assert.match(api, /window\.ccNexusDesktop\?\.renameSession/);
-  assert.match(api, /window\.ccNexusDesktop\?\.deleteSession/);
-  assert.match(api, /fetch\('\/api\/sessions'/);
+  assert.match(api, /requireDesktopApi\(\)\.getSessions/);
+  assert.match(api, /requireDesktopApi\(\)\.loadSession/);
+  assert.match(api, /requireDesktopApi\(\)\.renameSession/);
+  assert.match(api, /requireDesktopApi\(\)\.deleteSession/);
+  assert.doesNotMatch(api, /fetch\(/);
   assert.match(chat, /getSessions\(\)/);
   assert.match(chat, /loadSession\(sessionId\)/);
   assert.match(history, /getSessions\(\)/);
@@ -47,11 +59,7 @@ test('desktop session service lists, loads, renames and deletes persisted sessio
 
   try {
     await mkdir(sessionsDir, { recursive: true });
-    await writeFile(
-      path.join(sessionsDir, '_index.json'),
-      JSON.stringify([{ id: 's1', title: 'First', updatedAt: 20 }]),
-      'utf8',
-    );
+    await writeProjectIndex(sessionsDir, homeDir, [{ id: 's1', title: 'First', updatedAt: 20 }]);
     await writeFile(
       path.join(sessionsDir, 's1.json'),
       JSON.stringify([{ id: 'm1', role: 'user', content: [{ type: 'text', text: 'hello' }], timestamp: 10, sessionId: 's1' }]),
@@ -83,7 +91,6 @@ test('desktop session service lists, loads, renames and deletes persisted sessio
 
 test('desktop session service syncs with Claude project JSONL history without touching Claude config', async () => {
   const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
-  const { encodeClaudeProjectPath } = await import('../server/sessionSync.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-desktop-claude-history-'));
   const cwd = path.join(homeDir, 'workspace');
   const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
@@ -92,14 +99,10 @@ test('desktop session service syncs with Claude project JSONL history without to
   try {
     await mkdir(sessionsDir, { recursive: true });
     await mkdir(claudeProjectDir, { recursive: true });
-    await writeFile(
-      path.join(sessionsDir, '_index.json'),
-      JSON.stringify([
-        { id: 'kept-session', title: 'Keep', updatedAt: 20 },
-        { id: 'deleted-session', title: 'Delete', updatedAt: 10 },
-      ]),
-      'utf8',
-    );
+    await writeProjectIndex(sessionsDir, cwd, [
+      { id: 'kept-session', title: 'Keep', updatedAt: 20 },
+      { id: 'deleted-session', title: 'Delete', updatedAt: 10 },
+    ]);
     await writeFile(path.join(sessionsDir, 'kept-session.json'), '[]', 'utf8');
     await writeFile(path.join(sessionsDir, 'deleted-session.json'), '[]', 'utf8');
     await writeFile(path.join(claudeProjectDir, 'kept-session.jsonl'), '{}\n', 'utf8');
@@ -135,7 +138,6 @@ test('desktop session service syncs with Claude project JSONL history without to
 
 test('desktop session service recovers Claude JSONL history when the ccnexus index is malformed', async () => {
   const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
-  const { encodeClaudeProjectPath } = await import('../server/sessionSync.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-desktop-bad-index-'));
   const cwd = path.join(homeDir, 'workspace');
   const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
@@ -144,11 +146,8 @@ test('desktop session service recovers Claude JSONL history when the ccnexus ind
   try {
     await mkdir(sessionsDir, { recursive: true });
     await mkdir(claudeProjectDir, { recursive: true });
-    await writeFile(
-      path.join(sessionsDir, '_index.json'),
-      '[]  {"id":"corrupt-tail"}]',
-      'utf8',
-    );
+    await mkdir(path.dirname(projectIndexPath(sessionsDir, cwd)), { recursive: true });
+    await writeFile(projectIndexPath(sessionsDir, cwd), '[]  {"id":"corrupt-tail"}]', 'utf8');
     await writeFile(
       path.join(claudeProjectDir, 'recovered-session.jsonl'),
       JSON.stringify({
@@ -167,8 +166,9 @@ test('desktop session service recovers Claude JSONL history when the ccnexus ind
     assert.equal(list.type, 'session_list');
     assert.deepEqual(list.deletedSessionIds, []);
     assert.deepEqual(list.sessions.map((session) => session.id), ['recovered-session']);
+    const projectIndexFile = projectIndexPath(sessionsDir, cwd);
     assert.deepEqual(
-      JSON.parse(readFileSync(path.join(sessionsDir, '_index.json'), 'utf8')).map((session) => session.id),
+      JSON.parse(readFileSync(projectIndexFile, 'utf8')).sessions.map((session) => session.id),
       ['recovered-session'],
     );
   } finally {
@@ -178,7 +178,6 @@ test('desktop session service recovers Claude JSONL history when the ccnexus ind
 
 test('desktop session service keeps cached sessions when Claude JSONL is absent for the current workspace', async () => {
   const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
-  const { encodeClaudeProjectPath } = await import('../server/sessionSync.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-desktop-keep-cache-'));
   const cwd = path.join(homeDir, 'workspace');
   const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
@@ -187,11 +186,7 @@ test('desktop session service keeps cached sessions when Claude JSONL is absent 
   try {
     await mkdir(sessionsDir, { recursive: true });
     await mkdir(claudeProjectDir, { recursive: true });
-    await writeFile(
-      path.join(sessionsDir, '_index.json'),
-      JSON.stringify([{ id: 'cached-only', title: 'Cached', updatedAt: 20 }]),
-      'utf8',
-    );
+    await writeProjectIndex(sessionsDir, cwd, [{ id: 'cached-only', title: 'Cached', updatedAt: 20 }]);
     await writeFile(
       path.join(sessionsDir, 'cached-only.json'),
       JSON.stringify([{ id: 'm1', role: 'user', content: [{ type: 'text', text: 'cached' }], timestamp: 10, sessionId: 'cached-only' }]),
@@ -204,6 +199,74 @@ test('desktop session service keeps cached sessions when Claude JSONL is absent 
     assert.deepEqual(list.deletedSessionIds, []);
     assert.deepEqual(list.sessions.map((session) => session.id), ['cached-only']);
     assert.equal((await service.loadSession('cached-only')).messages[0].content[0].text, 'cached');
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop session service does not load an unindexed cached session after switching workspaces', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-desktop-unindexed-session-'));
+  const workspaceA = path.join(homeDir, 'workspace-a');
+  const workspaceB = path.join(homeDir, 'workspace-b');
+  const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
+
+  try {
+    await mkdir(workspaceA, { recursive: true });
+    await mkdir(workspaceB, { recursive: true });
+    await mkdir(sessionsDir, { recursive: true });
+    await writeProjectIndex(sessionsDir, workspaceA, [
+      { id: 'session-a', title: 'Workspace A', updatedAt: 20 },
+    ]);
+    await writeFile(path.join(sessionsDir, 'session-a.json'), JSON.stringify([
+      { id: 'message-a', role: 'user', content: [{ type: 'text', text: 'A' }], timestamp: 10, sessionId: 'session-a' },
+    ]), 'utf8');
+
+    const service = new DesktopSessionService({ homeDir, cwd: workspaceB });
+    const history = await service.loadSession('session-a');
+
+    assert.deepEqual(history, {
+      type: 'session_history',
+      sessionId: 'session-a',
+      messages: [],
+    });
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop session service isolates cached sessions by workspace when switching directories', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-desktop-workspace-sessions-'));
+  const workspaceA = path.join(homeDir, 'workspace-a');
+  const workspaceB = path.join(homeDir, 'workspace-b');
+  const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
+
+  try {
+    await mkdir(workspaceA, { recursive: true });
+    await mkdir(workspaceB, { recursive: true });
+    await mkdir(sessionsDir, { recursive: true });
+    await writeProjectIndex(sessionsDir, workspaceA, [
+      { id: 'session-a', title: 'Workspace A', updatedAt: 20 },
+    ]);
+    await writeProjectIndex(sessionsDir, workspaceB, [
+      { id: 'session-b', title: 'Workspace B', updatedAt: 10 },
+    ]);
+    await writeFile(path.join(sessionsDir, 'session-a.json'), JSON.stringify([
+      { id: 'message-a', role: 'user', content: [{ type: 'text', text: 'A' }], timestamp: 10, sessionId: 'session-a' },
+    ]), 'utf8');
+    await writeFile(path.join(sessionsDir, 'session-b.json'), JSON.stringify([
+      { id: 'message-b', role: 'user', content: [{ type: 'text', text: 'B' }], timestamp: 10, sessionId: 'session-b' },
+    ]), 'utf8');
+
+    const service = new DesktopSessionService({ homeDir, cwd: workspaceA });
+    assert.deepEqual((await service.getSessions()).sessions.map((session) => session.id), ['session-a']);
+
+    service.setCwd(workspaceB);
+    assert.deepEqual((await service.getSessions()).sessions.map((session) => session.id), ['session-b']);
+
+    service.setCwd(workspaceA);
+    assert.deepEqual((await service.getSessions()).sessions.map((session) => session.id), ['session-a']);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

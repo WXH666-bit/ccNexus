@@ -139,13 +139,22 @@ async function canUseTool(toolName, input, options) {
 }
 
 function runtimeSignature(options = {}) {
+  const settingsEnv = options.settings?.env || {};
+  const modelEnv = options.env || {};
   return JSON.stringify({
     cwd: options.cwd || '',
+    additionalDirectories: options.additionalDirectories || [],
+    systemPromptAppend: options.systemPrompt?.append || '',
+    streamingEnabled: options.includePartialMessages !== false,
+    runtimeSessionEpoch: options.runtimeSessionEpoch || '',
     model: options.model || '',
     effort: options.effort || '',
     includePartialMessages: options.includePartialMessages !== false,
-    contextWindow1M: (options.model || '').includes('[1m]'),
+    contextWindow1M: (options.model || '').toLowerCase().includes('[1m]')
+      || settingsEnv.CLAUDE_CODE_DISABLE_1M_CONTEXT === '',
     bypassPermissions: options.permissionMode === 'bypassPermissions',
+    modelRouting: modelEnv.ANTHROPIC_MODEL || '',
+    mcpServers: options.mcpServers || null,
   });
 }
 

@@ -51,7 +51,7 @@ function createMainWindow() {
     },
   });
 
-  const devUrl = process.env.CCNEXUS_WEB_URL || 'http://localhost:5000/chat';
+  const devUrl = 'http://127.0.0.1:5000/chat';
   if (app.isPackaged) {
     mainWindow.loadFile(indexHtml, { hash: '/chat' });
   } else {
