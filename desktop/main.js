@@ -43,7 +43,13 @@ function createMainWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'ccNexus',
-    backgroundColor: '#1f2023',
+    backgroundColor: '#1e1f22',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#1e1f22',
+      symbolColor: '#9aa0a6',
+      height: 42,
+    },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -94,6 +100,14 @@ ipcMain.handle('desktop:open-project', async () => {
 });
 
 ipcMain.handle('desktop:get-workspace', () => workspaceFiles.getWorkspace());
+
+ipcMain.handle('desktop:get-active-session', async () => ({
+  sessionId: await workspaceFiles.getActiveSessionId(),
+}));
+
+ipcMain.handle('desktop:set-active-session', async (_event, args = {}) => ({
+  sessionId: await workspaceFiles.setActiveSessionId(args.sessionId ?? null),
+}));
 
 ipcMain.handle('desktop:set-workspace', async (_event, args = {}) => {
   const requestedPath = typeof args === 'string' ? args : args.path;

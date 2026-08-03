@@ -25,6 +25,7 @@ export class WorkspaceFileService {
   constructor({ cwd = process.cwd(), stateFile = null } = {}) {
     this.workspaceRoot = path.resolve(cwd);
     this.stateFile = stateFile;
+    this.stateWritePromise = Promise.resolve();
   }
 
   getWorkspace() {
@@ -49,7 +50,7 @@ export class WorkspaceFileService {
   async restoreWorkspace() {
     if (!this.stateFile) return this.getWorkspace();
     try {
-      const state = JSON.parse(await fs.readFile(this.stateFile, 'utf8'));
+      const state = await this.readState();
       if (typeof state.lastWorkspace !== 'string' || !state.lastWorkspace.trim()) {
         return this.getWorkspace();
       }
@@ -63,16 +64,61 @@ export class WorkspaceFileService {
   }
 
   async persistWorkspace() {
-    if (!this.stateFile) return;
+    await this.updateState((state) => state);
+  }
+
+  async readState() {
+    if (!this.stateFile) return {};
     try {
-      await fs.mkdir(path.dirname(this.stateFile), { recursive: true });
-      await fs.writeFile(this.stateFile, JSON.stringify({
-        lastWorkspace: this.workspaceRoot,
-        updatedAt: Date.now(),
-      }, null, 2), 'utf8');
+      const state = JSON.parse(await fs.readFile(this.stateFile, 'utf8'));
+      return state && typeof state === 'object' && !Array.isArray(state) ? state : {};
     } catch {
-      // Opening a project should still work if the app state file is unavailable.
+      return {};
     }
+  }
+
+  async updateState(update) {
+    if (!this.stateFile) return;
+
+    const write = this.stateWritePromise.then(async () => {
+      try {
+        const state = await this.readState();
+        const nextState = update(state) || state;
+        nextState.lastWorkspace = this.workspaceRoot;
+        nextState.updatedAt = Date.now();
+        await fs.mkdir(path.dirname(this.stateFile), { recursive: true });
+        await fs.writeFile(this.stateFile, JSON.stringify(nextState, null, 2), 'utf8');
+      } catch {
+        // Opening a project should still work if the app state file is unavailable.
+      }
+    });
+    this.stateWritePromise = write.catch(() => {});
+    await write;
+  }
+
+  async getActiveSessionId() {
+    const state = await this.readState();
+    const activeSessions = state.activeSessionsByWorkspace;
+    const sessionId = activeSessions && typeof activeSessions === 'object'
+      ? activeSessions[this.workspaceRoot]
+      : null;
+    return typeof sessionId === 'string' && sessionId.trim() ? sessionId : null;
+  }
+
+  async setActiveSessionId(sessionId) {
+    if (sessionId !== null && (typeof sessionId !== 'string' || !sessionId.trim())) {
+      throw new Error('Invalid active session id');
+    }
+
+    await this.updateState((state) => {
+      const activeSessions = state.activeSessionsByWorkspace && typeof state.activeSessionsByWorkspace === 'object'
+        ? { ...state.activeSessionsByWorkspace }
+        : {};
+      if (sessionId) activeSessions[this.workspaceRoot] = sessionId;
+      else delete activeSessions[this.workspaceRoot];
+      return { ...state, activeSessionsByWorkspace: activeSessions };
+    });
+    return sessionId;
   }
 
   safePath(requestedPath) {

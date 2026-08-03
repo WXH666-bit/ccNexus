@@ -23,6 +23,14 @@ export async function loadSession(sessionId: string) {
   };
 }
 
+export async function getActiveSession() {
+  return await requireDesktopApi().getActiveSession();
+}
+
+export async function setActiveSession(sessionId: string | null) {
+  return await requireDesktopApi().setActiveSession(sessionId);
+}
+
 export async function renameSession(sessionId: string, title: string) {
   return await requireDesktopApi().renameSession(sessionId, title);
 }

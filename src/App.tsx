@@ -6,6 +6,9 @@ import SettingsView from './views/SettingsView';
 export default function App() {
   return (
     <div className="app-root">
+      <div className="window-drag-region" aria-hidden="true">
+        <span className="window-title">ccNexus</span>
+      </div>
       <Routes>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatView />} />

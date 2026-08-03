@@ -222,8 +222,15 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
               });
               runtime.ensureSessionDaemon({ sessionId: querySessionId, title: promptTitle(prompt) });
               registerActiveQuery(querySessionId, query);
-              await sessions.saveSession({ id: querySessionId, title: promptTitle(prompt), updatedAt: Date.now() });
-              emitSafe(emit, sessionEvent(querySessionId));
+              const savedSession = await sessions.saveSession({
+                id: querySessionId,
+                title: promptTitle(prompt),
+                updatedAt: Date.now(),
+              });
+              if (typeof workspaceFiles.setActiveSessionId === 'function') {
+                await workspaceFiles.setActiveSessionId(querySessionId).catch(() => {});
+              }
+              emitSafe(emit, sessionEvent(querySessionId, savedSession));
               await recordUserMessage(querySessionId, prompt);
             }
             emitSafe(emit, { type: 'system', subtype: event.subtype, sessionId: event.session_id || querySessionId });

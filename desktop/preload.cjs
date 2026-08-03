@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   openProject: () => ipcRenderer.invoke('desktop:open-project'),
   getWorkspace: () => ipcRenderer.invoke('desktop:get-workspace'),
   setWorkspace: (path) => ipcRenderer.invoke('desktop:set-workspace', { path }),
+  getActiveSession: () => ipcRenderer.invoke('desktop:get-active-session'),
+  setActiveSession: (sessionId) => ipcRenderer.invoke('desktop:set-active-session', { sessionId }),
   listFiles: (options) => ipcRenderer.invoke('desktop:list-files', options),
   readFile: (path) => ipcRenderer.invoke('desktop:read-file', { path }),
   saveFile: (file) => ipcRenderer.invoke('desktop:save-file', file),

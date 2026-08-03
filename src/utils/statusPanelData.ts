@@ -172,10 +172,16 @@ function extractFilePath(input: Record<string, unknown>) {
   ].map(asText).find(Boolean) || '';
 }
 
-function deriveFileChanges(messages: ChatMessage[]): StatusData['edits'] {
+function deriveFileChanges(
+  messages: ChatMessage[],
+  startFromIndex = 0,
+  processedFiles: readonly string[] = [],
+): StatusData['edits'] {
   const files = new Map<string, StatusFileChange>();
+  const processedFileSet = new Set(processedFiles);
 
   messages.forEach((message, messageIndex) => {
+    if (messageIndex < startFromIndex) return;
     message.content.forEach((block: ContentBlock) => {
       if (block.type !== 'tool_use' || !isFileModifyToolName(block.name)) return;
       const result = findToolResultForBlock(messages, messageIndex, block.id);
@@ -183,7 +189,7 @@ function deriveFileChanges(messages: ChatMessage[]): StatusData['edits'] {
 
       const input = asRecord(normalizeToolInput(block.name, block.input));
       const path = extractFilePath(input);
-      if (!path) return;
+      if (!path || processedFileSet.has(path)) return;
       const oldString = asText(input.old_string);
       const newString = asText(input.new_string);
       const diff = computeDiffStats(oldString, newString);
@@ -245,10 +251,18 @@ function deriveSubagents(messages: ChatMessage[]): SubAgentInfo[] {
   return agents;
 }
 
-export function deriveStatusData(messages: ChatMessage[]): Pick<StatusData, 'tasks' | 'edits' | 'subagents'> {
+export interface StatusDerivationOptions {
+  startFromIndex?: number;
+  processedFiles?: readonly string[];
+}
+
+export function deriveStatusData(
+  messages: ChatMessage[],
+  options: StatusDerivationOptions = {},
+): Pick<StatusData, 'tasks' | 'edits' | 'subagents'> {
   return {
     tasks: deriveTasks(messages),
-    edits: deriveFileChanges(messages),
+    edits: deriveFileChanges(messages, options.startFromIndex ?? 0, options.processedFiles ?? []),
     subagents: deriveSubagents(messages),
   };
 }

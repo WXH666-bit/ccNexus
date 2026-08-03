@@ -29,8 +29,9 @@ import {
 import { estimateMessagesUsedTokens, extractMessagesUsedTokens } from '../utils/contextUsage.js';
 import { getDesktopEventSessionId, normalizeDesktopChatEvent } from '../utils/desktopChatEvents.js';
 import { getContextUsage as loadContextUsage } from '../utils/desktopBridgeApi';
-import { getSessions, loadSession, renameSession } from '../utils/sessionBridgeApi';
+import { getActiveSession, getSessions, loadSession, renameSession, setActiveSession } from '../utils/sessionBridgeApi';
 import { deriveStatusData } from '../utils/statusPanelData';
+import { useFileChangesManagement } from '../hooks/useFileChangesManagement';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse
@@ -68,6 +69,7 @@ export default function ChatView() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const sessionsRef = useRef<Session[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [status, setStatus] = useState<StatusData>({});
@@ -123,9 +125,22 @@ export default function ChatView() {
   const activeSessionIdRef = useRef<string | null>(urlSessionId ?? null);
   const historyRequestTokenRef = useRef(0);
   const processedIncomingMessageCountRef = useRef(0);
+  const newSessionNavigationRef = useRef(false);
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
   const serverSessionNavigationRef = useRef<string | null>(null);
+
+  const currentSessionId = urlSessionId ?? activeSessionIdRef.current ?? currentSession?.id ?? null;
+  const {
+    baseMessageIndex,
+    processedFiles,
+    handleUndoFile: markFileProcessed,
+    handleKeepAll,
+  } = useFileChangesManagement({
+    currentSessionId,
+    currentSessionIdRef: activeSessionIdRef,
+    messages,
+  });
 
   const setMode = useCallback((nextMode: string) => {
     setModeState(nextMode);
@@ -140,6 +155,18 @@ export default function ChatView() {
   const setReasoning = useCallback((nextReasoning: string) => {
     setReasoningState(nextReasoning);
     localStorage.setItem('chatReasoning', nextReasoning);
+  }, []);
+
+  const updateSessions = useCallback((updater: Session[] | ((previous: Session[]) => Session[])) => {
+    setSessions(previous => {
+      const next = typeof updater === 'function' ? updater(previous) : updater;
+      sessionsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const rememberActiveSession = useCallback((sessionId: string | null) => {
+    void setActiveSession(sessionId).catch(() => {});
   }, []);
 
   const contextUsageRequestRef = useRef(0);
@@ -254,7 +281,7 @@ export default function ChatView() {
   }, [rewindTarget, currentSession, messages, send]);
 
   // File undo handler
-  const handleUndoFile = useCallback((filePath: string) => {
+  const handleUndoFileRequest = useCallback((filePath: string) => {
     if (!currentSession) return;
     send({
       type: 'undo_file',
@@ -283,10 +310,6 @@ export default function ChatView() {
 
   const handleSubagentHistory = useCallback((key: string, history: SubagentHistoryResponse) => {
     setSubagentHistories(previous => ({ ...previous, [key]: history }));
-  }, []);
-
-  const handleKeepAllFiles = useCallback(() => {
-    setStatus(prev => ({ ...prev, edits: undefined }));
   }, []);
 
   // Plan approval handlers
@@ -340,7 +363,7 @@ export default function ChatView() {
 
   // Match ccgui's beginSessionTransition: invalidate the outgoing history
   // request and clear every transient value before the next session is loaded.
-  const beginSessionTransition = useCallback((nextSessionId: string | null) => {
+  const beginSessionTransition = useCallback((nextSessionId: string | null, nextSession: Session | null = null) => {
     historyRequestTokenRef.current += 1;
     activeSessionIdRef.current = nextSessionId;
     requestedHistorySessionRef.current = null;
@@ -349,7 +372,7 @@ export default function ChatView() {
     setIsStreaming(false);
     setMessages([]);
     setUsageUsedTokens(undefined);
-    setCurrentSession(null);
+    setCurrentSession(nextSessionId ? nextSession : null);
     setPermission(null);
     setPlanApproval(null);
     setAskQuestion(null);
@@ -372,14 +395,14 @@ export default function ChatView() {
     setUsageUsedTokens(extractMessagesUsedTokens(history.messages) ?? readStoredContextUsage(history.sessionId) ?? estimateMessagesUsedTokens(history.messages));
     setCurrentSession(prev => prev?.id === history.sessionId
       ? prev
-      : sessions.find(session => session.id === history.sessionId) || {
+      : sessionsRef.current.find(session => session.id === history.sessionId) || {
         id: history.sessionId,
         title: 'New Chat',
         updatedAt: Date.now(),
       });
-  }, [sessions, urlSessionId]);
+  }, [urlSessionId]);
 
-  const requestSessionHistory = useCallback((sessionId: string) => {
+  const requestSessionHistory = useCallback((sessionId: string, fallbackSessionId: string | null = null) => {
     const requestToken = ++historyRequestTokenRef.current;
     activeSessionIdRef.current = sessionId;
     requestedHistorySessionRef.current = sessionId;
@@ -396,32 +419,55 @@ export default function ChatView() {
         if (historyRequestTokenRef.current === requestToken
           && requestedHistorySessionRef.current === sessionId) {
           requestedHistorySessionRef.current = null;
+          if (fallbackSessionId) {
+            const fallbackSession = sessionsRef.current.find(session => session.id === fallbackSessionId);
+            if (fallbackSession) {
+              beginSessionTransition(fallbackSession.id, fallbackSession);
+              setCurrentSession(fallbackSession);
+              rememberActiveSession(fallbackSession.id);
+              requestSessionHistory(fallbackSession.id);
+            }
+          }
         }
       });
-  }, [applySessionHistory]);
+  }, [applySessionHistory, beginSessionTransition, rememberActiveSession]);
 
-  const applySessionList = useCallback((sessionList: Session[], deletedSessionIds: string[] = []) => {
-    setSessions(sessionList);
+  const applySessionList = useCallback((sessionList: Session[], deletedSessionIds: string[] = [], preferredSessionId: string | null = null) => {
+    sessionsRef.current = sessionList;
+    updateSessions(sessionList);
     if (urlSessionId && deletedSessionIds.includes(urlSessionId)) {
       beginSessionTransition(null);
       setCurrentSession(null);
+      rememberActiveSession(null);
       navigate('/chat', { replace: true });
       return;
     }
     if (urlSessionId) {
       const s = sessionList.find(x => x.id === urlSessionId);
-      if (s) setCurrentSession(s);
-    } else if (sessionList.length > 0) {
-      const latest = [...sessionList].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-      if (activeSessionIdRef.current !== latest.id) {
-        beginSessionTransition(latest.id);
+      if (s) {
+        setCurrentSession(s);
+        rememberActiveSession(s.id);
       }
-      setCurrentSession(latest);
-      if (requestedHistorySessionRef.current !== latest.id) {
-        requestSessionHistory(latest.id);
+    } else if (!newSessionNavigationRef.current && sessionList.length > 0) {
+      const preferredSession = preferredSessionId
+        ? sessionList.find(session => session.id === preferredSessionId)
+        : undefined;
+      const latest = [...sessionList].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      const nextSession = preferredSession || latest;
+      if (activeSessionIdRef.current !== nextSession.id) {
+        beginSessionTransition(nextSession.id, nextSession);
+      } else {
+        setCurrentSession(nextSession);
+      }
+      rememberActiveSession(nextSession.id);
+      if (requestedHistorySessionRef.current !== nextSession.id) {
+        const fallbackSessionId = preferredSession && preferredSession.id !== latest.id
+          ? latest.id
+          : null;
+        requestSessionHistory(nextSession.id, fallbackSessionId);
       }
     }
-  }, [beginSessionTransition, navigate, requestSessionHistory, urlSessionId]);
+  }, [beginSessionTransition, navigate, rememberActiveSession, requestSessionHistory, updateSessions, urlSessionId]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -450,12 +496,18 @@ export default function ChatView() {
     };
   }, [finishStreamingMessage, isStreaming]);
 
-  // Initialize: request session list
-  useEffect(() => {
-    void getSessions()
-      .then(event => applySessionList(event.sessions, event.deletedSessionIds))
-      .catch(() => applySessionList([]));
+  const refreshSessions = useCallback(async () => {
+    const [event, activeSession] = await Promise.all([
+      getSessions(),
+      getActiveSession().catch(() => ({ sessionId: null })),
+    ]);
+    applySessionList(event.sessions, event.deletedSessionIds, activeSession.sessionId);
   }, [applySessionList]);
+
+  // Initialize from the last active session stored by the desktop runtime.
+  useEffect(() => {
+    void refreshSessions().catch(() => applySessionList([]));
+  }, [applySessionList, refreshSessions]);
 
   // Handle URL session change
   useEffect(() => {
@@ -465,11 +517,13 @@ export default function ChatView() {
         historyRequestTokenRef.current += 1;
         activeSessionIdRef.current = urlSessionId;
         requestedHistorySessionRef.current = null;
-        setCurrentSession(prev => prev?.id === urlSessionId ? prev : {
+        const targetSession = sessionsRef.current.find(session => session.id === urlSessionId);
+        setCurrentSession(prev => prev?.id === urlSessionId ? prev : targetSession || {
           id: urlSessionId,
           title: 'New Chat',
           updatedAt: Date.now(),
         });
+        rememberActiveSession(urlSessionId);
         return;
       }
       // A different route is a real navigation, not the server-assigned route
@@ -477,22 +531,26 @@ export default function ChatView() {
       // cannot suppress a later genuine navigation back to that stale ID.
       serverSessionNavigationRef.current = null;
       if (activeSessionIdRef.current !== urlSessionId) {
-        beginSessionTransition(urlSessionId);
-        const targetSession = sessions.find(session => session.id === urlSessionId);
+        const targetSession = sessionsRef.current.find(session => session.id === urlSessionId);
+        beginSessionTransition(urlSessionId, targetSession || {
+          id: urlSessionId,
+          title: 'New Chat',
+          updatedAt: Date.now(),
+        });
         setCurrentSession(targetSession || {
           id: urlSessionId,
           title: 'New Chat',
           updatedAt: Date.now(),
         });
       }
+      rememberActiveSession(urlSessionId);
       if (requestedHistorySessionRef.current !== urlSessionId) {
         requestSessionHistory(urlSessionId);
       }
-    } else if (activeSessionIdRef.current !== null) {
-      beginSessionTransition(null);
-      setCurrentSession(null);
+    } else if (newSessionNavigationRef.current) {
+      newSessionNavigationRef.current = false;
     }
-  }, [beginSessionTransition, requestSessionHistory, sessions, urlSessionId]);
+  }, [beginSessionTransition, rememberActiveSession, requestSessionHistory, urlSessionId]);
 
   // Handle desktop chat events
   useEffect(() => {
@@ -508,11 +566,12 @@ export default function ChatView() {
         || msg.type === 'session_deleted'
         || msg.type === 'session_renamed'
         || (msg.type === 'error' && !eventSessionId);
+      const establishesSession = msg.type === 'session' && !activeSessionId;
 
       // ccgui drops callbacks belonging to the outgoing channel while a new
       // session is loading. Desktop IPC is ordered, but old SDK queries can
       // still unwind later, so apply the same session boundary here.
-      if (!globalEvent && eventSessionId && (!activeSessionId || eventSessionId !== activeSessionId)) {
+      if (!globalEvent && eventSessionId && (!activeSessionId || eventSessionId !== activeSessionId) && !establishesSession) {
         continue;
       }
 
@@ -520,17 +579,23 @@ export default function ChatView() {
       case 'session': {
         if (activeSessionId && activeSessionId !== msg.sessionId) break;
         activeSessionIdRef.current = msg.sessionId;
+        const knownSession = sessionsRef.current.find(item => item.id === msg.sessionId);
+        const sessionTitle = msg.title?.trim() || knownSession?.title || currentSession?.title || 'New Chat';
+        const sessionUpdatedAt = Number.isFinite(msg.updatedAt)
+          ? msg.updatedAt as number
+          : knownSession?.updatedAt || Date.now();
         const session: Session = {
           id: msg.sessionId,
-          title: currentSession?.id === msg.sessionId ? currentSession.title : 'New Chat',
-          updatedAt: Date.now(),
+          title: sessionTitle,
+          updatedAt: sessionUpdatedAt,
         };
-        setSessions(prev => {
+        updateSessions(prev => {
           const existing = prev.find(item => item.id === msg.sessionId);
           return existing
-            ? prev.map(item => item.id === msg.sessionId ? { ...item, updatedAt: session.updatedAt } : item)
+            ? prev.map(item => item.id === msg.sessionId ? { ...item, ...session } : item)
             : [...prev, session];
         });
+        rememberActiveSession(msg.sessionId);
         if (!currentSession) {
           setCurrentSession(session);
           // Do not leave a guard behind when the canonical session event already
@@ -540,6 +605,8 @@ export default function ChatView() {
             serverSessionNavigationRef.current = msg.sessionId;
             navigate(`/chat/${msg.sessionId}`, { replace: true });
           }
+        } else if (currentSession.id === msg.sessionId) {
+          setCurrentSession(session);
         }
         break;
       }
@@ -551,15 +618,19 @@ export default function ChatView() {
         const active = activeSessionIdRef.current;
         if (active && active !== msg.session.id) break;
         activeSessionIdRef.current = msg.session.id;
-        setSessions(prev => [...prev, msg.session]);
+        updateSessions(prev => prev.some(session => session.id === msg.session.id)
+          ? prev.map(session => session.id === msg.session.id ? msg.session : session)
+          : [msg.session, ...prev]);
         setCurrentSession(msg.session);
+        rememberActiveSession(msg.session.id);
         navigate(`/chat/${msg.session.id}`, { replace: true });
         break;
       }
       case 'session_deleted': {
-        setSessions(prev => prev.filter(s => s.id !== msg.sessionId));
+        updateSessions(prev => prev.filter(s => s.id !== msg.sessionId));
         if (activeSessionIdRef.current === msg.sessionId || currentSession?.id === msg.sessionId) {
           activeSessionIdRef.current = null;
+          rememberActiveSession(null);
           setCurrentSession(null);
           setMessages([]);
           navigate('/chat', { replace: true });
@@ -567,7 +638,7 @@ export default function ChatView() {
         break;
       }
       case 'session_renamed': {
-        setSessions(prev => prev.map(s => s.id === msg.session_id ? { ...s, title: msg.title } : s));
+        updateSessions(prev => prev.map(s => s.id === msg.session_id ? { ...s, title: msg.title } : s));
         if (currentSession?.id === msg.session_id) {
           setCurrentSession(prev => prev ? { ...prev, title: msg.title } : prev);
         }
@@ -674,8 +745,9 @@ export default function ChatView() {
       case 'error': {
         finishStreamingMessage();
         if (msg.invalidSessionId) {
-          setSessions(prev => prev.filter(session => session.id !== msg.invalidSessionId));
+          updateSessions(prev => prev.filter(session => session.id !== msg.invalidSessionId));
           if (currentSession?.id === msg.invalidSessionId) {
+            rememberActiveSession(null);
             setCurrentSession(null);
             setMessages([]);
             navigate('/chat', { replace: true });
@@ -713,31 +785,25 @@ export default function ChatView() {
       }
 
       case 'undo_complete': {
-        if (msg.success) {
-          // Refresh status
-          setStatus(prev => {
-            if (!prev.edits) return prev;
-            const newFiles = prev.edits.files.filter(file => {
-              const filePath = typeof file === 'string' ? file : file.path;
-              return filePath !== msg.filePath;
-            });
-            return { ...prev, edits: { ...prev.edits, files: newFiles } };
-          });
+        if (msg.success && msg.filePath) {
+          markFileProcessed(msg.filePath);
         }
           break;
         }
       }
     }
-  }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage, applySessionList, applySessionHistory]);
+  }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage, applySessionList, applySessionHistory, markFileProcessed, rememberActiveSession, updateSessions]);
 
   const handleNewSession = useCallback(() => {
     if (isStreaming && currentSession?.id) {
       send({ type: 'abort', sessionId: currentSession.id });
     }
+    newSessionNavigationRef.current = true;
+    rememberActiveSession(null);
     beginSessionTransition(null);
     navigate('/chat', { replace: true });
     send({ type: 'new_session' });
-  }, [beginSessionTransition, currentSession, isStreaming, navigate, send]);
+  }, [beginSessionTransition, currentSession, isStreaming, navigate, rememberActiveSession, send]);
 
   const handleOpenHistory = useCallback(() => {
     if (isStreaming) {
@@ -861,11 +927,11 @@ export default function ChatView() {
     if (currentSession) {
       void renameSession(currentSession.id, title)
         .then(event => {
-          setSessions(prev => prev.map(s => s.id === event.session_id ? { ...s, title: event.title } : s));
+          updateSessions(prev => prev.map(s => s.id === event.session_id ? { ...s, title: event.title } : s));
           setCurrentSession(prev => prev ? { ...prev, title: event.title } : prev);
         });
     }
-  }, [currentSession]);
+  }, [currentSession, updateSessions]);
 
   const handlePermission = useCallback((permissionId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
     send({ type: 'permission_response', requestId: permissionId, behavior, allow: behavior !== 'deny' });
@@ -874,14 +940,14 @@ export default function ChatView() {
 
   // Keep the bottom status panel derived from the active session messages.
   useEffect(() => {
-    const derived = deriveStatusData(messages);
+    const derived = deriveStatusData(messages, { startFromIndex: baseMessageIndex, processedFiles });
     setStatus(prev => ({
       ...prev,
       tasks: derived.tasks,
       edits: derived.edits,
       subagents: subAgents.length > 0 ? subAgents : derived.subagents,
     }));
-  }, [messages, subAgents]);
+  }, [baseMessageIndex, messages, processedFiles, subAgents]);
 
   // Search highlight prop
   const searchHighlight = useMemo(() => {
@@ -895,18 +961,17 @@ export default function ChatView() {
   }, [searchQuery, searchResults, currentSearchIdx]);
 
   const handleWorkspaceChanged = useCallback(() => {
+    newSessionNavigationRef.current = false;
     beginSessionTransition(null);
     setFileOpenRequest(null);
     serverSessionNavigationRef.current = null;
     setCurrentSession(null);
-    setSessions([]);
+    updateSessions([]);
     setWorkspaceVersion((version) => version + 1);
     send({ type: 'new_session' });
     navigate('/chat', { replace: true });
-    void getSessions()
-      .then(event => applySessionList(event.sessions, event.deletedSessionIds))
-      .catch(() => applySessionList([]));
-  }, [applySessionList, beginSessionTransition, navigate, send]);
+    void refreshSessions().catch(() => applySessionList([]));
+  }, [applySessionList, beginSessionTransition, navigate, refreshSessions, send, updateSessions]);
 
   const handleOpenProject = useCallback(async () => {
     const desktopApi = window.ccNexusDesktop;
@@ -956,10 +1021,10 @@ export default function ChatView() {
         {showStatusPanel && (
           <StatusPanel
             status={status}
-            onUndoFile={handleUndoFile}
+            onUndoFile={handleUndoFileRequest}
             onOpenFile={handleOpenFile}
             onDiscardAllFiles={handleDiscardAllFiles}
-            onKeepAllFiles={handleKeepAllFiles}
+            onKeepAllFiles={handleKeepAll}
             subagentHistories={subagentHistories}
             onSubagentHistory={handleSubagentHistory}
             sessionId={currentSession?.id ?? urlSessionId ?? null}

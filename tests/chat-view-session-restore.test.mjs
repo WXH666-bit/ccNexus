@@ -20,9 +20,43 @@ test('ChatView requests the latest session history after restoring the session l
   const source = read('src/views/ChatView.tsx');
 
   assert.match(source, /const latest = \[\.\.\.sessionList\]\.sort/);
-  assert.match(source, /requestSessionHistory\(latest\.id\)/);
+  assert.match(source, /const nextSession = preferredSession \|\| latest/);
+  assert.match(source, /requestSessionHistory\(nextSession\.id, fallbackSessionId\)/);
   assert.match(source, /loadSession\(sessionId\)/);
   assert.doesNotMatch(source, /send\(\{\s*type:\s*'load_session',\s*sessionId\s*\}\)/s);
+});
+
+test('ChatView prefers the persisted active session before falling back to the latest session', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /getActiveSession/);
+  assert.match(source, /activeSession.*sessionId/);
+  assert.match(source, /preferredSession/);
+  assert.match(source, /setActiveSession/);
+});
+
+test('ChatView falls back to the latest session when the preferred history cannot be loaded', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /fallbackSessionId/);
+  assert.match(source, /if \(fallbackSessionId\)/);
+  assert.match(source, /requestSessionHistory\(fallbackSession\.id\)/);
+});
+
+test('ChatView does not clear a restored session just because the route has no session id', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.doesNotMatch(source, /else if \(activeSessionIdRef\.current !== null\) \{\s*beginSessionTransition\(null\);\s*setCurrentSession\(null\);/s);
+  assert.match(source, /newSessionNavigationRef/);
+});
+
+test('ChatView consumes the canonical title from the session event instead of a placeholder', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /title: msg\.title/);
+  assert.match(source, /Number\.isFinite\(msg\.updatedAt\)/);
+  assert.match(source, /sessionUpdatedAt/);
+  assert.doesNotMatch(source, /title: currentSession\?\.id === msg\.sessionId \? currentSession\.title : 'New Chat'/);
 });
 
 test('ChatView seeds context usage from restored history before the next live usage update', () => {

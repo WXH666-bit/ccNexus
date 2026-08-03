@@ -108,7 +108,7 @@ export interface Session {
 
 // ─── Desktop chat event types ────────────────────────────────────
 export type DesktopChatEvent =
-  | { type: 'session'; sessionId: string }
+  | { type: 'session'; sessionId: string; title?: string; updatedAt?: number }
   | { type: 'system'; subtype?: string; sessionId?: string }
   | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
   | { type: 'assistant'; sessionId?: string; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; session_id?: string; cost?: number; duration?: number; turns?: number } }

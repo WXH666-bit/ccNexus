@@ -60,6 +60,26 @@ html, body, #root {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  padding-top: env(titlebar-area-height, 42px);
+}
+
+.window-drag-region {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  height: env(titlebar-area-height, 42px);
+  padding: 0 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-size: 13px;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.window-title {
+  line-height: 1;
 }
 
 /* ─── Chat Header ───────────────────────────────────────────── */
@@ -683,6 +703,32 @@ html, body, #root {
 .markdown-body {
   line-height: 1.7;
   color: var(--text-primary);
+}
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown-body thead,
+.markdown-body tbody,
+.markdown-body tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  text-align: left;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.markdown-body th {
+  background-color: var(--bg-tertiary);
+  font-weight: 600;
 }
 .markdown-body p { margin-bottom: 12px; }
 .markdown-body p:last-child { margin-bottom: 0; }

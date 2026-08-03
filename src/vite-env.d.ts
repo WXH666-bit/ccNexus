@@ -10,6 +10,8 @@ interface CcNexusDesktopApi {
   openProject: () => Promise<{ canceled: boolean; path?: string; cwd?: string; rootName?: string }>;
   getWorkspace: () => Promise<{ cwd: string; rootName: string }>;
   setWorkspace: (path: string) => Promise<{ cwd: string; rootName: string }>;
+  getActiveSession: () => Promise<{ sessionId: string | null }>;
+  setActiveSession: (sessionId: string | null) => Promise<{ sessionId: string | null }>;
   listFiles: (options?: {
     path?: string;
     depth?: number;

@@ -20,12 +20,16 @@ test('desktop main exposes an open project dialog through IPC', () => {
   assert.match(main, /ipcMain\.handle\('desktop:read-file'/);
   assert.match(main, /ipcMain\.handle\('desktop:save-file'/);
   assert.match(main, /ipcMain\.handle\('desktop:set-workspace'/);
+  assert.match(main, /ipcMain\.handle\('desktop:get-active-session'/);
+  assert.match(main, /ipcMain\.handle\('desktop:set-active-session'/);
   assert.match(main, /properties:\s*\[\s*'openDirectory'/);
   assert.match(preload, /openProject:\s*\(\) => ipcRenderer\.invoke\('desktop:open-project'\)/);
   assert.match(preload, /listFiles:/);
   assert.match(preload, /readFile:/);
   assert.match(preload, /saveFile:/);
   assert.match(preload, /setWorkspace:/);
+  assert.match(preload, /getActiveSession:/);
+  assert.match(preload, /setActiveSession:/);
 });
 
 test('file explorer can open a desktop-selected project and refresh the tree', () => {
@@ -90,6 +94,31 @@ test('desktop workspace service restores the last opened workspace after restart
     await restarted.restoreWorkspace();
 
     assert.equal(restarted.getWorkspace().cwd, path.resolve(projectDir));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('desktop workspace service restores the last active session per workspace', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-active-session-'));
+  try {
+    const workspaceA = path.join(tempRoot, 'workspace-a');
+    const workspaceB = path.join(tempRoot, 'workspace-b');
+    const stateFile = path.join(tempRoot, 'state', 'desktop-state.json');
+    await mkdir(workspaceA);
+    await mkdir(workspaceB);
+
+    const firstRun = new WorkspaceFileService({ cwd: workspaceA, stateFile });
+    await firstRun.setActiveSessionId('session-a');
+    await firstRun.setWorkspace(workspaceB);
+    await firstRun.setActiveSessionId('session-b');
+
+    const restarted = new WorkspaceFileService({ cwd: workspaceA, stateFile });
+    assert.equal(await restarted.getActiveSessionId(), 'session-a');
+    await restarted.setWorkspace(workspaceB);
+    assert.equal(await restarted.getActiveSessionId(), 'session-b');
+    await restarted.setWorkspace(workspaceA);
+    assert.equal(await restarted.getActiveSessionId(), 'session-a');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

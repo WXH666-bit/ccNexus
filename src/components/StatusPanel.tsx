@@ -33,7 +33,7 @@ interface Props {
   onUndoFile?: (filePath: string) => void;
   onOpenFile?: (filePath: string) => void;
   onDiscardAllFiles?: (filePaths: string[]) => void;
-  onKeepAllFiles?: (filePaths: string[]) => void;
+  onKeepAllFiles?: () => void;
   subagentHistories?: Record<string, SubagentHistoryResponse>;
   onSubagentHistory?: (key: string, history: SubagentHistoryResponse) => void;
   sessionId?: string | null;
@@ -304,7 +304,7 @@ function StatusFileChangesList({
   onUndoFile?: (filePath: string) => void;
   onOpenFile?: (filePath: string) => void;
   onDiscardAllFiles?: (filePaths: string[]) => void;
-  onKeepAllFiles?: (filePaths: string[]) => void;
+  onKeepAllFiles?: () => void;
 }) {
   const { t } = useTranslation();
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
@@ -330,7 +330,7 @@ function StatusFileChangesList({
         <button
           type="button"
           className="status-file-batch-btn"
-          onClick={() => onKeepAllFiles?.(paths)}
+          onClick={() => onKeepAllFiles?.()}
           disabled={!onKeepAllFiles}
           title={t('status.keepAll', { defaultValue: '保留全部变更' })}
         >

@@ -58,6 +58,15 @@ test('permissionRequestEvent preserves optional UI labels', () => {
   });
 });
 
+test('sessionEvent carries the canonical title and update timestamp when available', () => {
+  assert.deepEqual(sessionEvent('s1', { title: 'Build the page', updatedAt: 123 }), {
+    type: 'session',
+    sessionId: 's1',
+    title: 'Build the page',
+    updatedAt: 123,
+  });
+});
+
 test('sessionEvent and streamEvent preserve camel-case session ids', () => {
   assert.equal(sessionEvent('s1').sessionId, 's1');
   assert.deepEqual(streamEvent({ type: 'content_block_delta' }, 's1', 'u1'), {

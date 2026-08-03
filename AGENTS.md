@@ -1,80 +1,87 @@
 # ccNexus 开发规则
 
-## 产品形态
+## 当前架构
 
-- ccNexus 是 Electron 桌面应用。React 只负责渲染界面；Claude Code SDK 进程、会话守护进程、IPC 和持久化都属于桌面运行时。
-- 本地 Web 页面只作为 Electron 使用的渲染界面保留。不要重新扩展已经移除的 Web broker 架构，也不要增加第二套运行时路径。
-- 桌面行为是唯一事实来源。一个功能只有在渲染状态、IPC 契约、运行时所有权、持久化和重启行为一致时才算完成。
+- ccNexus 是 Electron 桌面应用，不再维护独立的浏览器产品或 Web broker。
+- `desktop/main.js` 负责 Electron 生命周期、窗口、菜单、IPC 注册和桌面运行时组装。
+- `desktop/preload.cjs` 只暴露经过审核的窄 IPC API。Renderer 不得直接访问 Node.js、文件系统或 Claude SDK。
+- `desktop/runtime/` 负责工作区、会话、文件、provider、进程和聊天控制器。
+- `desktop/daemon/` 负责运行 Claude Agent SDK 查询和会话守护进程。
+- `src/` 是 Electron 加载的 React/Vite renderer。Vite 开发服务器只用于本地桌面开发加载 renderer。
+- Electron 窗口使用 `titleBarStyle: 'hidden'` 和 `titleBarOverlay` 保留原生窗口按钮；renderer 必须保留 `.window-drag-region` 与 `env(titlebar-area-height)` 顶部占位/拖拽区域，不能让内容覆盖系统按钮或恢复白色默认标题栏。
+- `server/` 只包含桌面运行时复用的协议、Claude 历史、请求选项和工具辅助模块，不得恢复为独立 HTTP/WebSocket broker。
+- `_ccgui/ccgui-src` 是行为和架构参考。修改聊天、会话、输入、usage、进程或状态栏前，必须先检查对应实现。
 
-## ccgui 对齐规则
+## ccgui 对齐
 
-- 修改运行时或聊天行为前，必须先检查 `_ccgui/ccgui-src` 中对应的实现。
-- ccgui 已有的行为必须优先照搬它的架构和控制流：持久化查询、每会话守护进程所有权、请求上下文、模型和思考强度覆盖、sidechain 历史、usage 处理、输入历史、本地斜杠命令和实时进程快照。
-- 优先对 ccgui 的代码和数据流做最小适配，不要因为 React 可以近似实现就另造协议或逻辑。
-- 底部状态栏必须与 ccgui 对齐：一个锚定在完整状态栏上方的 Popover，任务/子代理/编辑三个 Tab，结构化行项目，点击外部和 Escape 关闭，实时子代理详情，文件打开/变更/撤销操作，以及当前工作区范围限制。
-- 查看文件变更时，统计必须使用有界缓存和大文件保护；完整 diff 只能在用户展开对应文件后生成，不能在整个状态栏渲染期间预先计算。
+- ccgui 已实现的行为优先复用其生命周期、状态边界和数据流，不要因为 React 写法不同而重新发明协议。
+- 会话切换必须先使旧请求失效，再清理 transient state，同时设置新的 session ID 和标题，最后加载历史。
+- 历史响应、SDK 事件、usage、工具输出和权限事件必须校验 session ID；过期响应不得修改当前会话。
+- 当前工作区是会话、历史、搜索、重命名、收藏、删除、导出、文件和进程操作的边界。
+- 当前工作区的上次活动会话保存在 ccNexus 自己的 `.ccnexus/desktop-state.json`，不存在时才回退到最近活动会话。
+- Claude JSONL 可读时是历史权威来源；只有 Claude 历史缺失或不可读时才使用 ccNexus 缓存。
+- provider、模型、思考强度、权限模式和 `[1m]` 等运行时选择必须通过请求或运行时作用域传递，不得写入 Claude 配置。
+- `/new`、`/clear`、`/reset`、`/resume`、`/continue`、`/plan` 和 `/context` 等本地命令必须按现有桌面 IPC/SDK 数据流处理。
+
+## 编辑变更状态
+
+- 文件变更必须按 ccgui 的 `useFileChangesManagement` / `useFileChanges` 思路实现。`保留全部` 不是临时清空 React 状态，而是将当前会话消息长度记录为基线，只展示基线之后的新变更。
+- 单文件或批量撤销只有在 `undo_complete` 成功且带有 `filePath` 时，才记录为已处理文件；变更列表必须按会话基线和已处理文件重新派生。
+- 基线和已处理文件按 session ID 隔离，并在会话切换、renderer 重挂载和历史恢复时恢复，不能让旧会话的撤销事件或历史响应污染当前会话。
 
 ## Claude 配置安全
 
-- 永远不要写入、重写、删除或迁移 Claude Code 设置、provider 文件、凭据、MCP 配置或项目 `.claude` 配置。
-- 测试和诊断可以读取 Claude 配置及项目状态，但不得写入这些位置。诊断文件必须放在 Claude 路径之外的临时目录，并在结束前删除。
-- 模型、思考强度、provider、权限模式和 `[1m]` 等运行时覆盖，必须像 ccgui 一样通过会话请求或进程环境传递，不得写入 Claude 配置。
-- `[1m]` 会改变运行时身份。不能把它静默应用到已经运行且不兼容的会话，必须像 ccgui 一样创建或重启兼容运行时。
+- 永远不要修改、重写、删除或迁移 Claude Code 配置、provider 文件、凭据、MCP 配置或项目 `.claude` 内容。
+- 测试和诊断可以读取配置和项目状态，但不能写入配置。
+- 诊断文件必须放在 Claude 配置路径之外的临时目录，并在任务结束前清理。
+- 文件树的保护规则必须继续禁止修改 `.claude`、`.codex`、`.git` 和 `node_modules` 等受保护内容。
 
-## 会话与工作区
+## 持久化边界
 
-- 当前工作区是隔离边界。会话列表、历史搜索、选择、重命名、收藏、批量删除、导出、文件操作、sidechain 读取和进程控制都必须限定在当前工作区。
-- 当前工作区存在且可读时，优先使用 Claude JSONL 历史；只有 Claude 历史缺失或不可读时，才使用 ccNexus 自有缓存作为后备。
-- 过期会话响应不能修改当前聊天。切换工作区、会话或 Tab 时，应清除草稿、usage、状态行和 sidechain 详情。
-- 每个会话保持一个持久运行时所有者。工作区、模型身份、provider 或长上下文设置不兼容时，不能复用原守护进程。
-- `/new`、`/clear`、`/reset`、`/resume`、`/continue`、`/plan` 和 `/context` 在 ccgui 视为本地命令时，也必须在本地处理；其他提示词通过桌面聊天 IPC 发送。
+- 工作区状态、活动会话 ID、会话索引和运行时缓存写入 ccNexus 自己的 `.ccnexus` 目录；renderer-only UI 状态（例如聊天偏好、上下文显示、Keep All 基线和已处理文件）可以使用 ccNexus 自己的 renderer `localStorage`，但绝不能写入 Claude 配置。
+- 会话索引按工作区隔离。切换工作区时停止旧运行时、清理旧 transient state，并重新加载新工作区的会话。
+- 删除、重命名、收藏和导出必须使用当前工作区的 session ID，并保持 Claude JSONL 只读原则。
+- 持久化失败不能阻止打开工作区或继续聊天，但必须保留内存中的正确状态。
 
-## Usage 与缓存指标
+## Usage 与上下文
 
 - 上下文占用使用权威 assistant usage：
   `input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens`。
-- 上下文条只接受 `assistant.message.usage`。一次工具循环中的 `result.usage` 可能聚合多个 API 调用，不能替代 assistant 消息的上下文快照。
-- 缓存命中率是独立指标：
+- 上下文百分比必须优先来自 Claude SDK 的 `query.getContextUsage()` 和真实 assistant usage，不得在 React 中猜分类或合成百分比。
+- `result.usage` 可能聚合工具循环中的多次 API 调用，不能代替 assistant message usage。
+- 缓存命中率独立计算为：
   `cache_read_input_tokens / (input_tokens + cache_creation_input_tokens + cache_read_input_tokens)`。
-- 必须把实时 assistant usage 保存在消息和持久化 JSONL/缓存记录中，确保刷新和重新加载会话后上下文值一致。
-- `/context` 必须通过桌面 IPC 请求会话守护进程，再调用 Claude SDK 的 `query.getContextUsage()`。`totalTokens`、模型上限、分类数据、MCP 工具、agents、memory 文件、skills 和自动压缩状态都必须直接传递，不能在 React 中合成分类百分比。
-- 诊断缓存时，必须记录 Claude JSONL 中的原始 assistant usage，并与界面指标对比。至少测试一次短请求和一次读写或工具请求，不能把工具循环聚合值误当成单个上下文快照。
-- 冷启动、provider 缓存过期或运行时身份变化可能导致单次命中率降低；不得用错误的上下文公式或伪造数据把它显示成高命中率。
+- 诊断缓存时必须对照 Claude JSONL 的原始 assistant usage，至少检查一次短请求和一次读写或工具请求。
 
-## 运行时与界面
+## UI 与运行时
 
-- Node 进程管理遵循 ccgui 的实时快照行为：子菜单打开时持续刷新，终止或重启 daemon/channel 前进行确认，并允许直接清理孤儿进程。
-- 只读 sidechain 历史 IPC 必须校验 session 和 agent 标识，只能读取当前工作区的 Claude 项目目录，容忍损坏 JSONL，且绝不写入历史。
-- 聊天输入必须遵循 ccgui：有上限的本地输入历史、ArrowUp/ArrowDown 草稿导航、IME 安全提交、粘贴与附件处理，以及受控 contenteditable 同步。
-- 文件打开、变更、撤销、权限、计划审批、工具输出、思考块、消息锚点、历史和设置交互都必须感知工作区；ccgui 支持键盘关闭的地方也要支持键盘关闭。
-- 不要覆盖脏工作区中与当前任务无关的用户修改。编辑范围应限于请求的行为，并保持现有项目约定。
-
-## 桌面检查
-
-- 使用 Computer Use 时，先检查当前窗口再操作，避免破坏性动作；验证结束后必须最小化 ccNexus。若打开了 PyCharm 或 ccgui，也必须最小化它们。
-- 不要用关闭应用代替最小化，也不要在测试期间修改 Claude 配置。
+- Markdown 使用 GFM 解析；表格、代码块、思考块、工具卡片和权限卡片的视觉行为应与 ccgui 对齐。
+- 顶部标题栏必须保持与应用主题一致，并保留可拖拽区域和原生最小化、最大化、关闭按钮；不得用普通内容层覆盖 `titleBarOverlay` 的窗口控制区。
+- 编辑状态栏的文件变更、撤销和保留全部必须使用会话持久化基线，不能只依赖当前挂载的 ChatView 内存状态。
+- Node 进程管理使用实时快照，终止、重启和孤儿进程清理必须有明确的 session/channel 边界。
+- 任何桌面操作都要保留错误状态、加载状态和 stale-event 防护。
+- 使用 Computer Use 验证结束后必须最小化 ccNexus；如果打开 PyCharm 或 ccgui，也必须最小化它们。
 
 ## 验证命令
 
-先运行聚焦测试，再运行协议、类型和构建检查：
+Windows 下先运行聚焦测试，再运行完整协议测试、类型检查和构建：
 
 ```powershell
 node tests\context-usage.test.mjs
 node tests\claude-history.test.mjs
 node tests\assistant-turn.test.mjs
 node tests\chat-protocol.test.mjs
+node tests\chat-view-session-restore.test.mjs
 node tests\desktop-chat-ipc.test.mjs
 node tests\desktop-session-ipc.test.mjs
 node tests\desktop-config-ipc.test.mjs
 node tests\desktop-usage-statistics.test.mjs
-node tests\desktop-subagent-history.test.mjs
-node tests\diff-performance.test.mjs
-node tests\model-resolution.test.mjs
-node tests\query-options.test.mjs
-node tests\status-panel-parity.test.mjs
+node tests\markdown-table.test.mjs
+node tests\file-changes-management.test.mjs
+node tests\desktop-titlebar.test.mjs
 npm.cmd run test:protocol
 npx.cmd tsc --noEmit
 npm.cmd run build
 ```
 
-- 必须报告任何未能运行的验证命令。没有证据就不能声称修复完成或已经完全对齐。
+没有运行成功的验证命令必须在交付说明中明确报告，不能用未验证的结论代替测试结果。

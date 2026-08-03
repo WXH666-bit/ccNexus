@@ -1,5 +1,8 @@
-export function sessionEvent(sessionId) {
-  return { type: 'session', sessionId };
+export function sessionEvent(sessionId, metadata = {}) {
+  const event = { type: 'session', sessionId };
+  if (metadata.title !== undefined) event.title = metadata.title;
+  if (Number.isFinite(metadata.updatedAt)) event.updatedAt = metadata.updatedAt;
+  return event;
 }
 
 export function streamEvent(event, sessionId, uuid) {
