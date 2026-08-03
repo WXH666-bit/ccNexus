@@ -14,6 +14,7 @@ import MessageQueue from '../components/MessageQueue';
 import type { QueuedMessage } from '../components/MessageQueue';
 import FileExplorer from '../components/FileExplorer';
 import GeneratingResponseIndicator from '../components/GeneratingResponseIndicator';
+import ContextUsageDialog, { type ContextUsageData } from '../components/ContextUsageDialog';
 import { useDesktopChat } from '../hooks/useDesktopChat';
 import {
   createStreamingBlockState,
@@ -28,6 +29,8 @@ import {
 import { findToolResultForBlock, isFileModifyToolName } from '../utils/toolRendering.js';
 import { normalizeToolInput } from '../utils/toolInputNormalization.js';
 import { estimateMessagesUsedTokens, extractMessagesUsedTokens } from '../utils/contextUsage.js';
+import { getDesktopEventSessionId, normalizeDesktopChatEvent } from '../utils/desktopChatEvents.js';
+import { getContextUsage as loadContextUsage } from '../utils/desktopBridgeApi';
 import { getSessions, loadSession, renameSession } from '../utils/sessionBridgeApi';
 import type { 
   ChatMessage, Session, StatusData, PermissionRequest,
@@ -43,6 +46,8 @@ function readStoredPreference(key: string, fallback: string) {
 }
 
 const CONTEXT_USAGE_STORAGE_PREFIX = 'chatContextUsage:';
+const NEW_SESSION_COMMANDS = new Set(['/new', '/clear', '/reset']);
+const RESUME_COMMANDS = new Set(['/resume', '/continue']);
 
 function readStoredContextUsage(sessionId?: string) {
   if (!sessionId) return undefined;
@@ -71,7 +76,20 @@ export default function ChatView() {
   const [model, setModelState] = useState(() => readStoredPreference('chatModel', 'default'));
   const [reasoning, setReasoningState] = useState(() => readStoredPreference('chatReasoning', 'high'));
   const [usageUsedTokens, setUsageUsedTokens] = useState<number | undefined>(undefined);
+  const [contextUsage, setContextUsage] = useState<ContextUsageData | null>(null);
+  const [contextUsageLoading, setContextUsageLoading] = useState(false);
+  const [contextUsageError, setContextUsageError] = useState('');
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
+
+  useEffect(() => {
+    const handlePreferenceChange = () => {
+      setModeState(readStoredPreference('chatMode', 'default'));
+      setModelState(readStoredPreference('chatModel', 'default'));
+      setReasoningState(readStoredPreference('chatReasoning', 'high'));
+    };
+    window.addEventListener('ccnexus:chat-preferences-changed', handlePreferenceChange);
+    return () => window.removeEventListener('ccnexus:chat-preferences-changed', handlePreferenceChange);
+  }, []);
 
   // P1 features state
   const [rewindTarget, setRewindTarget] = useState<ChatMessage | null>(null);
@@ -101,6 +119,8 @@ export default function ChatView() {
   const streamActivityAtRef = useRef(Date.now());
   const streamStallIntervalRef = useRef<number | null>(null);
   const requestedHistorySessionRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(urlSessionId ?? null);
+  const historyRequestTokenRef = useRef(0);
   const processedIncomingMessageCountRef = useRef(0);
   // The server assigns the first session after the optimistic turn exists. Keep
   // that matching route update from being handled as a user session switch.
@@ -120,6 +140,33 @@ export default function ChatView() {
     setReasoningState(nextReasoning);
     localStorage.setItem('chatReasoning', nextReasoning);
   }, []);
+
+  const contextUsageRequestRef = useRef(0);
+  const handleContextUsage = useCallback(async (requestedModel: string) => {
+    const requestId = ++contextUsageRequestRef.current;
+    const sessionId = currentSession?.id ?? urlSessionId ?? undefined;
+    setContextUsage(null);
+    setContextUsageError('');
+    setContextUsageLoading(true);
+    try {
+      const result = await loadContextUsage({ sessionId, model: requestedModel }) as ContextUsageData;
+      if (requestId !== contextUsageRequestRef.current) return;
+      if (sessionId && (currentSession?.id ?? urlSessionId ?? undefined) !== sessionId) return;
+      setContextUsage(result);
+    } catch (error) {
+      if (requestId !== contextUsageRequestRef.current) return;
+      setContextUsageError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (requestId === contextUsageRequestRef.current) setContextUsageLoading(false);
+    }
+  }, [currentSession?.id, urlSessionId]);
+
+  useEffect(() => {
+    contextUsageRequestRef.current += 1;
+    setContextUsage(null);
+    setContextUsageError('');
+    setContextUsageLoading(false);
+  }, [currentSession?.id, urlSessionId]);
 
   // Search logic
   const performSearch = useCallback((query: string) => {
@@ -264,8 +311,30 @@ export default function ChatView() {
     setMessages(prev => prev.map(m => m.isStreaming ? { ...m, isStreaming: false } : m));
   }, []);
 
+  // Match ccgui's beginSessionTransition: invalidate the outgoing history
+  // request and clear every transient value before the next session is loaded.
+  const beginSessionTransition = useCallback((nextSessionId: string | null) => {
+    historyRequestTokenRef.current += 1;
+    activeSessionIdRef.current = nextSessionId;
+    requestedHistorySessionRef.current = null;
+    resetStreamingBlockState(streamingBlocksRef.current);
+    streamingMsgRef.current = null;
+    setIsStreaming(false);
+    setMessages([]);
+    setUsageUsedTokens(undefined);
+    setCurrentSession(null);
+    setPermission(null);
+    setPlanApproval(null);
+    setAskQuestion(null);
+    setRewindTarget(null);
+    setSubAgents([]);
+    setMessageQueue([]);
+    setStatus({});
+  }, []);
+
   const applySessionHistory = useCallback((history: { sessionId: string; messages: ChatMessage[] }) => {
     if (urlSessionId && urlSessionId !== history.sessionId) return;
+    if (activeSessionIdRef.current !== history.sessionId) return;
     requestedHistorySessionRef.current = history.sessionId;
     resetStreamingBlockState(streamingBlocksRef.current);
     streamingMsgRef.current = null;
@@ -282,19 +351,31 @@ export default function ChatView() {
   }, [sessions, urlSessionId]);
 
   const requestSessionHistory = useCallback((sessionId: string) => {
+    const requestToken = ++historyRequestTokenRef.current;
+    activeSessionIdRef.current = sessionId;
     requestedHistorySessionRef.current = sessionId;
     void loadSession(sessionId)
-      .then(applySessionHistory)
+      .then(history => {
+        if (
+          historyRequestTokenRef.current !== requestToken
+          || activeSessionIdRef.current !== history.sessionId
+          || requestedHistorySessionRef.current !== history.sessionId
+        ) return;
+        applySessionHistory(history);
+      })
       .catch(() => {
-        requestedHistorySessionRef.current = null;
+        if (historyRequestTokenRef.current === requestToken
+          && requestedHistorySessionRef.current === sessionId) {
+          requestedHistorySessionRef.current = null;
+        }
       });
   }, [applySessionHistory]);
 
   const applySessionList = useCallback((sessionList: Session[], deletedSessionIds: string[] = []) => {
     setSessions(sessionList);
     if (urlSessionId && deletedSessionIds.includes(urlSessionId)) {
+      beginSessionTransition(null);
       setCurrentSession(null);
-      setMessages([]);
       navigate('/chat', { replace: true });
       return;
     }
@@ -303,13 +384,15 @@ export default function ChatView() {
       if (s) setCurrentSession(s);
     } else if (sessionList.length > 0) {
       const latest = [...sessionList].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (activeSessionIdRef.current !== latest.id) {
+        beginSessionTransition(latest.id);
+      }
       setCurrentSession(latest);
       if (requestedHistorySessionRef.current !== latest.id) {
-        requestedHistorySessionRef.current = latest.id;
         requestSessionHistory(latest.id);
       }
     }
-  }, [navigate, requestSessionHistory, urlSessionId]);
+  }, [beginSessionTransition, navigate, requestSessionHistory, urlSessionId]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -350,6 +433,9 @@ export default function ChatView() {
     if (urlSessionId) {
       if (serverSessionNavigationRef.current === urlSessionId) {
         serverSessionNavigationRef.current = null;
+        historyRequestTokenRef.current += 1;
+        activeSessionIdRef.current = urlSessionId;
+        requestedHistorySessionRef.current = null;
         setCurrentSession(prev => prev?.id === urlSessionId ? prev : {
           id: urlSessionId,
           title: 'New Chat',
@@ -361,25 +447,50 @@ export default function ChatView() {
       // we were waiting to consume. Disarm the old one before this switch so it
       // cannot suppress a later genuine navigation back to that stale ID.
       serverSessionNavigationRef.current = null;
+      if (activeSessionIdRef.current !== urlSessionId) {
+        beginSessionTransition(urlSessionId);
+        const targetSession = sessions.find(session => session.id === urlSessionId);
+        setCurrentSession(targetSession || {
+          id: urlSessionId,
+          title: 'New Chat',
+          updatedAt: Date.now(),
+        });
+      }
       if (requestedHistorySessionRef.current !== urlSessionId) {
-        requestedHistorySessionRef.current = urlSessionId;
         requestSessionHistory(urlSessionId);
       }
-      setMessages([]);
-      setUsageUsedTokens(readStoredContextUsage(urlSessionId));
-      resetStreamingBlockState(streamingBlocksRef.current);
-      streamingMsgRef.current = null;
+    } else if (activeSessionIdRef.current !== null) {
+      beginSessionTransition(null);
+      setCurrentSession(null);
     }
-  }, [urlSessionId, requestSessionHistory]);
+  }, [beginSessionTransition, requestSessionHistory, sessions, urlSessionId]);
 
   // Handle desktop chat events
   useEffect(() => {
     const nextMessages = incomingMessages.slice(processedIncomingMessageCountRef.current);
     processedIncomingMessageCountRef.current = incomingMessages.length;
 
-    for (const msg of nextMessages) {
+    for (const rawMessage of nextMessages) {
+      const msg = normalizeDesktopChatEvent(rawMessage) as typeof rawMessage;
+      const activeSessionId = activeSessionIdRef.current ?? urlSessionId ?? currentSession?.id ?? null;
+      const eventSessionId = getDesktopEventSessionId(msg);
+      const globalEvent = msg.type === 'session_list'
+        || msg.type === 'session_created'
+        || msg.type === 'session_deleted'
+        || msg.type === 'session_renamed'
+        || (msg.type === 'error' && !eventSessionId);
+
+      // ccgui drops callbacks belonging to the outgoing channel while a new
+      // session is loading. Desktop IPC is ordered, but old SDK queries can
+      // still unwind later, so apply the same session boundary here.
+      if (!globalEvent && eventSessionId && (!activeSessionId || eventSessionId !== activeSessionId)) {
+        continue;
+      }
+
       switch (msg.type) {
       case 'session': {
+        if (activeSessionId && activeSessionId !== msg.sessionId) break;
+        activeSessionIdRef.current = msg.sessionId;
         const session: Session = {
           id: msg.sessionId,
           title: currentSession?.id === msg.sessionId ? currentSession.title : 'New Chat',
@@ -408,6 +519,9 @@ export default function ChatView() {
         break;
       }
       case 'session_created': {
+        const active = activeSessionIdRef.current;
+        if (active && active !== msg.session.id) break;
+        activeSessionIdRef.current = msg.session.id;
         setSessions(prev => [...prev, msg.session]);
         setCurrentSession(msg.session);
         navigate(`/chat/${msg.session.id}`, { replace: true });
@@ -415,7 +529,8 @@ export default function ChatView() {
       }
       case 'session_deleted': {
         setSessions(prev => prev.filter(s => s.id !== msg.sessionId));
-        if (currentSession?.id === msg.sessionId) {
+        if (activeSessionIdRef.current === msg.sessionId || currentSession?.id === msg.sessionId) {
+          activeSessionIdRef.current = null;
           setCurrentSession(null);
           setMessages([]);
           navigate('/chat', { replace: true });
@@ -455,7 +570,7 @@ export default function ChatView() {
           role: 'assistant',
           content: msg.message.content,
           timestamp: Date.now(),
-          sessionId: msg.message.sessionId,
+          sessionId: msg.message.sessionId ?? msg.sessionId,
           model: msg.message.model,
           usage: msg.message.usage,
           isStreaming: false,
@@ -475,7 +590,9 @@ export default function ChatView() {
 
       case 'tool_result': {
         streamActivityAtRef.current = Date.now();
-        const resultBlock = { type: 'tool_result' as const, tool_use_id: msg.tool_use_id, content: msg.content, is_error: msg.is_error };
+        const toolUseId = msg.toolUseId ?? msg.tool_use_id;
+        if (!toolUseId) break;
+        const resultBlock = { type: 'tool_result' as const, tool_use_id: toolUseId, content: msg.content, is_error: msg.is_error };
         appendToolResultBlock(streamingBlocksRef.current, resultBlock);
         setMessages(prev => prev.map(m => {
           if (!m.isStreaming) return m;
@@ -512,8 +629,10 @@ export default function ChatView() {
       }
 
       case 'usage_update': {
-        setUsageUsedTokens(msg.usedTokens);
         const usageSessionId = msg.sessionId ?? currentSession?.id ?? urlSessionId;
+        const activeSessionId = activeSessionIdRef.current ?? currentSession?.id ?? urlSessionId;
+        if (usageSessionId && activeSessionId && usageSessionId !== activeSessionId) break;
+        setUsageUsedTokens(msg.usedTokens);
         writeStoredContextUsage(usageSessionId, msg.usedTokens);
         break;
       }
@@ -579,8 +698,41 @@ export default function ChatView() {
     }
   }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage, applySessionList, applySessionHistory]);
 
+  const handleNewSession = useCallback(() => {
+    if (isStreaming && currentSession?.id) {
+      send({ type: 'abort', sessionId: currentSession.id });
+    }
+    beginSessionTransition(null);
+    navigate('/chat', { replace: true });
+    send({ type: 'new_session' });
+  }, [beginSessionTransition, currentSession, isStreaming, navigate, send]);
+
+  const handleOpenHistory = useCallback(() => {
+    if (isStreaming) {
+      send({ type: 'abort', sessionId: currentSession?.id });
+      finishStreamingMessage();
+    }
+    navigate('/history');
+  }, [currentSession, finishStreamingMessage, isStreaming, navigate, send]);
+
   const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
     if (!text.trim() && attachments.length === 0) return;
+
+    if (attachments.length === 0) {
+      const command = text.trim().split(/\s+/)[0]?.toLowerCase();
+      if (NEW_SESSION_COMMANDS.has(command)) {
+        handleNewSession();
+        return;
+      }
+      if (RESUME_COMMANDS.has(command)) {
+        handleOpenHistory();
+        return;
+      }
+      if (command === '/plan') {
+        setMode('plan');
+        return;
+      }
+    }
 
     // If AI is streaming and queue is requested, add to queue
     if (isStreaming && queue) {
@@ -640,7 +792,7 @@ export default function ChatView() {
         alwaysThinking,
       },
     });
-  }, [send, currentSession, mode, model, reasoning, isStreaming]);
+  }, [beginSessionTransition, currentSession, finishStreamingMessage, handleNewSession, handleOpenHistory, isStreaming, mode, model, navigate, reasoning, send, setMode]);
 
   // Process message queue when streaming completes
   useEffect(() => {
@@ -670,14 +822,6 @@ export default function ChatView() {
     send({ type: 'abort', sessionId: currentSession?.id });
     finishStreamingMessage();
   }, [send, currentSession, finishStreamingMessage]);
-
-  const handleNewSession = useCallback(() => {
-    send({ type: 'new_session' });
-    setMessages([]);
-    resetStreamingBlockState(streamingBlocksRef.current);
-    streamingMsgRef.current = null;
-    setIsStreaming(false);
-  }, [send]);
 
   const handleRenameSession = useCallback((title: string) => {
     if (currentSession) {
@@ -734,29 +878,23 @@ export default function ChatView() {
   }, [searchQuery, searchResults, currentSearchIdx]);
 
   const handleWorkspaceChanged = useCallback(() => {
-    requestedHistorySessionRef.current = null;
+    beginSessionTransition(null);
     serverSessionNavigationRef.current = null;
     setCurrentSession(null);
-    setMessages([]);
     setSessions([]);
-    setUsageUsedTokens(undefined);
-    resetStreamingBlockState(streamingBlocksRef.current);
-    streamingMsgRef.current = null;
-    setIsStreaming(false);
     setWorkspaceVersion((version) => version + 1);
     send({ type: 'new_session' });
     navigate('/chat', { replace: true });
     void getSessions()
       .then(event => applySessionList(event.sessions, event.deletedSessionIds))
       .catch(() => applySessionList([]));
-  }, [applySessionList, navigate, send]);
+  }, [applySessionList, beginSessionTransition, navigate, send]);
 
   const handleOpenProject = useCallback(async () => {
     const desktopApi = window.ccNexusDesktop;
-    if (!desktopApi?.openProject || !desktopApi.setWorkspace) return;
+    if (!desktopApi?.openProject) return;
     const project = await desktopApi.openProject();
     if (!project || project.canceled || !project.path) return;
-    await desktopApi.setWorkspace(project.path);
     handleWorkspaceChanged();
   }, [handleWorkspaceChanged]);
 
@@ -776,6 +914,7 @@ export default function ChatView() {
           onSearchPrev={() => navigateSearch('prev')}
           onRewind={rewindTarget ? () => setRewindTarget(null) : undefined}
           onOpenProject={handleOpenProject}
+          onOpenHistory={handleOpenHistory}
         />
         <div className="chat-main">
           {messages.length === 0 ? (
@@ -804,6 +943,7 @@ export default function ChatView() {
         />
         <ChatInputBox
           onSend={handleSend}
+          onContextUsage={handleContextUsage}
           onStop={handleStop}
           isStreaming={isStreaming}
           connected={connected}
@@ -818,6 +958,7 @@ export default function ChatView() {
           showToolAnchors={showToolAnchors}
           setShowToolAnchors={setShowToolAnchors}
           usageUsedTokens={usageUsedTokens}
+          sessionKey={currentSession?.id ?? urlSessionId ?? null}
         />
       </div>
       {permission && (
@@ -882,6 +1023,18 @@ export default function ChatView() {
           </div>
         </div>
       )}
+      <ContextUsageDialog
+        isOpen={contextUsageLoading || Boolean(contextUsage) || Boolean(contextUsageError)}
+        isLoading={contextUsageLoading}
+        data={contextUsage}
+        error={contextUsageError}
+        onClose={() => {
+          contextUsageRequestRef.current += 1;
+          setContextUsageLoading(false);
+          setContextUsage(null);
+          setContextUsageError('');
+        }}
+      />
     </div>
   );
 }

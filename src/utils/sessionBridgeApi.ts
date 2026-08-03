@@ -27,6 +27,10 @@ export async function renameSession(sessionId: string, title: string) {
   return await requireDesktopApi().renameSession(sessionId, title);
 }
 
+export async function toggleFavoriteSession(sessionId: string) {
+  return await requireDesktopApi().toggleFavoriteSession(sessionId);
+}
+
 export async function deleteSession(sessionId: string) {
   return await requireDesktopApi().deleteSession(sessionId);
 }

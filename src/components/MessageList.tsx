@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../types';
 import MessageItem from './MessageItem';
 import { findToolResultForBlock } from '../utils/toolRendering.js';
+import { useScrollBehavior } from '../hooks/useScrollBehavior';
+import { ArrowDown } from 'lucide-react';
 
 interface SearchHighlight {
   query: string;
@@ -18,44 +19,40 @@ interface MessageListProps {
 }
 
 export default function MessageList({ messages, isStreaming, searchHighlight, onRewind }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-
-  useEffect(() => {
-    if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, autoScroll]);
-
-  const handleScroll = () => {
-    if (!containerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    setAutoScroll(scrollHeight - scrollTop - clientHeight < 100);
-  };
+  const { containerRef, bottomRef, autoScroll, scrollToBottom } = useScrollBehavior({
+    contentVersion: messages,
+    streamingActive: isStreaming,
+  });
 
   return (
-    <div className="message-list" ref={containerRef} onScroll={handleScroll}>
-      {messages.map((msg, idx) => (
-        <MessageItem 
-          key={msg.id} 
-          message={msg} 
-          messageIndex={idx}
-          isLast={idx === messages.length - 1}
-          searchHighlight={searchHighlight}
-          onRewind={onRewind}
-          findToolResult={(toolId, messageIndex) => findToolResultForBlock(messages, messageIndex, toolId)}
-        />
-      ))}
-      {isStreaming && messages.length > 0 && messages[messages.length - 1].isStreaming && messages[messages.length - 1].content.length === 0 && (
-        <div className="waiting-indicator">
-          <span className="dot" /><span className="dot" /><span className="dot" />
-        </div>
-      )}
-      <div ref={bottomRef} />
+    <div className="message-list" ref={containerRef}>
+      <div className="message-list-content">
+        {messages.map((msg, idx) => (
+          <MessageItem
+            key={msg.id}
+            message={msg}
+            messageIndex={idx}
+            isLast={idx === messages.length - 1}
+            searchHighlight={searchHighlight}
+            onRewind={onRewind}
+            findToolResult={(toolId, messageIndex) => findToolResultForBlock(messages, messageIndex, toolId)}
+          />
+        ))}
+        {isStreaming && messages.length > 0 && messages[messages.length - 1].isStreaming && messages[messages.length - 1].content.length === 0 && (
+          <div className="waiting-indicator">
+            <span className="dot" /><span className="dot" /><span className="dot" />
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
       {!autoScroll && (
-        <button className="scroll-to-bottom" onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }}>
-          ↓
+        <button
+          className="scroll-to-bottom"
+          onClick={() => scrollToBottom('smooth')}
+          title="Scroll to latest message"
+          aria-label="Scroll to latest message"
+        >
+          <ArrowDown size={17} />
         </button>
       )}
     </div>

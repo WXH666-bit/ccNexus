@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import ContextBar from './ContextBar';
 import InputEditable from './InputEditable';
 import CompletionDropdown, { type CompletionItem } from './CompletionDropdown';
@@ -6,6 +6,8 @@ import ButtonArea from './ButtonArea';
 import { applyLongContextSuffix } from '../../utils/modelResolution';
 import { calculateContextPercentage, getModelContextLimit } from '../../utils/contextUsage';
 import { getAgents, getCommands, getFileTree, getPrompts } from '../../utils/desktopBridgeApi';
+import { enhancePromptText } from '../../utils/promptEnhancer';
+import { useInputHistory } from './useInputHistory';
 
 interface ChatInputBoxProps {
   onSend: (
@@ -18,6 +20,7 @@ interface ChatInputBoxProps {
     alwaysThinking?: boolean,
     modelOverride?: string,
   ) => void;
+  onContextUsage?: (model: string) => void;
   onStop: () => void;
   isStreaming: boolean;
   connected: boolean;
@@ -32,6 +35,7 @@ interface ChatInputBoxProps {
   showToolAnchors: boolean;
   setShowToolAnchors: (visible: boolean) => void;
   usageUsedTokens?: number;
+  sessionKey?: string | null;
 }
 
 interface FileEntry {
@@ -96,6 +100,7 @@ function shouldFocusEditor(event: MouseEvent<HTMLDivElement>) {
 
 export default function ChatInputBox({
   onSend,
+  onContextUsage,
   onStop,
   isStreaming,
   connected,
@@ -110,6 +115,7 @@ export default function ChatInputBox({
   showToolAnchors,
   setShowToolAnchors,
   usageUsedTokens,
+  sessionKey,
 }: ChatInputBoxProps) {
   void TRIGGER_CONFIGS;
   const [text, setText] = useState('');
@@ -122,11 +128,30 @@ export default function ChatInputBox({
   const [streaming, setStreamingState] = useState(() => localStorage.getItem('streaming') !== 'false');
   const [alwaysThinking, setAlwaysThinkingState] = useState(() => localStorage.getItem('alwaysThinking') === 'true');
   const [longContextEnabled, setLongContextEnabledState] = useState(() => localStorage.getItem('longContextEnabled') !== 'false');
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  const getEditorText = useCallback(() => editorRef.current?.innerText ?? text, [text]);
+  const syncHistoryText = useCallback(() => {
+    setText(editorRef.current?.innerText ?? '');
+  }, []);
+  const { record: recordInputHistory, handleKeyDown: handleHistoryKeyDown } = useInputHistory({
+    editableRef: editorRef,
+    getTextContent: getEditorText,
+    handleInput: syncHistoryText,
+  });
 
   const activeTrigger = triggerFromText(text);
   const effectiveModel = applyLongContextSuffix(model === 'default' ? 'claude-sonnet-4-6' : model, longContextEnabled);
   const usageMaxTokens = getModelContextLimit(effectiveModel);
   const usagePercentage = calculateContextPercentage(usageUsedTokens ?? 0, usageMaxTokens);
+
+  // ccgui clears draft text and attachments when the active session changes.
+  // Keeping a draft from the previous conversation is both surprising and a
+  // data-leak risk when the user switches projects or history entries.
+  useEffect(() => {
+    setText('');
+    setAttachments([]);
+  }, [sessionKey]);
 
   const setSelectedAgent = useCallback((agent: string) => {
     setSelectedAgentState(agent);
@@ -196,7 +221,7 @@ export default function ChatInputBox({
       return files
         .filter(file => includesQuery(file.name) || includesQuery(file.path))
         .slice(0, 8)
-        .map(file => ({ id: file.path, label: file.name, value: `@${file.name}`, description: file.path, kind: 'file' }));
+        .map(file => ({ id: file.path, label: file.name, value: `@${file.path}`, description: file.path, kind: 'file' }));
     }
 
     if (activeTrigger.trigger === '#') {
@@ -238,6 +263,12 @@ export default function ChatInputBox({
   const submit = useCallback((queue = false) => {
     const trimmed = text.trim();
     if (!trimmed && attachments.length === 0) return;
+    recordInputHistory(text);
+    if (attachments.length === 0 && /^\/context(?:\s|$)/i.test(trimmed)) {
+      onContextUsage?.(effectiveModel);
+      setText('');
+      return;
+    }
     onSend(
       trimmed,
       attachments.map(attachment => ({ type: attachment.type, data: attachment.data })),
@@ -250,7 +281,11 @@ export default function ChatInputBox({
     );
     setText('');
     setAttachments([]);
-  }, [alwaysThinking, attachments, longContextEnabled, model, onSend, reasoning, selectedAgent, streaming, text]);
+  }, [alwaysThinking, attachments, effectiveModel, longContextEnabled, model, onContextUsage, onSend, reasoning, recordInputHistory, selectedAgent, streaming, text]);
+
+  const enhancePrompt = useCallback(() => {
+    setText(current => enhancePromptText(current));
+  }, []);
 
   const selectCompletion = (item: CompletionItem) => {
     if (!activeTrigger) return;
@@ -286,6 +321,8 @@ export default function ChatInputBox({
         value={text}
         placeholder={PLACEHOLDER}
         onChange={setText}
+        editorRef={editorRef}
+        onHistoryKeyDown={handleHistoryKeyDown}
         onSubmit={() => submit(false)}
         onPasteImage={file => {
           readImage(file).then(image => setAttachments(prev => [...prev, image])).catch(() => {});
@@ -314,6 +351,7 @@ export default function ChatInputBox({
         showToolAnchors={showToolAnchors}
         setShowToolAnchors={setShowToolAnchors}
         onSubmit={submit}
+        onEnhancePrompt={enhancePrompt}
         onStop={onStop}
       />
 

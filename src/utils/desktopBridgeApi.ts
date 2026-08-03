@@ -42,12 +42,32 @@ export async function getProviders() {
   };
 }
 
+export async function getWorkspace() {
+  return await requireDesktopApi().getWorkspace() as { cwd: string; rootName: string };
+}
+
 export async function switchProvider(providerId: string) {
   return await requireDesktopApi().switchProvider(providerId);
 }
 
 export async function getAgents() {
   return await requireDesktopApi().getAgents() as { agents: AgentItem[] };
+}
+
+export async function getMcpServers() {
+  return await requireDesktopApi().getMcpServers() as {
+    servers: Array<{ id: string; name: string; enabled: boolean; scope: string; config: Record<string, unknown> }>;
+    disabled: string[];
+    invalid: Array<{ id: string; reason: string }>;
+    scope: string;
+  };
+}
+
+export async function getSkills() {
+  return await requireDesktopApi().getSkills() as {
+    global: Record<string, { id: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
+    local: Record<string, { id: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
+  };
 }
 
 export async function getCommands() {
@@ -76,6 +96,18 @@ export async function stopProcess(processRef: { pid: number; id?: string }) {
 
 export async function restartProcess(processRef: { pid: number; id?: string }) {
   return await requireDesktopApi().restartProcess(processRef);
+}
+
+export async function getUsageStatistics(args: { scope?: 'current' | 'all'; dateRange?: '7d' | '30d' | 'all' } = {}) {
+  return await requireDesktopApi().getUsageStatistics(args);
+}
+
+export async function getContextUsage(args: { sessionId?: string | null; model?: string } = {}) {
+  return await requireDesktopApi().getContextUsage(args);
+}
+
+export async function exportSession(sessionId: string, title?: string) {
+  return await requireDesktopApi().exportSession(sessionId, title);
 }
 
 export async function scanFiles(query: string, limit = 20) {

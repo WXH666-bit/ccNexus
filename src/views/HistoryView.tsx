@@ -1,18 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Search, Star, Trash2, Edit3, Download, MessageSquare } from 'lucide-react';
+import { Check, CheckSquare, ChevronLeft, Copy, Download, Edit3, MessageSquare, RefreshCw, Search, Star, Trash2, X } from 'lucide-react';
 import type { Session } from '../types';
 import { useDesktopChat } from '../hooks/useDesktopChat';
-import { deleteSession, getSessions, renameSession } from '../utils/sessionBridgeApi';
+import { deleteSession, getSessions, loadSession, renameSession, toggleFavoriteSession } from '../utils/sessionBridgeApi';
+import { normalizeDesktopChatEvent } from '../utils/desktopChatEvents.js';
+import { exportSession } from '../utils/desktopBridgeApi';
 
 export default function HistoryView() {
   const navigate = useNavigate();
-  const { lastMessage } = useDesktopChat();
+  const { incomingMessages } = useDesktopChat();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [search, setSearch] = useState('');
   const [showFavorites, setShowFavorites] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [deepSearchMatches, setDeepSearchMatches] = useState<Set<string> | null>(null);
+  const [deepSearching, setDeepSearching] = useState(false);
+  const processedIncomingMessageCountRef = useRef(0);
 
   useEffect(() => {
     void getSessions()
@@ -21,45 +29,122 @@ export default function HistoryView() {
   }, []);
 
   useEffect(() => {
-    if (lastMessage?.type === 'session_list') {
-      setSessions(lastMessage.sessions);
+    const nextMessages = incomingMessages.slice(processedIncomingMessageCountRef.current);
+    processedIncomingMessageCountRef.current = incomingMessages.length;
+
+    for (const rawMessage of nextMessages) {
+      const message = normalizeDesktopChatEvent(rawMessage) as typeof rawMessage;
+      if (message.type === 'session_list') {
+        setSessions(message.sessions);
+      } else if (message.type === 'session_created') {
+        setSessions(prev => prev.some(s => s.id === message.session.id)
+          ? prev.map(s => s.id === message.session.id ? message.session : s)
+          : [message.session, ...prev]);
+      } else if (message.type === 'session_renamed') {
+        setSessions(prev => prev.map(s => s.id === message.session_id ? { ...s, title: message.title } : s));
+        setEditingId(null);
+      } else if (message.type === 'session_deleted') {
+        setSessions(prev => prev.filter(s => s.id !== message.sessionId));
+      } else if (message.type === 'session_favorite_changed') {
+        setSessions(prev => prev.map(s => s.id === message.sessionId
+          ? { ...s, isFavorite: message.isFavorite, favoritedAt: message.favoritedAt }
+          : s));
+      }
     }
-    if (lastMessage?.type === 'session_renamed') {
-      setSessions(prev => prev.map(s => s.id === lastMessage.session_id ? { ...s, title: lastMessage.title } : s));
-      setEditingId(null);
-    }
-    if (lastMessage?.type === 'session_deleted') {
-      setSessions(prev => prev.filter(s => s.id !== lastMessage.sessionId));
-    }
-  }, [lastMessage]);
+  }, [incomingMessages]);
 
   const filtered = sessions
     .filter(s => !showFavorites || s.isFavorite)
-    .filter(s => s.title.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+    .filter(s => {
+      const query = search.trim().toLowerCase();
+      if (!query) return true;
+      if (String(s.title || '').toLowerCase().includes(query)) return true;
+      return deepSearchMatches?.has(s.id) || false;
+    })
+    .sort((a, b) => Number(Boolean(b.isFavorite)) - Number(Boolean(a.isFavorite))
+      || (b.favoritedAt || 0) - (a.favoritedAt || 0)
+      || b.updatedAt - a.updatedAt);
 
   const handleDelete = async (id: string) => {
+    if (!window.confirm('确定删除这个会话吗？')) return;
     await deleteSession(id);
     setSessions(prev => prev.filter(s => s.id !== id));
+    const refreshed = await getSessions().catch(() => null);
+    if (refreshed) setSessions(refreshed.sessions);
+  };
+
+  const handleDeepSearch = async () => {
+    const query = search.trim().toLowerCase();
+    if (!query || deepSearching) return;
+    setDeepSearching(true);
+    const matches = new Set<string>();
+    await Promise.all(sessions.map(async session => {
+      const history = await loadSession(session.id).catch(() => ({ messages: [] }));
+      const haystack = (history.messages || []).flatMap(message => (message.content || []).map(block => {
+        if (block.type === 'text') return block.text;
+        if (block.type === 'thinking') return block.thinking || '';
+        return '';
+      })).join('\n').toLowerCase();
+      if (haystack.includes(query)) matches.add(session.id);
+    }));
+    setDeepSearchMatches(matches);
+    setDeepSearching(false);
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds(previous => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(previous => previous.size === filtered.length
+      ? new Set()
+      : new Set(filtered.map(session => session.id)));
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0 || !window.confirm(`确定删除选中的 ${selectedIds.size} 个会话吗？`)) return;
+    const ids = [...selectedIds];
+    await Promise.all(ids.map(id => deleteSession(id).catch(() => null)));
+    setSessions(previous => previous.filter(session => !selectedIds.has(session.id)));
+    setSelectedIds(new Set());
+    setSelectionMode(false);
   };
 
   const handleRename = async (id: string) => {
     if (editValue.trim()) {
       await renameSession(id, editValue.trim());
       setSessions(prev => prev.map(s => s.id === id ? { ...s, title: editValue.trim() } : s));
+      const refreshed = await getSessions().catch(() => null);
+      if (refreshed) setSessions(refreshed.sessions);
     }
     setEditingId(null);
   };
 
-  const handleExport = (session: Session) => {
-    const data = JSON.stringify(session, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${session.title || session.id}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExport = async (session: Session) => {
+    await exportSession(session.id, session.title).catch(() => null);
+  };
+
+  const handleToggleFavorite = async (session: Session) => {
+    const result = await toggleFavoriteSession(session.id).catch(() => null);
+    if (!result) return;
+    setSessions(prev => prev.map(item => item.id === session.id
+      ? { ...item, isFavorite: result.isFavorite, favoritedAt: result.favoritedAt }
+      : item));
+  };
+
+  const handleCopyId = async (sessionId: string) => {
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      setCopiedId(sessionId);
+      window.setTimeout(() => setCopiedId(current => current === sessionId ? null : current), 1800);
+    } catch {
+      setCopiedId(null);
+    }
   };
 
   const formatDate = (ts: number) => {
@@ -83,7 +168,7 @@ export default function HistoryView() {
             <Search size={16} />
             <input
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setDeepSearchMatches(null); }}
               placeholder="搜索会话..."
             />
           </div>
@@ -94,6 +179,36 @@ export default function HistoryView() {
           >
             <Star size={16} />
           </button>
+          <button
+            className={`filter-btn ${selectionMode ? 'active' : ''}`}
+            onClick={() => { setSelectionMode(value => !value); setSelectedIds(new Set()); }}
+            title="选择模式"
+            aria-label="选择模式"
+          >
+            <CheckSquare size={16} />
+          </button>
+          <button
+            className="filter-btn"
+            onClick={() => { void handleDeepSearch(); }}
+            disabled={!search.trim() || deepSearching}
+            title="深度搜索"
+            aria-label="深度搜索"
+          >
+            <RefreshCw size={16} className={deepSearching ? 'spin' : ''} />
+          </button>
+          {selectionMode && (
+            <>
+              <button className="filter-btn" onClick={toggleSelectAll} title="全选" aria-label="全选">
+                <CheckSquare size={16} />
+              </button>
+              <button className="filter-btn danger-btn" onClick={() => { void handleBatchDelete(); }} disabled={selectedIds.size === 0} title="删除选中" aria-label="删除选中">
+                <Trash2 size={16} />
+              </button>
+              <button className="filter-btn" onClick={() => { setSelectionMode(false); setSelectedIds(new Set()); }} title="退出选择" aria-label="退出选择">
+                <X size={16} />
+              </button>
+            </>
+          )}
         </div>
       </div>
       <div className="history-list">
@@ -104,8 +219,17 @@ export default function HistoryView() {
           </div>
         ) : (
           filtered.map(session => (
-            <div key={session.id} className="history-item">
-              <div className="history-item-main" onClick={() => navigate(`/chat/${session.id}`)}>
+            <div key={session.id} className={`history-item ${selectedIds.has(session.id) ? 'selected' : ''}`}>
+              {selectionMode && (
+                <input
+                  className="history-item-checkbox"
+                  type="checkbox"
+                  checked={selectedIds.has(session.id)}
+                  onChange={() => toggleSelected(session.id)}
+                  aria-label={`选择 ${session.title || session.id}`}
+                />
+              )}
+              <div className="history-item-main" onClick={() => selectionMode ? toggleSelected(session.id) : navigate(`/chat/${session.id}`)}>
                 <div className="history-item-title">
                   {editingId === session.id ? (
                     <input
@@ -128,6 +252,17 @@ export default function HistoryView() {
                 </div>
               </div>
               <div className="history-item-actions">
+                <button
+                  onClick={() => { void handleToggleFavorite(session); }}
+                  title={session.isFavorite ? '取消收藏' : '收藏'}
+                  aria-label={session.isFavorite ? '取消收藏' : '收藏'}
+                  className={session.isFavorite ? 'active' : ''}
+                >
+                  <Star size={14} fill={session.isFavorite ? 'currentColor' : 'none'} />
+                </button>
+                <button onClick={() => { void handleCopyId(session.id); }} title="复制会话 ID" aria-label="复制会话 ID">
+                  {copiedId === session.id ? <Check size={14} /> : <Copy size={14} />}
+                </button>
                 <button onClick={() => { setEditingId(session.id); setEditValue(session.title); }} title="重命名">
                   <Edit3 size={14} />
                 </button>

@@ -75,6 +75,13 @@ export function createDesktopRuntime(options = {}) {
     return stream;
   }
 
+  async function getContextUsage({ sessionId, title = 'Context usage', options: queryOptions = {} } = {}) {
+    const daemonSessionId = sessionId || `context-${Date.now()}`;
+    const daemon = ensureSessionDaemon({ sessionId: daemonSessionId, title });
+    if (!daemon?.bridge) throw new Error('Unable to establish the Claude runtime');
+    return daemon.bridge.getContextUsage(queryOptions);
+  }
+
   function removeSessionDaemon(sessionId) {
     const bridge = bridges.get(sessionId);
     if (bridge) {
@@ -128,6 +135,7 @@ export function createDesktopRuntime(options = {}) {
     ensureSessionDaemon,
     adoptSessionDaemon,
     queryClaude,
+    getContextUsage,
     removeSessionDaemon,
     registerChannel: (args) => registry.registerChannel(args),
     unregisterChannel: (args) => registry.unregisterChannel(args),

@@ -130,14 +130,20 @@ export default function ConfigSelect({
     }
   };
 
-  // Load processes
+  // ccgui keeps the node-process submenu live while it is open.
   useEffect(() => {
-    if (menuState === 'main' || menuState === 'processes') {
+    if (menuState === 'main') {
       void loadProcesses();
+      return undefined;
     }
+    if (menuState !== 'processes') return undefined;
+    void loadProcesses();
+    const timer = window.setInterval(() => { void loadProcesses(); }, 2000);
+    return () => window.clearInterval(timer);
   }, [menuState]);
 
   const handleKillProcess = async (proc: Process) => {
+    if (proc.kind !== 'ORPHAN' && !window.confirm(`Terminate ${proc.kind.toLowerCase()} process ${proc.pid}?`)) return;
     try {
       await stopProcess({ pid: proc.pid, id: proc.id });
       // Refresh process list
@@ -148,6 +154,7 @@ export default function ConfigSelect({
   };
 
   const handleRestartProcess = async (proc: Process) => {
+    if (!window.confirm(`Restart daemon ${proc.pid}?`)) return;
     try {
       await restartProcess({ pid: proc.pid, id: proc.id });
       await loadProcesses();

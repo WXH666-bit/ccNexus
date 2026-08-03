@@ -24,6 +24,7 @@ interface Props {
   showToolAnchors: boolean;
   setShowToolAnchors: (visible: boolean) => void;
   onSubmit: (queue?: boolean) => void;
+  onEnhancePrompt: () => void;
   onStop: () => void;
 }
 
@@ -66,6 +67,7 @@ export default function ButtonArea({
   showToolAnchors,
   setShowToolAnchors,
   onSubmit,
+  onEnhancePrompt,
   onStop,
 }: Props) {
   return (
@@ -105,6 +107,7 @@ export default function ButtonArea({
           type="button"
           className="enhance-prompt-button"
           disabled={!hasInputContent || isStreaming}
+          onClick={onEnhancePrompt}
           title="增强提示词"
         >
           <Sparkles size={16} />

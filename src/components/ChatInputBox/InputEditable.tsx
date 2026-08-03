@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 interface Props {
   value: string;
@@ -7,6 +7,8 @@ interface Props {
   onChange: (value: string) => void;
   onSubmit: () => void;
   onPasteImage: (file: File) => void;
+  editorRef?: RefObject<HTMLDivElement | null>;
+  onHistoryKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => boolean;
 }
 
 export default function InputEditable({
@@ -16,25 +18,28 @@ export default function InputEditable({
   onChange,
   onSubmit,
   onPasteImage,
+  editorRef,
+  onHistoryKeyDown,
 }: Props) {
   const editableRef = useRef<HTMLDivElement>(null);
+  const inputRef = editorRef || editableRef;
   const isComposingRef = useRef(false);
   const [completionSuffix] = useState('');
 
   useEffect(() => {
-    const el = editableRef.current;
+    const el = inputRef.current;
     if (!el || el.innerText === value) return;
     el.innerText = value;
-  }, [value]);
+  }, [inputRef, value]);
 
   const syncText = () => {
-    onChange(editableRef.current?.innerText ?? '');
+    onChange(inputRef.current?.innerText ?? '');
   };
 
   return (
     <div className="input-editable-wrapper">
       <div
-        ref={editableRef}
+        ref={inputRef}
         className="input-editable"
         contentEditable={!disabled}
         spellCheck={false}
@@ -42,6 +47,7 @@ export default function InputEditable({
         data-completion-suffix={completionSuffix}
         onInput={syncText}
         onKeyDown={event => {
+          if (onHistoryKeyDown?.(event)) return;
           if (event.key === 'Enter' && !event.shiftKey && !isComposingRef.current) {
             event.preventDefault();
             onSubmit();

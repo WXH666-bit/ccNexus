@@ -35,7 +35,7 @@ test('message anchor hover does not resize the scrollable rail overflow area', (
   const dotRule = styles.match(/\.anchor-dot\s*\{[^}]*\}/s)?.[0] || '';
   const hoverRule = styles.match(/\.anchor-dot:hover,\s*\.anchor-dot\.hovered\s*\{[^}]*\}/s)?.[0] || '';
 
-  assert.match(dotRule, /border:\s*1px solid transparent;/);
+  assert.match(dotRule, /border:\s*2px solid var\(--border-color\);/);
   assert.match(hoverRule, /box-shadow:/);
   assert.match(hoverRule, /border-color:/);
   assert.doesNotMatch(hoverRule, /outline:/);
@@ -50,21 +50,23 @@ test('chat message list hides page-level horizontal overflow above the status pa
   assert.match(styles, /\.chat-content-with-rail \.message-list\s*\{[^}]*min-width:\s*0;/s);
 });
 
-test('message anchor rail reserves right-side space so it cannot cover user message actions', () => {
+test('message anchor rail follows ccgui left-side layout and reserves its own gutter', () => {
   const styles = read('src/index.css');
 
-  assert.match(styles, /--anchor-rail-gutter:\s*48px;/);
-  assert.match(styles, /\.chat-content-with-rail \.message-list\s*\{[^}]*padding-right:\s*var\(--anchor-rail-gutter\);/s);
-  assert.match(styles, /\.anchor-rail\s*\{[^}]*right:\s*12px;/s);
+  assert.match(styles, /--anchor-rail-gutter:\s*36px;/);
+  assert.match(styles, /\.chat-content-with-rail \.message-list\s*\{[^}]*padding-left:\s*var\(--anchor-rail-gutter\);/s);
+  assert.match(styles, /\.anchor-rail\s*\{[^}]*left:\s*4px;/s);
+  assert.match(styles, /\.anchor-rail\s*\{[^}]*pointer-events:\s*none;/s);
 });
 
-test('message anchor rail defaults to conversation history nodes and hides tool detail nodes', () => {
+test('message anchor rail defaults to user conversation nodes and keeps tool detail opt-in', () => {
   const source = read('src/components/MessageAnchorRail.tsx');
 
   assert.match(source, /showToolAnchors\?: boolean/);
   assert.match(source, /showToolAnchors = false/);
   assert.match(source, /getAnchors\(messages, showToolAnchors\)/);
-  assert.match(source, /if \(!showToolAnchors\) return;/);
+  assert.match(source, /message\.role === 'user'/);
+  assert.match(source, /if \(!showToolAnchors \|\| message\.role !== 'assistant'\) return;/);
   assert.match(source, /block\.type === 'tool_use'/);
   assert.match(source, /block\.type === 'thinking'/);
 });

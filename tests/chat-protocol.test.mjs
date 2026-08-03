@@ -10,6 +10,7 @@ import {
 test('assistantEvent wraps the complete message under message', () => {
   assert.deepEqual(assistantEvent({ id: 'a1', content: [{ type: 'text', text: 'Hi' }], sessionId: 's1' }), {
     type: 'assistant',
+    sessionId: 's1',
     message: { id: 'a1', content: [{ type: 'text', text: 'Hi' }], sessionId: 's1' },
   });
 });

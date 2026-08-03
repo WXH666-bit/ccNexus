@@ -1,0 +1,146 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+test('desktop usage aggregation follows ccgui message-id deduplication and model grouping', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-statistics-'));
+  const workspace = path.join(homeDir, 'workspace');
+
+  try {
+    const service = new DesktopSessionService({ homeDir, cwd: workspace });
+    await service.saveSession({ id: 'session-1', title: 'Usage test', updatedAt: Date.now() });
+
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 900,
+    };
+    await service.appendMessage('session-1', {
+      id: 'assistant-message-1',
+      role: 'assistant',
+      model: 'deepseek-v4-pro',
+      usage,
+      timestamp: Date.now(),
+      content: [{ type: 'text', text: 'first block' }],
+    });
+    // Claude JSONL can contain another assistant line with the same message.id
+    // for a separate content block; ccgui counts that usage only once.
+    await service.appendMessage('session-1', {
+      id: 'assistant-message-1',
+      role: 'assistant',
+      model: 'deepseek-v4-pro',
+      usage,
+      timestamp: Date.now() + 1,
+      content: [{ type: 'thinking', thinking: 'second block' }],
+    });
+
+    const statistics = await service.getUsageStatistics();
+    assert.equal(statistics.totalSessions, 1);
+    assert.deepEqual(statistics.totalUsage, {
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 900,
+      totalTokens: 1010,
+    });
+    assert.equal(statistics.sessions[0].model, 'deepseek-v4-pro');
+    assert.equal(statistics.sessions[0].cost, 0.00072);
+    assert.equal(statistics.byModel[0].model, 'deepseek-v4-pro');
+    assert.equal(statistics.byModel[0].sessionCount, 1);
+    assert.equal(statistics.dailyUsage[0].sessions, 1);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop usage aggregation deduplicates Claude JSONL lines by inner message.id', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-jsonl-'));
+  const workspace = path.join(homeDir, 'workspace');
+  const { encodeClaudeProjectPath } = await import('../server/claudeProjectPaths.js');
+
+  try {
+    const claudeProjectDir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectPath(workspace));
+    await (await import('node:fs/promises')).mkdir(claudeProjectDir, { recursive: true });
+    const service = new DesktopSessionService({ homeDir, cwd: workspace });
+    const sessionId = 'jsonl-session';
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 900,
+    };
+    const entries = [
+      { type: 'assistant', uuid: 'outer-thinking', timestamp: '2026-07-27T01:00:00.000Z', message: { id: 'api-message', role: 'assistant', model: 'deepseek-v4-pro', usage, content: [{ type: 'thinking', thinking: 'x' }] } },
+      { type: 'assistant', uuid: 'outer-text', timestamp: '2026-07-27T01:00:00.001Z', message: { id: 'api-message', role: 'assistant', model: 'deepseek-v4-pro', usage, content: [{ type: 'text', text: 'x' }] } },
+    ];
+    await (await import('node:fs/promises')).writeFile(
+      path.join(claudeProjectDir, `${sessionId}.jsonl`),
+      entries.map(entry => JSON.stringify(entry)).join('\n'),
+      'utf8',
+    );
+
+    const statistics = await service.getUsageStatistics();
+    assert.equal(statistics.totalSessions, 1);
+    assert.equal(statistics.totalUsage.totalTokens, 1010);
+    assert.equal(statistics.totalUsage.cacheReadTokens, 900);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop usage aggregation supports ccgui current and all-project scopes', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const { encodeClaudeProjectPath } = await import('../server/claudeProjectPaths.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-scopes-'));
+  const workspaceA = path.join(homeDir, 'workspace-a');
+  const workspaceB = path.join(homeDir, 'workspace-b');
+  const { mkdir, writeFile } = await import('node:fs/promises');
+
+  try {
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 900,
+    };
+    for (const [workspace, sessionId] of [[workspaceA, 'scope-a'], [workspaceB, 'scope-b']]) {
+      const projectDir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectPath(workspace));
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(path.join(projectDir, `${sessionId}.jsonl`), JSON.stringify({
+        type: 'assistant',
+        uuid: `${sessionId}-outer`,
+        timestamp: '2026-07-27T01:00:00.000Z',
+        sessionId,
+        message: {
+          id: `${sessionId}-message`,
+          role: 'assistant',
+          model: 'deepseek-v4-pro',
+          usage,
+          content: [{ type: 'text', text: workspace }],
+        },
+      }), 'utf8');
+    }
+
+    const service = new DesktopSessionService({ homeDir, cwd: workspaceA });
+    const current = await service.getUsageStatistics({ scope: 'current' });
+    assert.equal(current.scope, 'current');
+    assert.equal(current.projectPath, path.resolve(workspaceA));
+    assert.equal(current.totalSessions, 1);
+    assert.equal(current.totalUsage.totalTokens, 1010);
+
+    const all = await service.getUsageStatistics({ scope: 'all' });
+    assert.equal(all.scope, 'all');
+    assert.equal(all.projectPath, 'all');
+    assert.equal(all.projectName, 'All Projects');
+    assert.equal(all.totalSessions, 2);
+    assert.equal(all.totalUsage.totalTokens, 2020);
+    assert.equal(all.totalUsage.cacheReadTokens, 1800);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});

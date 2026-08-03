@@ -95,6 +95,7 @@ test('history conversion keeps assistant usage for accurate restored context per
     timestamp: '2026-07-27T01:00:07.000Z',
     message: {
       role: 'assistant',
+      id: 'api-message-1',
       model: 'deepseek-v4-pro',
       usage: {
         input_tokens: 14_658,
@@ -112,6 +113,34 @@ test('history conversion keeps assistant usage for accurate restored context per
     cache_creation_input_tokens: 0,
     cache_read_input_tokens: 0,
   });
+  assert.equal(message.usageMessageId, 'api-message-1');
+});
+
+test('history conversion preserves one usage identity across repeated content-block lines', () => {
+  const first = convertClaudeHistoryEntry({
+    type: 'assistant',
+    uuid: 'thinking-line-uuid',
+    message: {
+      id: 'shared-api-message',
+      role: 'assistant',
+      usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 900 },
+      content: [{ type: 'thinking', thinking: 'thinking' }],
+    },
+  }, 'session-usage');
+  const second = convertClaudeHistoryEntry({
+    type: 'assistant',
+    uuid: 'text-line-uuid',
+    message: {
+      id: 'shared-api-message',
+      role: 'assistant',
+      usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 900 },
+      content: [{ type: 'text', text: 'answer' }],
+    },
+  }, 'session-usage');
+
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.usageMessageId, 'shared-api-message');
+  assert.equal(second.usageMessageId, 'shared-api-message');
 });
 
 test('history conversion mirrors ccgui content block normalization for thinking and command tags', () => {

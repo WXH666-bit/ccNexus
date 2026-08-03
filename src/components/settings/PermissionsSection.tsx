@@ -1,36 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Shield } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Trash2 } from 'lucide-react';
 
-interface ToolPermission {
-  name: string;
-  allowed: boolean;
-}
+const MODE_KEY = 'chatMode';
 
 export default function PermissionsSection() {
   const { t } = useTranslation();
-  const [mode, setMode] = useState('auto');
-  const [tools, setTools] = useState<ToolPermission[]>([
-    { name: 'EditTool', allowed: true },
-    { name: 'BashTool', allowed: false },
-    { name: 'ReadTool', allowed: true },
-  ]);
+  const [mode, setMode] = useState(() => localStorage.getItem(MODE_KEY) || 'default');
 
-  const addTool = () => {
-    const name = prompt('Enter tool name:');
-    if (name) {
-      setTools([...tools, { name, allowed: false }]);
-    }
-  };
+  useEffect(() => {
+    const syncMode = () => setMode(localStorage.getItem(MODE_KEY) || 'default');
+    window.addEventListener('ccnexus:chat-preferences-changed', syncMode);
+    return () => window.removeEventListener('ccnexus:chat-preferences-changed', syncMode);
+  }, []);
 
-  const toggleTool = (index: number) => {
-    const newTools = [...tools];
-    newTools[index].allowed = !newTools[index].allowed;
-    setTools(newTools);
-  };
-
-  const removeTool = (index: number) => {
-    setTools(tools.filter((_, i) => i !== index));
+  const handleModeChange = (nextMode: string) => {
+    setMode(nextMode);
+    localStorage.setItem(MODE_KEY, nextMode);
+    window.dispatchEvent(new Event('ccnexus:chat-preferences-changed'));
   };
 
   return (
@@ -39,40 +26,18 @@ export default function PermissionsSection() {
       <p className="settings-desc">{t('settings.permissions.desc')}</p>
 
       <div className="setting-group">
-        <label>{t('settings.permissions.mode')}</label>
-        <select value={mode} onChange={(e) => setMode(e.target.value)}>
-          <option value="auto">{t('settings.permissions.modes.auto')}</option>
+        <label><Shield size={14} /> {t('settings.permissions.mode')}</label>
+        <select value={mode} onChange={event => handleModeChange(event.target.value)}>
+          <option value="default">{t('settings.permissions.modes.default', { defaultValue: '默认模式' })}</option>
           <option value="plan">{t('settings.permissions.modes.plan')}</option>
           <option value="acceptEdits">{t('settings.permissions.modes.acceptEdits')}</option>
+          <option value="bypassPermissions">{t('settings.permissions.modes.auto', { defaultValue: '自动模式' })}</option>
         </select>
       </div>
 
-      <div className="setting-group">
-        <label>{t('settings.permissions.whitelist')}</label>
-        <div className="tool-permission-list">
-          {tools.map((tool, idx) => (
-            <div key={idx} className="tool-permission-item">
-              <span className="tool-name">{tool.name}</span>
-              <div className="tool-actions">
-                <label className="toggle">
-                  <input 
-                    type="checkbox" 
-                    checked={tool.allowed} 
-                    onChange={() => toggleTool(idx)} 
-                  />
-                  <span className="toggle-slider"></span>
-                </label>
-                <button className="icon-btn danger" onClick={() => removeTool(idx)}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        <button className="btn btn-secondary" onClick={addTool}>
-          <Plus size={14} />
-          {t('settings.permissions.addTool')}
-        </button>
+      <div className="settings-info-note">
+        <Shield size={15} />
+        <span>工具权限仍由聊天中的 ccgui 风格确认弹窗处理；此处只保存当前会话模式。</span>
       </div>
     </div>
   );

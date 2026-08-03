@@ -166,6 +166,13 @@ export function convertClaudeHistoryEntry(entry, fallbackSessionId) {
     sessionId: entry.sessionId || fallbackSessionId,
   };
 
+  // Claude writes one JSONL line per content block. Those lines have different
+  // outer UUIDs but share the inner API message.id. Keep that identity beside
+  // the renderer id so usage aggregation can deduplicate exactly like ccgui.
+  if (typeof entry.message.id === 'string' && entry.message.id.trim()) {
+    message.usageMessageId = entry.message.id;
+  }
+
   if (role === 'assistant' && entry.message.model) {
     message.model = entry.message.model;
   }

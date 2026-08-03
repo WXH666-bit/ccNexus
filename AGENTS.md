@@ -6,6 +6,11 @@
 - Keep the local Web UI only as the renderer surface needed by Electron. Do not expand the old Web broker architecture.
 - Before changing Claude runtime behavior, inspect and follow the matching implementation under `_ccgui/ccgui-src`.
 - Prefer ccgui's persistent-query, runtime lifecycle, per-session ownership, request-context, and usage handling patterns over new custom behavior.
+- The renderer's `/context` command must use the desktop IPC path to the session daemon and Claude SDK `query.getContextUsage()`; never recreate the category breakdown with percentages guessed in React.
+- Keep session history authoritative to the current workspace's Claude JSONL when it exists; use ccNexus-owned cache only when Claude history is absent or unreadable.
+- Keep history search, selection, batch deletion, favorites, export, and rename scoped to the active workspace. Stale session responses must not mutate the active chat.
+- Keep the chat input aligned with ccgui: persist bounded local input history, restore the draft when navigating with ArrowUp/ArrowDown, and handle `/new`, `/clear`, `/reset`, `/resume`, `/continue`, and `/plan` as local commands before sending a prompt.
+- Node process management should follow ccgui's live snapshot behavior: refresh while the submenu is open, confirm daemon/channel termination or restart, and allow orphan cleanup directly.
 
 ## Claude Configuration Safety
 
@@ -22,6 +27,7 @@
 - Cache hit rate is a separate metric. Use `cache_read_input_tokens / (input_tokens + cache_creation_input_tokens + cache_read_input_tokens)` for a Claude request; do not confuse it with context occupancy.
 - A warm persistent session should normally report approximately 97% to 99% cache reads in stable short or tool turns. A cold session or an expired provider-side cache can have a lower first request.
 - Keep the 1M context suffix and inline settings override behavior aligned with ccgui. `[1m]` changes the runtime identity and must not be silently applied to an already-spawned incompatible runtime.
+- The `/context` dialog's `totalTokens`, model limit, category grid, MCP tools, agents, memory files, skills, and autocompact state must be passed through from SDK `getContextUsage()` without synthetic category allocation.
 
 ## Desktop Diagnostics
 
@@ -39,8 +45,12 @@ node tests\claude-history.test.mjs
 node tests\assistant-turn.test.mjs
 node tests\chat-protocol.test.mjs
 node tests\desktop-chat-ipc.test.mjs
+node tests\desktop-session-ipc.test.mjs
+node tests\desktop-config-ipc.test.mjs
+node tests\desktop-usage-statistics.test.mjs
 node tests\model-resolution.test.mjs
 node tests\query-options.test.mjs
+npm.cmd run test:protocol
 npx.cmd tsc --noEmit
 npm.cmd run build
 ```

@@ -19,13 +19,15 @@ export function assistantEvent({ id, content, sessionId, model, usage, cost, dur
 
   return {
     type: 'assistant',
+    sessionId,
     message,
   };
 }
 
-export function permissionRequestEvent({ requestId, toolName, input, title, displayName }) {
+export function permissionRequestEvent({ requestId, toolName, input, title, displayName, sessionId }) {
   const event = { type: 'permission_request', requestId, toolName, input };
   if (title !== undefined) event.title = title;
   if (displayName !== undefined) event.displayName = displayName;
+  if (sessionId !== undefined) event.sessionId = sessionId;
   return event;
 }

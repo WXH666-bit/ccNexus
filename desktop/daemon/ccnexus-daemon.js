@@ -365,6 +365,39 @@ async function runQuery(id, params = {}) {
   }
 }
 
+async function runContextUsage(id, params = {}) {
+  if (activeRequestId && (!runtime || runtime.closed)) {
+    writeRawLine({
+      id,
+      done: true,
+      success: false,
+      error: `Daemon is busy with ${activeRequestId}`,
+    });
+    return;
+  }
+
+  const previousRequestId = activeRequestId;
+  if (!activeRequestId) activeRequestId = id;
+  try {
+    const currentRuntime = await ensureRuntime(params.options || {});
+    if (!currentRuntime || currentRuntime.closed || typeof currentRuntime.query?.getContextUsage !== 'function') {
+      throw new Error('getContextUsage is not available on the current runtime');
+    }
+    touchRuntime(currentRuntime);
+    const result = await currentRuntime.query.getContextUsage();
+    reply(id, { result });
+  } catch (err) {
+    writeRawLine({
+      id,
+      done: true,
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    if (activeRequestId === id) activeRequestId = previousRequestId;
+  }
+}
+
 sendDaemonEvent('starting');
 sendDaemonEvent('ready');
 
@@ -428,6 +461,11 @@ rl.on('line', (line) => {
 
   if (method === 'query') {
     runQuery(id, command.params);
+    return;
+  }
+
+  if (method === 'context_usage') {
+    runContextUsage(id, command.params);
     return;
   }
 

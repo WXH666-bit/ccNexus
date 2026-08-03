@@ -1,7 +1,16 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { getWorkspace } from '../../utils/desktopBridgeApi';
+import { CLAUDE_MODELS } from '../../utils/modelResolution';
 
 export default function BasicConfigSection() {
   const { t, i18n } = useTranslation();
+  const [workspace, setWorkspace] = useState('');
+  const [model, setModel] = useState(() => localStorage.getItem('chatModel') || 'default');
+
+  useEffect(() => {
+    void getWorkspace().then(result => setWorkspace(result.cwd)).catch(() => setWorkspace(''));
+  }, []);
 
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang);
@@ -16,17 +25,24 @@ export default function BasicConfigSection() {
         <label>{t('settings.basic.workDir')}</label>
         <input 
           type="text" 
-          defaultValue={typeof window !== 'undefined' ? window.location.origin : ''} 
+          value={workspace}
           readOnly 
         />
       </div>
 
       <div className="setting-group">
         <label>{t('settings.basic.defaultModel')}</label>
-        <select defaultValue="default">
+        <select
+          value={model}
+          onChange={event => {
+            const nextModel = event.target.value;
+            setModel(nextModel);
+            localStorage.setItem('chatModel', nextModel);
+            window.dispatchEvent(new Event('ccnexus:chat-preferences-changed'));
+          }}
+        >
           <option value="default">default</option>
-          <option value="claude-sonnet-4-20250514">Sonnet 4</option>
-          <option value="claude-opus-4-20250514">Opus 4</option>
+          {CLAUDE_MODELS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
         </select>
       </div>
 

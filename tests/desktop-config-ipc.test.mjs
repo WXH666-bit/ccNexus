@@ -87,6 +87,14 @@ test('desktop local config service mirrors existing Claude-side readers without 
 
     await service.savePrompt({ name: 'new-prompt', content: 'Saved through IPC.' });
     assert.ok((await service.listPrompts()).prompts.some(prompt => prompt.name === 'new-prompt'));
+    assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(
+      path.join(homeDir, '.claude', 'prompts', 'tone.md'),
+      'utf8',
+    )), 'Use a calm tone.');
+    assert.ok((await import('node:fs/promises').then(({ readFile }) => readFile(
+      path.join(homeDir, '.ccnexus', 'prompts', 'new-prompt.md'),
+      'utf8',
+    ))).includes('Saved through IPC.'));
     await service.deletePrompt('new-prompt');
     assert.ok(!(await service.listPrompts()).prompts.some(prompt => prompt.name === 'new-prompt'));
     await assert.rejects(() => service.savePrompt({ name: '../bad', content: 'nope' }), /Invalid prompt name/);
@@ -142,6 +150,56 @@ test('desktop local config reads ccgui codemoss provider state for model mapping
   }
 });
 
+test('desktop local config exposes ccgui-style read-only MCP and Skills state', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-mcp-skills-state-'));
+  const cwd = path.join(homeDir, 'workspace');
+  const claudeJsonPath = path.join(homeDir, '.claude.json');
+  const claudeJson = {
+    mcpServers: {
+      globalDocs: { command: 'node', args: ['global-docs.mjs'] },
+      disabledGlobal: { command: 'node', args: ['disabled.mjs'] },
+    },
+    disabledMcpServers: ['disabledGlobal'],
+    projects: {
+      [cwd]: {
+        mcpServers: {
+          projectDocs: { command: 'node', args: ['project-docs.mjs'] },
+        },
+      },
+    },
+  };
+
+  try {
+    await mkdir(path.join(homeDir, '.claude', 'skills', 'reviewer'), { recursive: true });
+    await mkdir(path.join(cwd, '.claude', 'skills', 'local-check'), { recursive: true });
+    await writeFile(claudeJsonPath, JSON.stringify(claudeJson), 'utf8');
+    await writeFile(
+      path.join(homeDir, '.claude', 'skills', 'reviewer', 'SKILL.md'),
+      '---\nname: reviewer\ndescription: Review changes\n---\nUse review mode.',
+      'utf8',
+    );
+    await writeFile(
+      path.join(cwd, '.claude', 'skills', 'local-check', 'skill.md'),
+      '---\nname: local-check\ndescription: Check local files\n---\nCheck files.',
+      'utf8',
+    );
+
+    const service = new LocalConfigService({ homeDir });
+    const before = readFileSync(claudeJsonPath, 'utf8');
+    const mcp = await service.listMcpServers(cwd);
+    const skills = await service.listSkills(cwd);
+
+    assert.deepEqual(mcp.servers.map(server => server.id), ['projectDocs']);
+    assert.deepEqual(mcp.disabled, []);
+    assert.equal(skills.global.reviewer.description, 'Review changes');
+    assert.equal(skills.local['local-check'].description, 'Check local files');
+    assert.equal(readFileSync(claudeJsonPath, 'utf8'), before);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
 test('desktop local config follows ccgui cc-switch database filename and settings_config shape', () => {
   const serviceSource = read('desktop/runtime/localConfigService.js');
 
@@ -158,6 +216,58 @@ test('desktop main owns provider and prompt operations through LocalConfigServic
   assert.match(mainSource, /localConfig\.listPrompts\(\)/);
   assert.match(mainSource, /localConfig\.savePrompt\(args\)/);
   assert.match(mainSource, /localConfig\.deletePrompt\(args\.name\)/);
+});
+
+test('provider switching never writes Claude Code settings', () => {
+  const serviceSource = read('desktop/runtime/localConfigService.js');
+
+  assert.doesNotMatch(serviceSource, /writeClaudeSettings/);
+  assert.match(serviceSource, /provider-state\.json/);
+});
+
+test('provider switching resets the persistent runtime before the next query', () => {
+  const controllerSource = read('desktop/runtime/chatController.js');
+  const mainSource = read('desktop/main.js');
+
+  assert.match(controllerSource, /function resetForProviderChange\(\)/);
+  assert.match(controllerSource, /runtime\.shutdown\(\)/);
+  assert.match(mainSource, /chatController\.resetForProviderChange\(\)/);
+});
+
+test('provider switching persists only ccNexus-owned provider state', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-provider-state-'));
+
+  try {
+    await mkdir(path.join(homeDir, '.codemoss'), { recursive: true });
+    await writeFile(
+      path.join(homeDir, '.codemoss', 'config.json'),
+      JSON.stringify({
+        claude: {
+          current: 'provider-a',
+          providers: {
+            'provider-a': { name: 'Provider A', settingsConfig: { env: { ANTHROPIC_MODEL: 'model-a' } } },
+            'provider-b': { name: 'Provider B', settingsConfig: { env: { ANTHROPIC_MODEL: 'model-b' } } },
+          },
+        },
+      }),
+      'utf8',
+    );
+    await mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+    const originalSettings = JSON.stringify({ env: { ANTHROPIC_MODEL: 'original' } });
+    await writeFile(settingsPath, originalSettings, 'utf8');
+
+    const service = new LocalConfigService({ homeDir });
+    await service.switchProvider('provider-b');
+
+    assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')), originalSettings);
+    const providers = await service.getProviders();
+    assert.equal(providers.currentProviderId, 'provider-b');
+    assert.equal(providers.currentEnv.ANTHROPIC_MODEL, 'model-b');
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
 });
 
 test('desktop workspace file service scans files for completion through the same workspace root', async () => {

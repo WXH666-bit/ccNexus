@@ -7,6 +7,9 @@ import { claudeProjectSessionsDir, encodeClaudeProjectPath } from '../../server/
 const PROJECT_INDEX_DIR = 'projects';
 const PROJECT_INDEX_VERSION = 1;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
+const USAGE_SCOPE_CURRENT = 'current';
+const USAGE_SCOPE_ALL = 'all';
 
 function sessionFile(directory, sessionId) {
   if (typeof sessionId !== 'string' || sessionId === '_index' || !SESSION_ID_PATTERN.test(sessionId)) {
@@ -21,6 +24,10 @@ function normalizeWorkspacePath(workspacePath) {
 
 function projectIndexFile(directory, workspacePath) {
   return path.join(directory, PROJECT_INDEX_DIR, `${encodeClaudeProjectPath(workspacePath)}.json`);
+}
+
+function claudeProjectsRoot(homeDir) {
+  return path.join(homeDir, '.claude', 'projects');
 }
 
 async function directoryExists(directory) {
@@ -51,6 +58,94 @@ function titleFromMessages(messages, fallbackTitle) {
   return typeof text === 'string' && text.trim()
     ? text.trim().slice(0, 60)
     : fallbackTitle;
+}
+
+function tokenValue(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function emptyUsage() {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function usageFromMessage(message) {
+  const usage = message?.usage;
+  if (!usage || typeof usage !== 'object') return null;
+  const inputTokens = tokenValue(usage.input_tokens);
+  const outputTokens = tokenValue(usage.output_tokens);
+  const cacheWriteTokens = tokenValue(usage.cache_creation_input_tokens);
+  const cacheReadTokens = tokenValue(usage.cache_read_input_tokens);
+  if (inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens === 0) return null;
+  return {
+    inputTokens,
+    outputTokens,
+    cacheWriteTokens,
+    cacheReadTokens,
+    totalTokens: inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens,
+  };
+}
+
+function addUsage(target, source) {
+  target.inputTokens += source.inputTokens;
+  target.outputTokens += source.outputTokens;
+  target.cacheWriteTokens += source.cacheWriteTokens;
+  target.cacheReadTokens += source.cacheReadTokens;
+  target.totalTokens += source.totalTokens;
+}
+
+function messageTimestamp(message, fallback) {
+  const timestamp = typeof message?.timestamp === 'number'
+    ? message.timestamp
+    : Date.parse(message?.timestamp || '');
+  return Number.isFinite(timestamp) ? timestamp : fallback;
+}
+
+function dateKey(timestamp) {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+const DEFAULT_CLAUDE_PRICING = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 };
+const CLAUDE_PRICING = [
+  ['claude-opus-4-8', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
+  ['claude-opus-4-7', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
+  ['claude-opus-4-6', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
+  ['claude-opus-4-5', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
+  ['claude-opus-4-1', { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }],
+  ['claude-opus-4', { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }],
+  ['claude-fable-5', { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }],
+  ['claude-sonnet-4-6', DEFAULT_CLAUDE_PRICING],
+  ['claude-sonnet-5', DEFAULT_CLAUDE_PRICING],
+  ['claude-sonnet-4-5', { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3, tier: [6, 22.5, 7.5, 0.6] }],
+  ['claude-sonnet-4', { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3, tier: [6, 22.5, 7.5, 0.6] }],
+  ['claude-haiku-4-5', { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }],
+  ['claude-haiku-4', { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }],
+];
+
+function pricingForModel(model) {
+  const raw = typeof model === 'string' && model.trim() ? model.toLowerCase() : 'claude-sonnet-4-6';
+  const claudeIndex = raw.indexOf('claude-');
+  const normalized = claudeIndex >= 0 ? raw.slice(claudeIndex) : raw;
+  return CLAUDE_PRICING.find(([prefix]) => normalized.startsWith(prefix))?.[1] || DEFAULT_CLAUDE_PRICING;
+}
+
+function usageCost(usage, model) {
+  const pricing = pricingForModel(model);
+  const requestTokens = usage.inputTokens + usage.outputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
+  const rates = requestTokens > 200_000 && pricing.tier
+    ? { input: pricing.tier[0], output: pricing.tier[1], cacheWrite: pricing.tier[2], cacheRead: pricing.tier[3] }
+    : pricing;
+  return (
+    (usage.inputTokens * rates.input)
+    + (usage.outputTokens * rates.output)
+    + (usage.cacheWriteTokens * rates.cacheWrite)
+    + (usage.cacheReadTokens * rates.cacheRead)
+  ) / 1_000_000;
 }
 
 export class DesktopSessionService {
@@ -95,6 +190,60 @@ export class DesktopSessionService {
 
   claudeProjectDir() {
     return claudeProjectSessionsDir({ homeDir: this.homeDir, cwd: this.cwd });
+  }
+
+  async listClaudeProjectDirectories() {
+    const projectsRoot = claudeProjectsRoot(this.homeDir);
+    try {
+      const entries = await fs.readdir(projectsRoot, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(projectsRoot, entry.name));
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  async listClaudeUsageSessions() {
+    const sessions = [];
+    for (const claudeDir of await this.listClaudeProjectDirectories()) {
+      let entries;
+      try {
+        entries = await fs.readdir(claudeDir, { withFileTypes: true });
+      } catch (error) {
+        if (error.code === 'ENOENT') continue;
+        throw error;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+        const sessionId = path.basename(entry.name, '.jsonl');
+        try {
+          sessionFile(this.sessionsDir, sessionId);
+        } catch {
+          continue;
+        }
+
+        const filePath = path.join(claudeDir, entry.name);
+        let stat;
+        try {
+          stat = await fs.stat(filePath);
+        } catch (error) {
+          if (error.code === 'ENOENT') continue;
+          throw error;
+        }
+        sessions.push({
+          session: {
+            id: sessionId,
+            title: `Session ${sessionId.slice(0, 8)}`,
+            updatedAt: stat.mtimeMs,
+          },
+          claudeProjectDir: claudeDir,
+        });
+      }
+    }
+    return sessions;
   }
 
   async syncWithClaude(options = {}) {
@@ -183,6 +332,10 @@ export class DesktopSessionService {
       title: session.title ?? existing?.title ?? `Session ${session.id.slice(0, 8)}`,
       updatedAt: session.updatedAt ?? existing?.updatedAt ?? Date.now(),
     };
+    const isFavorite = session.isFavorite ?? existing?.isFavorite;
+    const favoritedAt = session.favoritedAt ?? existing?.favoritedAt;
+    if (isFavorite !== undefined) entry.isFavorite = Boolean(isFavorite);
+    if (favoritedAt !== undefined && Number.isFinite(favoritedAt)) entry.favoritedAt = favoritedAt;
 
     if (existingIndex >= 0) index.splice(existingIndex, 1);
     index.unshift(entry);
@@ -195,6 +348,159 @@ export class DesktopSessionService {
     return { type: 'session_list', sessions: synced.sessions, deletedSessionIds: synced.deletedSessionIds };
   }
 
+  async getUsageStatistics(options = {}) {
+    const scope = options.scope === USAGE_SCOPE_ALL ? USAGE_SCOPE_ALL : USAGE_SCOPE_CURRENT;
+    const dateRange = options.dateRange === '7d' || options.dateRange === '30d'
+      ? options.dateRange
+      : 'all';
+    const sessionEntries = scope === USAGE_SCOPE_ALL
+      ? await this.listClaudeUsageSessions()
+      : (await this.getSessions(options)).sessions.map((session) => ({
+        session,
+        claudeProjectDir: this.claudeProjectDir(),
+      }));
+    const totalUsage = emptyUsage();
+    const sessions = [];
+    const daily = new Map();
+    const modelUsage = new Map();
+    const now = Date.now();
+    const cutoffTime = dateRange === 'all'
+      ? 0
+      : now - (dateRange === '30d' ? 30 : 7) * 24 * 60 * 60 * 1000;
+    const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const twoWeeksAgo = now - 14 * 24 * 60 * 60 * 1000;
+    const currentWeek = { sessions: 0, cost: 0, tokens: 0 };
+    const lastWeek = { sessions: 0, cost: 0, tokens: 0 };
+
+    for (const { session, claudeProjectDir } of sessionEntries) {
+      const history = scope === USAGE_SCOPE_ALL
+        ? { messages: await readClaudeSessionMessages({ claudeProjectDir, sessionId: session.id }) }
+        : await this.loadSession(session.id);
+      if (scope === USAGE_SCOPE_ALL && session.title.startsWith('Session ')) {
+        session.title = titleFromMessages(history.messages, session.title);
+      }
+      const sessionUsage = emptyUsage();
+      let sessionTimestamp = 0;
+      let sessionCost = 0;
+      let usageCount = 0;
+      let sessionModel = null;
+      const seenUsageMessageIds = new Set();
+      const usageRecords = [];
+
+      for (const message of history.messages || []) {
+        // Claude JSONL repeats one assistant usage payload for every content
+        // block. ccgui counts one payload per assistant message.id.
+        if (message?.role && message.role !== 'assistant') continue;
+        const usageMessageId = message?.usageMessageId || message?.messageId || message?.id || message?.uuid;
+        if (usageMessageId && seenUsageMessageIds.has(usageMessageId)) continue;
+        const usage = usageFromMessage(message);
+        if (!usage) continue;
+        if (usageMessageId) seenUsageMessageIds.add(usageMessageId);
+        const timestamp = messageTimestamp(message, session.updatedAt || now);
+        sessionTimestamp = sessionTimestamp === 0 ? timestamp : Math.min(sessionTimestamp, timestamp);
+        const messageModel = typeof message.model === 'string' && message.model.trim()
+          ? message.model.trim()
+          : sessionModel || DEFAULT_CLAUDE_MODEL;
+        if (!sessionModel && message.model) sessionModel = messageModel;
+        addUsage(sessionUsage, usage);
+        usageCount += 1;
+        const messageCost = usageCost(usage, messageModel);
+        sessionCost += messageCost;
+        usageRecords.push({ timestamp, usage, cost: messageCost, model: messageModel });
+      }
+
+      if (usageCount === 0) continue;
+      if (cutoffTime > 0 && sessionTimestamp < cutoffTime) continue;
+
+      for (const record of usageRecords) {
+        addUsage(totalUsage, record.usage);
+        const key = dateKey(record.timestamp);
+        const day = daily.get(key) || { date: key, sessions: 0, usage: emptyUsage(), cost: 0, modelsUsed: new Set() };
+        addUsage(day.usage, record.usage);
+        day.cost += record.cost;
+        if (record.model) day.modelsUsed.add(record.model);
+        daily.set(key, day);
+      }
+
+      const sessionDate = dateKey(sessionTimestamp || session.updatedAt || now);
+      const day = daily.get(sessionDate);
+      if (day) day.sessions += 1;
+
+      const resolvedSessionModel = sessionModel || DEFAULT_CLAUDE_MODEL;
+      const model = modelUsage.get(resolvedSessionModel) || {
+        model: resolvedSessionModel,
+        totalCost: 0,
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        sessionCount: 0,
+      };
+      model.totalCost += sessionCost;
+      model.totalTokens += sessionUsage.totalTokens;
+      model.inputTokens += sessionUsage.inputTokens;
+      model.outputTokens += sessionUsage.outputTokens;
+      model.cacheCreationTokens += sessionUsage.cacheWriteTokens;
+      model.cacheReadTokens += sessionUsage.cacheReadTokens;
+      model.sessionCount += 1;
+      modelUsage.set(resolvedSessionModel, model);
+
+      const week = sessionTimestamp > oneWeekAgo
+        ? currentWeek
+        : sessionTimestamp > twoWeeksAgo ? lastWeek : null;
+      if (week) {
+        week.sessions += 1;
+        week.cost += sessionCost;
+        week.tokens += sessionUsage.totalTokens;
+      }
+
+      sessions.push({
+        sessionId: session.id,
+        timestamp: sessionTimestamp || session.updatedAt || now,
+        model: resolvedSessionModel,
+        usage: sessionUsage,
+        cost: sessionCost,
+        summary: session.title,
+      });
+    }
+
+    const dailyUsage = [...daily.values()]
+      .map(day => ({ ...day, modelsUsed: [...day.modelsUsed] }))
+      .sort((left, right) => left.date.localeCompare(right.date));
+
+    const trend = (current, previous) => previous === 0 ? 0 : ((current - previous) / previous) * 100;
+    const totalSessions = sessions.length;
+
+    return {
+      type: 'usage_statistics',
+      scope,
+      dateRange,
+      projectPath: scope === USAGE_SCOPE_ALL ? 'all' : this.cwd,
+      projectName: scope === USAGE_SCOPE_ALL ? 'All Projects' : path.basename(this.cwd),
+      totalSessions,
+      totalUsage,
+      estimatedCost: currentWeek.cost + lastWeek.cost + sessions
+        .filter(session => session.timestamp <= twoWeeksAgo)
+        .reduce((total, session) => total + session.cost, 0),
+      sessions,
+      dailyUsage,
+      weeklyComparison: {
+        currentWeek,
+        lastWeek,
+        trends: {
+          sessions: trend(currentWeek.sessions, lastWeek.sessions),
+          cost: trend(currentWeek.cost, lastWeek.cost),
+          tokens: trend(currentWeek.tokens, lastWeek.tokens),
+        },
+      },
+      byModel: [...modelUsage.values()]
+        .filter(model => model.totalTokens > 0)
+        .sort((left, right) => right.totalCost - left.totalCost),
+      lastUpdated: now,
+    };
+  }
+
   async loadSession(sessionId) {
     const projectIndex = await this.readProjectIndex();
     if (!projectIndex.some((session) => session.id === sessionId)) {
@@ -202,6 +508,19 @@ export class DesktopSessionService {
     }
 
     let messages;
+    const claudeHistoryFile = path.join(this.claudeProjectDir(), `${sessionId}.jsonl`);
+    if (await fileExists(claudeHistoryFile)) {
+      // Claude JSONL is the source of truth used by ccgui. The ccnexus cache
+      // remains a fallback for sessions that have no readable Claude history.
+      messages = await readClaudeSessionMessages({
+        claudeProjectDir: this.claudeProjectDir(),
+        sessionId,
+      });
+      if (messages.length > 0) {
+        return { type: 'session_history', sessionId, messages };
+      }
+    }
+
     try {
       messages = JSON.parse(await fs.readFile(sessionFile(this.sessionsDir, sessionId), 'utf8'));
     } catch (error) {
@@ -245,11 +564,42 @@ export class DesktopSessionService {
     return { type: 'session_renamed', session_id: sessionId, title: title.trim() };
   }
 
+  async toggleFavoriteSession(sessionId) {
+    const index = await this.readProjectIndex();
+    const session = index.find((entry) => entry.id === sessionId);
+    if (!session) throw new Error('Session not found');
+
+    const isFavorite = !Boolean(session.isFavorite);
+    const nextIndex = index.map((entry) => {
+      if (entry.id !== sessionId) return entry;
+      const next = { ...entry, isFavorite };
+      if (isFavorite) next.favoritedAt = Date.now();
+      else delete next.favoritedAt;
+      return next;
+    });
+    await this.writeProjectIndex(nextIndex);
+    const updated = nextIndex.find((entry) => entry.id === sessionId);
+    return {
+      type: 'session_favorite_changed',
+      sessionId,
+      isFavorite,
+      favoritedAt: updated?.favoritedAt,
+    };
+  }
+
   async deleteSession(sessionId) {
     const messageFile = sessionFile(this.sessionsDir, sessionId);
+    const claudeHistoryFile = path.join(this.claudeProjectDir(), `${sessionId}.jsonl`);
     const index = await this.readProjectIndex();
     try {
       await fs.unlink(messageFile);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    try {
+      // Claude JSONL is the authoritative history source. Delete it together
+      // with the ccNexus index so a later sync does not resurrect the session.
+      await fs.unlink(claudeHistoryFile);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }

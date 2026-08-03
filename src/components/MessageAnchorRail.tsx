@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { MouseEvent } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 import { MessageSquare, Bot, User, Code, Lightbulb, Info } from 'lucide-react';
 import type { ChatMessage, MessageAnchor } from '../types';
 
@@ -9,6 +9,10 @@ interface Props {
   showToolAnchors?: boolean;
 }
 
+interface PositionedAnchor extends MessageAnchor {
+  position: number;
+}
+
 interface TooltipState {
   idx: number;
   top: number;
@@ -16,83 +20,89 @@ interface TooltipState {
   timestamp: number;
 }
 
-function getAnchors(messages: ChatMessage[], showToolAnchors: boolean): MessageAnchor[] {
+function getText(message: ChatMessage) {
+  const text = message.content.find(block => block.type === 'text');
+  return text?.type === 'text' ? text.text : '';
+}
+
+/**
+ * ccgui's rail is a compact conversation navigator: user messages are the
+ * default anchors, while tool/thinking nodes are opt-in detail anchors.
+ * Positions are distributed against the rail track instead of stacking in a
+ * scrollable overlay, so the rail remains stable while message bubbles grow.
+ */
+function getAnchors(messages: ChatMessage[], showToolAnchors: boolean): PositionedAnchor[] {
   const anchors: MessageAnchor[] = [];
-  
-  messages.forEach((msg, idx) => {
-    if (msg.role === 'user') {
-      const text = msg.content.find(b => b.type === 'text');
-      const label = text ? (text as { type: 'text'; text: string }).text.slice(0, 30) : '用户消息';
+
+  messages.forEach(message => {
+    if (message.role === 'user') {
       anchors.push({
-        messageId: msg.id,
-        label,
-        timestamp: msg.timestamp,
+        messageId: message.id,
+        label: getText(message).slice(0, 300) || 'User message',
+        timestamp: message.timestamp,
         role: 'user',
         kind: 'user_message',
       });
-    } else if (msg.role === 'assistant') {
-      // Add anchor for first text block
-      const textBlock = msg.content.find(b => b.type === 'text');
-      if (textBlock) {
-        const text = (textBlock as { type: 'text'; text: string }).text;
-        const label = text.slice(0, 30) || '助手回复';
-        anchors.push({
-          messageId: msg.id,
-          label,
-          timestamp: msg.timestamp,
-          role: 'assistant',
-          kind: 'assistant_text',
-        });
-      }
-      
-      // Add anchors for tool calls
-      msg.content.forEach(block => {
-        if (!showToolAnchors) return;
-        if (block.type === 'tool_use') {
-          const toolBlock = block as { type: 'tool_use'; name: string; id: string };
-          anchors.push({
-            messageId: msg.id,
-            label: `${toolBlock.name}`,
-            timestamp: msg.timestamp,
-            role: 'assistant',
-            kind: 'tool_call',
-          });
-        } else if (block.type === 'thinking') {
-          anchors.push({
-            messageId: msg.id,
-            label: '思考过程',
-            timestamp: msg.timestamp,
-            role: 'assistant',
-            kind: 'thinking',
-          });
-        }
-      });
-    } else if (msg.role === 'system') {
-      if (!showToolAnchors) return;
-      const text = msg.content.find(b => b.type === 'text');
-      const label = text ? (text as { type: 'text'; text: string }).text.slice(0, 30) : '系统消息';
+      return;
+    }
+
+    if (!showToolAnchors || message.role !== 'assistant') return;
+    const text = getText(message);
+    if (text) {
       anchors.push({
-        messageId: msg.id,
-        label,
-        timestamp: msg.timestamp,
-        role: 'system',
-        kind: 'system',
+        messageId: message.id,
+        label: text.slice(0, 300),
+        timestamp: message.timestamp,
+        role: 'assistant',
+        kind: 'assistant_text',
       });
     }
+    message.content.forEach(block => {
+      if (block.type === 'tool_use') {
+        anchors.push({
+          messageId: message.id,
+          label: block.name,
+          timestamp: message.timestamp,
+          role: 'assistant',
+          kind: 'tool_call',
+        });
+      } else if (block.type === 'thinking') {
+        anchors.push({
+          messageId: message.id,
+          label: 'Thinking process',
+          timestamp: message.timestamp,
+          role: 'assistant',
+          kind: 'thinking',
+        });
+      }
+    });
   });
-  
-  return anchors;
+
+  // ccgui hides the rail until there are at least two conversation anchors.
+  // A lone dot adds noise and can sit on top of the only user bubble.
+  if (anchors.length <= 1) return [];
+  return anchors.map((anchor, index) => ({
+    ...anchor,
+    position: anchors.length === 1
+      ? 0.5
+      : 0.04 + (index / (anchors.length - 1)) * 0.92,
+  }));
 }
 
 function getAnchorIcon(kind: MessageAnchor['kind']) {
   switch (kind) {
-    case 'user_message': return <User size={12} />;
-    case 'assistant_text': return <MessageSquare size={12} />;
-    case 'tool_call': return <Code size={12} />;
-    case 'thinking': return <Lightbulb size={12} />;
-    case 'system': return <Info size={12} />;
-    default: return <Bot size={12} />;
+    case 'user_message': return <User size={10} />;
+    case 'assistant_text': return <MessageSquare size={10} />;
+    case 'tool_call': return <Code size={10} />;
+    case 'thinking': return <Lightbulb size={10} />;
+    case 'system': return <Info size={10} />;
+    default: return <Bot size={10} />;
   }
+}
+
+function scrollToMessage(messageId: string) {
+  const node = document.getElementById(`msg-${messageId}`);
+  node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 export default function MessageAnchorRail({ messages, onAnchorClick, showToolAnchors = false }: Props) {
@@ -101,34 +111,49 @@ export default function MessageAnchorRail({ messages, onAnchorClick, showToolAnc
 
   if (anchors.length === 0) return null;
 
-  const showTooltip = (anchor: MessageAnchor, idx: number, event: MouseEvent<HTMLDivElement>) => {
+  const showTooltip = (anchor: PositionedAnchor, idx: number, event: MouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const centerY = rect.top + rect.height / 2;
-    const top = Math.min(Math.max(centerY, 28), window.innerHeight - 28);
     setTooltipState({
       idx,
-      top,
+      top: Math.min(Math.max(centerY, 28), window.innerHeight - 28),
       label: anchor.label,
       timestamp: anchor.timestamp,
     });
   };
 
+  const activateAnchor = (anchor: PositionedAnchor) => {
+    onAnchorClick(anchor.messageId);
+    scrollToMessage(anchor.messageId);
+  };
+
+  const handleKeyDown = (anchor: PositionedAnchor, event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    activateAnchor(anchor);
+  };
+
   return (
-    <div className="anchor-rail">
-      <div className="anchor-rail-track">
-        {anchors.map((anchor, idx) => (
-          <div
-            key={`${anchor.messageId}-${idx}`}
-            className={`anchor-dot anchor-${anchor.kind} ${tooltipState?.idx === idx ? 'hovered' : ''}`}
-            onMouseEnter={(event) => showTooltip(anchor, idx, event)}
-            onMouseLeave={() => setTooltipState(null)}
-            onClick={() => onAnchorClick(anchor.messageId)}
-            aria-label={anchor.label}
-          >
-            {getAnchorIcon(anchor.kind)}
-          </div>
-        ))}
-      </div>
+    <div className="anchor-rail" role="navigation" aria-label="Message anchors">
+      <div className="anchor-rail-track" aria-hidden="true" />
+      {anchors.map((anchor, idx) => (
+        <div
+          key={`${anchor.messageId}-${anchor.kind}-${idx}`}
+          className={`anchor-dot anchor-${anchor.kind} ${tooltipState?.idx === idx ? 'hovered' : ''}`}
+          style={{ top: `${anchor.position * 100}%` }}
+          role="button"
+          tabIndex={0}
+          onMouseEnter={(event) => showTooltip(anchor, idx, event)}
+          onMouseLeave={() => setTooltipState(null)}
+          onFocus={(event) => showTooltip(anchor, idx, event as unknown as MouseEvent<HTMLDivElement>)}
+          onBlur={() => setTooltipState(null)}
+          onKeyDown={(event) => handleKeyDown(anchor, event)}
+          onClick={() => activateAnchor(anchor)}
+          aria-label={anchor.label}
+        >
+          {getAnchorIcon(anchor.kind)}
+        </div>
+      ))}
       {tooltipState && (
         <div className="anchor-tooltip" style={{ top: tooltipState.top }}>
           <span className="anchor-tooltip-label">{tooltipState.label}</span>

@@ -53,6 +53,16 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     runtime.unregisterChannel({ sessionId, query });
   }
 
+  async function stopOwnedQuery(sessionId) {
+    const query = ownedQueries.get(sessionId);
+    if (!query) return false;
+    try { await query.interrupt(); } catch { /* ignore */ }
+    try { query.close(); } catch { /* ignore */ }
+    unregisterActiveQuery(sessionId, query);
+    if (currentSessionId === sessionId) currentSessionId = null;
+    return true;
+  }
+
   function forgetSessionState(sessionId) {
     sessionMessages.delete(sessionId);
     fileEditHistory.delete(sessionId);
@@ -60,7 +70,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     runtime.removeSessionDaemon(sessionId);
   }
 
-  function requestPermissionFromRenderer(emit, toolName, input, options) {
+  function requestPermissionFromRenderer(emit, toolName, input, options, sessionId) {
     const requestId = createPendingId();
     return new Promise((resolve) => {
       pendingPermissions.set(requestId, { resolve, toolName, input });
@@ -68,6 +78,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         requestId,
         toolName,
         input,
+        sessionId,
         title: options?.title || `Allow ${toolName}?`,
         displayName: options?.displayName || toolName,
       }));
@@ -79,9 +90,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     });
   }
 
-  function createPermissionHandler(emit) {
+  function createPermissionHandler(emit, getSessionId) {
     const policy = createPermissionPolicy({
-      askUser: (toolName, input, options) => requestPermissionFromRenderer(emit, toolName, input, options),
+      askUser: (toolName, input, options) => requestPermissionFromRenderer(emit, toolName, input, options, getSessionId?.()),
     });
     return policy.canUseTool;
   }
@@ -102,9 +113,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       sessionId,
       timestamp: Date.now(),
     };
-    const messages = await loadMessages(sessionId);
-    messages.push(userMessage);
     await sessions.appendMessage(sessionId, userMessage);
+    sessionMessages.delete(sessionId);
+    await loadMessages(sessionId);
   }
 
   async function recordAssistantMessage(sessionId, assistantMessage) {
@@ -113,9 +124,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       role: 'assistant',
       timestamp: Date.now(),
     };
-    const messages = await loadMessages(sessionId);
-    messages.push(message);
     await sessions.appendMessage(sessionId, message);
+    sessionMessages.delete(sessionId);
+    await loadMessages(sessionId);
   }
 
   async function rememberEditableFile(sessionId, block) {
@@ -123,6 +134,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     const filePath = block.input?.file_path || block.input?.path;
     const absPath = filePath && workspaceFiles.safePath(filePath);
     if (!absPath) return;
+    if (workspaceFiles.isProtectedWorkspacePath?.(absPath)) return;
     if (!fileEditHistory.has(sessionId)) fileEditHistory.set(sessionId, new Map());
     const history = fileEditHistory.get(sessionId);
     if (history.has(absPath)) return;
@@ -145,13 +157,13 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       prompt += '\n\n[User attached images]';
     }
 
-    const canUseTool = createPermissionHandler(emit);
+    const canUseTool = createPermissionHandler(emit, () => querySessionId);
     const { currentEnv } = await localConfig.getProviders();
     const queryEnv = { ...process.env, ...(currentEnv || {}) };
     const effectiveClientOptions = await buildClaudeClientOptions({
       cwd: workspaceFiles.getWorkspace().cwd,
       clientOptions,
-      loadAgent: (name) => localConfig.getAgent(name),
+      loadAgent: (name) => localConfig.getAgent(name, workspaceFiles.getWorkspace().cwd),
     });
     const modelForUsage = clientOptions?.model && clientOptions.model !== 'default'
       ? clientOptions.model
@@ -164,7 +176,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     });
     if (querySessionId) queryOpts.resume = querySessionId;
 
-    emitSafe(emit, { type: 'status', status: 'thinking' });
+    emitSafe(emit, { type: 'status', status: 'thinking', sessionId: querySessionId });
 
     let query;
     try {
@@ -187,7 +199,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
             usage,
             provider: 'claude',
             model: modelForUsage,
-            sessionId: querySessionId,
+            sessionId: event.session_id || querySessionId,
           }));
         }
 
@@ -214,13 +226,13 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
               emitSafe(emit, sessionEvent(querySessionId));
               await recordUserMessage(querySessionId, prompt);
             }
-            emitSafe(emit, { type: 'system', subtype: event.subtype, sessionId: event.session_id });
+            emitSafe(emit, { type: 'system', subtype: event.subtype, sessionId: event.session_id || querySessionId });
             break;
           }
 
           case 'stream_event':
             assistantTurn.addStreamEvent(event.event);
-            emitSafe(emit, streamEvent(event.event, event.session_id, event.uuid));
+            emitSafe(emit, streamEvent(event.event, event.session_id || querySessionId, event.uuid));
             break;
 
           case 'assistant':
@@ -232,8 +244,8 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
             for (const result of extractToolResults(event.message)) {
               assistantTurn.addToolResult(result);
               emitSafe(emit, {
-                ...result,
-                sessionId: event.session_id,
+              ...result,
+                sessionId: event.session_id || querySessionId,
                 uuid: event.uuid,
               });
             }
@@ -259,9 +271,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
               cost: event.total_cost_usd,
               turns: event.num_turns,
               is_error: event.is_error,
-              sessionId: event.session_id,
+              sessionId: finalSessionId,
             });
-            emitSafe(emit, { type: 'status', status: 'idle' });
+            emitSafe(emit, { type: 'status', status: 'idle', sessionId: finalSessionId });
             break;
           }
 
@@ -271,7 +283,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
               toolName: event.tool_name,
               toolUseId: event.tool_use_id,
               elapsed: event.elapsed_time_seconds,
-              sessionId: event.session_id,
+              sessionId: event.session_id || querySessionId,
             });
             break;
 
@@ -280,13 +292,13 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
               type: 'tool_use_summary',
               summary: event.summary,
               precedingIds: event.preceding_tool_use_ids,
-              sessionId: event.session_id,
+              sessionId: event.session_id || querySessionId,
             });
             break;
 
           default:
             if (event.type && event.type !== 'system') {
-              emitSafe(emit, { type: 'sdk_event', sdkType: event.type, sessionId: event.session_id });
+              emitSafe(emit, { type: 'sdk_event', sdkType: event.type, sessionId: event.session_id || querySessionId });
             }
             break;
         }
@@ -302,11 +314,33 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       }
       emitSafe(emit, invalidSessionId
         ? staleSessionErrorEvent(messageText, invalidSessionId)
-        : { type: 'error', message: messageText });
-      emitSafe(emit, { type: 'status', status: 'idle' });
+        : { type: 'error', message: messageText, sessionId: querySessionId });
+      emitSafe(emit, { type: 'status', status: 'idle', sessionId: querySessionId });
     } finally {
       if (querySessionId) unregisterActiveQuery(querySessionId, query);
     }
+  }
+
+  async function getContextUsage({ sessionId = null, model = 'default' } = {}) {
+    const workspace = workspaceFiles.getWorkspace();
+    const { currentEnv } = await localConfig.getProviders();
+    const queryEnv = { ...process.env, ...(currentEnv || {}) };
+    const clientOptions = await buildClaudeClientOptions({
+      cwd: workspace.cwd,
+      clientOptions: { model },
+      loadAgent: (name) => localConfig.getAgent(name, workspace.cwd),
+    });
+    const queryOptions = buildClaudeQueryOptions({
+      cwd: workspace.cwd,
+      env: queryEnv,
+      clientOptions,
+    });
+    if (sessionId) queryOptions.resume = sessionId;
+    return runtime.getContextUsage({
+      sessionId,
+      title: 'Context usage',
+      options: queryOptions,
+    });
   }
 
   async function handle(message, emit) {
@@ -329,20 +363,18 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
 
       case 'abort': {
         const sessionId = message.sessionId || currentSessionId;
-        const query = ownedQueries.get(sessionId);
-        if (query) {
-          try { await query.interrupt(); } catch { /* ignore */ }
-          try { query.close(); } catch { /* ignore */ }
-          unregisterActiveQuery(sessionId, query);
-        }
-        emitSafe(emit, { type: 'status', status: 'idle' });
+        await stopOwnedQuery(sessionId);
+        emitSafe(emit, { type: 'status', status: 'idle', sessionId });
         break;
       }
 
-      case 'new_session':
+      case 'new_session': {
+        const previousSessionId = currentSessionId;
+        if (previousSessionId) await stopOwnedQuery(previousSessionId);
         currentSessionId = null;
         emitSafe(emit, { type: 'status', status: 'idle' });
         break;
+      }
 
       case 'rewind': {
         const targetSessionId = message.sessionId || currentSessionId;
@@ -358,7 +390,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         }
         const truncated = messages.slice(0, targetIndex + 1);
         sessionMessages.set(targetSessionId, truncated);
-        emitSafe(emit, { type: 'rewind_complete', messages: truncated });
+        emitSafe(emit, { type: 'rewind_complete', sessionId: targetSessionId, messages: truncated });
         break;
       }
 
@@ -383,21 +415,21 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       case 'undo_file': {
         const targetSessionId = message.sessionId || currentSessionId;
         const absPath = workspaceFiles.safePath(message.filePath);
-        if (!absPath) {
-          emitSafe(emit, { type: 'undo_complete', success: false, error: 'Access denied' });
+        if (!absPath || workspaceFiles.isProtectedWorkspacePath?.(absPath)) {
+          emitSafe(emit, { type: 'undo_complete', sessionId: targetSessionId, success: false, error: 'Access denied' });
           break;
         }
         const history = targetSessionId ? fileEditHistory.get(targetSessionId) : null;
         if (!history || !history.has(absPath)) {
-          emitSafe(emit, { type: 'undo_complete', success: false, error: 'No original content found' });
+          emitSafe(emit, { type: 'undo_complete', sessionId: targetSessionId, success: false, error: 'No original content found' });
           break;
         }
         try {
           await fs.writeFile(absPath, history.get(absPath), 'utf-8');
           history.delete(absPath);
-          emitSafe(emit, { type: 'undo_complete', success: true, filePath: message.filePath });
+          emitSafe(emit, { type: 'undo_complete', sessionId: targetSessionId, success: true, filePath: message.filePath });
         } catch (error) {
-          emitSafe(emit, { type: 'undo_complete', success: false, error: normalizeError(error) });
+          emitSafe(emit, { type: 'undo_complete', sessionId: targetSessionId, success: false, error: normalizeError(error) });
         }
         break;
       }
@@ -419,9 +451,45 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     pendingUserQuestions.clear();
   }
 
+  // A persistent SDK runtime keeps the provider environment it was created
+  // with. ccgui tears down that runtime before switching providers so the next
+  // turn starts with fresh credentials, model routing, and cache state.
+  function resetForProviderChange() {
+    dispose();
+    currentSessionId = null;
+    latestChatRequest += 1;
+    sessionMessages.clear();
+    fileEditHistory.clear();
+    runtime.shutdown();
+  }
+
+  // A workspace owns its Claude project history and daemon cwd. Match ccgui's
+  // session transition boundary before the runtime is pointed at another
+  // directory so late events from the old project cannot enter the new chat.
+  function resetForWorkspaceChange() {
+    dispose();
+    currentSessionId = null;
+    latestChatRequest += 1;
+    sessionMessages.clear();
+    fileEditHistory.clear();
+  }
+
+  async function abortSession(sessionId) {
+    if (!sessionId) return false;
+    return await stopOwnedQuery(sessionId);
+  }
+
   function getActiveSessionIds() {
     return [...ownedQueries.keys()];
   }
 
-  return { handle, dispose, getActiveSessionIds };
+  return {
+    handle,
+    getContextUsage,
+    dispose,
+    resetForProviderChange,
+    resetForWorkspaceChange,
+    abortSession,
+    getActiveSessionIds,
+  };
 }

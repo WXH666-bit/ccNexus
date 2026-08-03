@@ -81,6 +81,8 @@ export type ContentBlock =
 // ── Chat message ────────────────────────────────────────────────
 export interface ChatMessage {
   id: string;
+  /** Inner Claude API message.id used to deduplicate repeated JSONL blocks. */
+  usageMessageId?: string;
   role: 'user' | 'assistant' | 'system';
   content: ContentBlock[];
   timestamp: number;
@@ -99,6 +101,7 @@ export interface Session {
   title: string;
   updatedAt: number;
   isFavorite?: boolean;
+  favoritedAt?: number;
   messageCount?: number;
   summary?: string;
 }
@@ -106,25 +109,29 @@ export interface Session {
 // ─── Desktop chat event types ────────────────────────────────────
 export type DesktopChatEvent =
   | { type: 'session'; sessionId: string }
+  | { type: 'system'; subtype?: string; sessionId?: string }
   | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
-  | { type: 'assistant'; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; cost?: number; duration?: number; turns?: number } }
+  | { type: 'assistant'; sessionId?: string; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; session_id?: string; cost?: number; duration?: number; turns?: number } }
   | { type: 'usage_update'; sessionId?: string; percentage: number; totalTokens: number; limit: number; usedTokens: number; maxTokens: number }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
-  | { type: 'tool_progress'; tool_name: string; tool_use_id: string; status: 'running' | 'completed' | 'error' }
-  | { type: 'permission_request'; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
-  | { type: 'status'; status: 'thinking' | 'idle' }
-  | { type: 'error'; message: string; invalidSessionId?: string }
+  | { type: 'tool_result'; sessionId?: string; uuid?: string; tool_use_id?: string; toolUseId?: string; content: string; is_error?: boolean }
+  | { type: 'tool_progress'; sessionId?: string; toolName?: string; tool_name?: string; toolUseId?: string; tool_use_id?: string; elapsed?: number; status?: 'running' | 'completed' | 'error' }
+  | { type: 'tool_use_summary'; sessionId?: string; summary?: string; precedingIds?: string[] }
+  | { type: 'permission_request'; sessionId?: string; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
+  | { type: 'status'; sessionId?: string; status: 'thinking' | 'idle' }
+  | { type: 'sdk_event'; sdkType?: string; sessionId?: string }
+  | { type: 'error'; sessionId?: string; message: string; invalidSessionId?: string }
   | { type: 'result'; subtype: string; duration?: number; cost?: number; turns?: number; is_error?: boolean; sessionId?: string }
   | { type: 'session_list'; sessions: Session[]; deletedSessionIds?: string[] }
   | { type: 'session_history'; sessionId: string; messages: ChatMessage[] }
   | { type: 'session_created'; session: Session }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_renamed'; session_id: string; title: string }
-  | { type: 'rewind_complete'; messages: ChatMessage[] }
-  | { type: 'plan_approval'; plan: PlanApprovalRequest }
-  | { type: 'ask_user_question'; question: AskUserQuestionRequest }
-  | { type: 'subagent_update'; agents: SubAgentInfo[] }
-  | { type: 'undo_complete'; success: boolean; filePath?: string; error?: string };
+  | { type: 'session_favorite_changed'; sessionId: string; isFavorite: boolean; favoritedAt?: number }
+  | { type: 'rewind_complete'; sessionId?: string; messages: ChatMessage[] }
+  | { type: 'plan_approval'; sessionId?: string; plan: PlanApprovalRequest }
+  | { type: 'ask_user_question'; sessionId?: string; question: AskUserQuestionRequest }
+  | { type: 'subagent_update'; sessionId?: string; agents: SubAgentInfo[] }
+  | { type: 'undo_complete'; sessionId?: string; success: boolean; filePath?: string; error?: string };
 
 // ─── Tool call card types ────────────────────────────────────────
 export interface EditFileData {

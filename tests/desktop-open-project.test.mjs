@@ -32,7 +32,7 @@ test('file explorer can open a desktop-selected project and refresh the tree', (
   const source = read('src/components/FileExplorer.tsx');
 
   assert.match(source, /desktopApi\.openProject/);
-  assert.match(source, /desktopApi\.setWorkspace/);
+  assert.doesNotMatch(source, /desktopApi\.setWorkspace/);
   assert.match(source, /void loadTree\(\)/);
   assert.match(source, /FolderPlus/);
 });
@@ -45,7 +45,8 @@ test('chat header exposes a top-level desktop open project action', () => {
   assert.match(header, /onOpenProject/);
   assert.match(chat, /handleOpenProject/);
   assert.match(chat, /desktopApi\.openProject/);
-  assert.match(chat, /setWorkspace\(project\.path\)/);
+  assert.match(chat, /handleWorkspaceChanged/);
+  assert.doesNotMatch(chat, /setWorkspace\(project\.path\)/);
   assert.match(chat, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\}/);
   assert.match(chat, /onOpenProject=\{handleOpenProject\}/);
 });

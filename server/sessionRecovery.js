@@ -6,5 +6,5 @@ export function isMissingClaudeConversationError(message) {
 
 /** Keeps invalidation data and the visible error in one desktop chat event. */
 export function staleSessionErrorEvent(message, invalidSessionId) {
-  return { type: 'error', message, invalidSessionId };
+  return { type: 'error', message, invalidSessionId, sessionId: invalidSessionId };
 }

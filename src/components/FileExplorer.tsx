@@ -168,7 +168,7 @@ export default function FileExplorer({ onWorkspaceChange }: FileExplorerProps) {
   const openProject = useCallback(async () => {
     if (dirty && !window.confirm('当前文件有未保存修改，确定切换项目吗？')) return;
     const desktopApi = window.ccNexusDesktop;
-    if (!desktopApi?.openProject || !desktopApi.setWorkspace) {
+    if (!desktopApi?.openProject) {
       setTreeError('打开项目只在桌面应用中可用');
       return;
     }
@@ -176,7 +176,7 @@ export default function FileExplorer({ onWorkspaceChange }: FileExplorerProps) {
     try {
       const project = await desktopApi.openProject();
       if (!project || project.canceled || !project.path) return;
-      const data = await desktopApi.setWorkspace(project.path);
+      const data = project;
 
       setSelectedFile(null);
       setFileMeta(null);

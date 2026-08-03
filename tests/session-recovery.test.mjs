@@ -20,6 +20,7 @@ test('includes the invalid local session id in the same error event', () => {
       type: 'error',
       message: 'No conversation found with session ID: stale-1',
       invalidSessionId: 'stale-1',
+      sessionId: 'stale-1',
     },
   );
 });

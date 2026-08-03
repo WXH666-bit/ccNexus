@@ -28,7 +28,11 @@ test('desktop main and preload expose session history IPC', () => {
   assert.match(main, /ipcMain\.handle\('desktop:get-sessions'/);
   assert.match(main, /ipcMain\.handle\('desktop:load-session'/);
   assert.match(main, /ipcMain\.handle\('desktop:rename-session'/);
+  assert.match(main, /ipcMain\.handle\('desktop:toggle-favorite-session'/);
   assert.match(main, /ipcMain\.handle\('desktop:delete-session'/);
+  assert.match(main, /async function switchWorkspace/);
+  assert.match(main, /chatController\.resetForWorkspaceChange\(\)/);
+  assert.match(main, /ipcMain\.handle\('desktop:get-usage-statistics',[\s\S]*args/);
   assert.match(preload, /getSessions:/);
   assert.match(preload, /loadSession:/);
   assert.match(preload, /renameSession:/);
@@ -49,6 +53,7 @@ test('client session api uses desktop IPC without a browser fallback', () => {
   assert.match(chat, /loadSession\(sessionId\)/);
   assert.match(history, /getSessions\(\)/);
   assert.match(history, /renameSession\(id, editValue\.trim\(\)\)/);
+  assert.match(history, /toggleFavoriteSession/);
   assert.match(history, /deleteSession\(id\)/);
 });
 
@@ -80,6 +85,13 @@ test('desktop session service lists, loads, renames and deletes persisted sessio
     const renamed = await service.renameSession('s1', 'Renamed');
     assert.deepEqual(renamed, { type: 'session_renamed', session_id: 's1', title: 'Renamed' });
     assert.equal((await service.getSessions()).sessions[0].title, 'Renamed');
+
+    const favorited = await service.toggleFavoriteSession('s1');
+    assert.equal(favorited.type, 'session_favorite_changed');
+    assert.equal(favorited.isFavorite, true);
+    assert.equal((await service.getSessions()).sessions[0].isFavorite, true);
+    await service.toggleFavoriteSession('s1');
+    assert.equal((await service.getSessions()).sessions[0].isFavorite, false);
 
     const deleted = await service.deleteSession('s1');
     assert.deepEqual(deleted, { type: 'session_deleted', sessionId: 's1' });
@@ -131,6 +143,38 @@ test('desktop session service syncs with Claude project JSONL history without to
     const imported = await service.loadSession('claude-only');
     assert.equal(imported.type, 'session_history');
     assert.equal(imported.messages[0].content[0].text, 'Imported from Claude history');
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop session service prefers the current Claude JSONL over stale ccnexus cache', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-desktop-refresh-history-'));
+  const cwd = path.join(homeDir, 'workspace');
+  const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
+  const claudeProjectDir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectPath(cwd));
+
+  try {
+    await mkdir(sessionsDir, { recursive: true });
+    await mkdir(claudeProjectDir, { recursive: true });
+    await writeProjectIndex(sessionsDir, cwd, [{ id: 'session-1', title: 'Current', updatedAt: 20 }]);
+    await writeFile(path.join(sessionsDir, 'session-1.json'), JSON.stringify([
+      { id: 'cached-message', role: 'user', content: [{ type: 'text', text: 'stale cache' }], timestamp: 10, sessionId: 'session-1' },
+    ]), 'utf8');
+    await writeFile(path.join(claudeProjectDir, 'session-1.jsonl'), JSON.stringify({
+      type: 'user',
+      uuid: 'claude-message',
+      timestamp: '2026-07-27T01:00:00.000Z',
+      sessionId: 'session-1',
+      message: { role: 'user', content: 'fresh Claude history' },
+    }), 'utf8');
+
+    const service = new DesktopSessionService({ homeDir, cwd });
+    const history = await service.loadSession('session-1');
+
+    assert.equal(history.messages.length, 1);
+    assert.equal(history.messages[0].content[0].text, 'fresh Claude history');
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -267,6 +311,35 @@ test('desktop session service isolates cached sessions by workspace when switchi
 
     service.setCwd(workspaceA);
     assert.deepEqual((await service.getSessions()).sessions.map((session) => session.id), ['session-a']);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop session deletion removes the authoritative Claude JSONL for the active workspace', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-delete-claude-history-'));
+  const cwd = path.join(homeDir, 'workspace');
+  const claudeProjectDir = path.join(homeDir, '.claude', 'projects', encodeClaudeProjectPath(cwd));
+
+  try {
+    await mkdir(claudeProjectDir, { recursive: true });
+    await writeFile(
+      path.join(claudeProjectDir, 'claude-session.jsonl'),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u1',
+        sessionId: 'claude-session',
+        message: { role: 'user', content: 'Delete me' },
+      }),
+      'utf8',
+    );
+
+    const service = new DesktopSessionService({ homeDir, cwd });
+    assert.deepEqual((await service.getSessions()).sessions.map((session) => session.id), ['claude-session']);
+    await service.deleteSession('claude-session');
+
+    assert.deepEqual((await service.getSessions()).sessions, []);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

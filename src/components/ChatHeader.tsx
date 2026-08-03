@@ -15,12 +15,13 @@ interface ChatHeaderProps {
   onSearchPrev?: () => void;
   onRewind?: () => void;
   onOpenProject?: () => void;
+  onOpenHistory?: () => void;
 }
 
 export default function ChatHeader({ 
   sessionTitle, onNewSession, onRenameSession,
   searchQuery, onSearchChange, searchResults, currentSearchIdx,
-  onSearchNext, onSearchPrev, onRewind, onOpenProject
+  onSearchNext, onSearchPrev, onRewind, onOpenProject, onOpenHistory
 }: ChatHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -148,7 +149,7 @@ export default function ChatHeader({
         <button
           className={`header-btn ${location.pathname.startsWith('/history') ? 'active' : ''}`}
           title="历史"
-          onClick={() => navigate('/history')}
+          onClick={() => onOpenHistory ? onOpenHistory() : navigate('/history')}
         >
           <History size={18} />
         </button>

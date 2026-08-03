@@ -52,16 +52,65 @@ function normalizeProvider(id, provider = {}, source = 'codemoss') {
   };
 }
 
+function isValidMcpServerConfig(serverConfig) {
+  if (!serverConfig || typeof serverConfig !== 'object') return false;
+  const hasCommand = typeof serverConfig.command === 'string' && serverConfig.command.length > 0;
+  const hasUrl = typeof serverConfig.url === 'string' && serverConfig.url.length > 0;
+  if (!hasCommand && !hasUrl) return false;
+  if (serverConfig.args !== undefined && !Array.isArray(serverConfig.args)) return false;
+  if (serverConfig.env !== undefined && (!serverConfig.env || typeof serverConfig.env !== 'object')) return false;
+  if (serverConfig.headers !== undefined && (!serverConfig.headers || typeof serverConfig.headers !== 'object')) return false;
+  return true;
+}
+
+function normalizeCwd(cwd) {
+  if (!cwd) return '';
+  return path.resolve(String(cwd));
+}
+
+function findProjectConfig(config, cwd) {
+  const normalizedCwd = normalizeCwd(cwd).replace(/\\/g, '/').replace(/\/$/, '');
+  const projects = config?.projects;
+  if (!normalizedCwd || !projects || typeof projects !== 'object') return null;
+  if (projects[normalizedCwd]) return projects[normalizedCwd];
+
+  for (const [projectPath, projectConfig] of Object.entries(projects)) {
+    if (projectPath.replace(/\\/g, '/').replace(/\/$/, '') === normalizedCwd) return projectConfig;
+  }
+  return null;
+}
+
+function redactMcpConfig(config) {
+  const visible = { ...config };
+  for (const key of ['env', 'headers']) {
+    if (!visible[key] || typeof visible[key] !== 'object') continue;
+    visible[key] = Object.fromEntries(Object.keys(visible[key]).map(name => [name, '***']));
+  }
+  return visible;
+}
+
+function frontmatterValue(content, key) {
+  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+  if (!match) return '';
+  const line = new RegExp(`^${key}:\\s*(.+)$`, 'im').exec(match[1]);
+  return line?.[1]?.trim().replace(/^['"]|['"]$/g, '') || '';
+}
+
 export class LocalConfigService {
   constructor({ homeDir = process.env.HOME || os.homedir() || '/tmp' } = {}) {
     this.homeDir = homeDir;
     this.ccSwitchDbPath = path.join(homeDir, '.cc-switch', 'cc-switch.db');
     this.codemossConfigPath = path.join(homeDir, '.codemoss', 'config.json');
     this.claudeDir = path.join(homeDir, '.claude');
+    this.claudeJsonPath = path.join(homeDir, '.claude.json');
     this.claudeSettingsPath = path.join(this.claudeDir, 'settings.json');
+    this.providerStatePath = path.join(homeDir, '.ccnexus', 'provider-state.json');
     this.agentsDir = path.join(this.claudeDir, 'agents');
     this.commandsDir = path.join(this.claudeDir, 'commands');
-    this.promptsDir = path.join(this.claudeDir, 'prompts');
+    // Claude prompt files are read-only. Prompt edits belong to ccNexus-owned
+    // storage so using the desktop UI never mutates Claude Code files.
+    this.claudePromptsDir = path.join(this.claudeDir, 'prompts');
+    this.promptsDir = path.join(this.homeDir, '.ccnexus', 'prompts');
   }
 
   async readCcSwitchProviders() {
@@ -139,10 +188,46 @@ export class LocalConfigService {
     return providerIds[0] || '';
   }
 
-  async writeClaudeSettings(settings) {
-    await fs.mkdir(path.dirname(this.claudeSettingsPath), { recursive: true });
-    await fs.writeFile(this.claudeSettingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-    return true;
+  async readProviderState() {
+    try {
+      const data = await fs.readFile(this.providerStatePath, 'utf8');
+      const parsed = parseJsonObject(data, {});
+      return typeof parsed.providerId === 'string' ? parsed : {};
+    } catch (error) {
+      if (error.code === 'ENOENT') return {};
+      console.error('[Desktop Providers] Failed to read ccNexus provider state:', error.message);
+      return {};
+    }
+  }
+
+  async writeProviderState(providerId) {
+    await fs.mkdir(path.dirname(this.providerStatePath), { recursive: true });
+    await fs.writeFile(this.providerStatePath, JSON.stringify({
+      providerId,
+      updatedAt: Date.now(),
+    }, null, 2), 'utf8');
+  }
+
+  providerEnvironment(provider) {
+    const env = { ...(provider?.settingsConfig?.env || {}) };
+    if (provider?.base_url && !env.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = provider.base_url;
+    if (provider?.api_key && !env.ANTHROPIC_AUTH_TOKEN) env.ANTHROPIC_AUTH_TOKEN = provider.api_key;
+
+    if (provider?.model_mapping) {
+      try {
+        const mapping = typeof provider.model_mapping === 'string'
+          ? JSON.parse(provider.model_mapping)
+          : provider.model_mapping;
+        if (mapping?.main) env.ANTHROPIC_MODEL = mapping.main;
+        if (mapping?.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = mapping.sonnet;
+        if (mapping?.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = mapping.opus;
+        if (mapping?.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = mapping.haiku;
+      } catch {
+        // Ignore malformed optional provider mapping and keep its base env.
+      }
+    }
+
+    return env;
   }
 
   async getProviders() {
@@ -151,12 +236,17 @@ export class LocalConfigService {
     const ccSwitchProviders = await this.readCcSwitchProviders();
     const providers = [...codemossProviders, ...ccSwitchProviders];
     const codemossProviderId = this.getCodemossCurrentProviderId(codemossConfig);
-    const codemossProvider = providers.find(provider => provider.id === codemossProviderId);
+    const providerState = await this.readProviderState();
     const settings = await this.readClaudeSettings();
+    const persistedProviderId = providers.some(provider => provider.id === providerState.providerId)
+      ? providerState.providerId
+      : null;
+    const currentProviderId = persistedProviderId || codemossProviderId || settings.env?.CC_SWITCH_PROVIDER_ID || null;
+    const currentProvider = providers.find(provider => provider.id === currentProviderId);
     return {
       providers,
-      currentProviderId: codemossProviderId || settings.env?.CC_SWITCH_PROVIDER_ID || null,
-      currentEnv: codemossProvider?.settingsConfig?.env || settings.env || {},
+      currentProviderId,
+      currentEnv: currentProvider ? this.providerEnvironment(currentProvider) : settings.env || {},
     };
   }
 
@@ -169,62 +259,155 @@ export class LocalConfigService {
     const provider = providers.find(item => item.id === providerId || item.name === providerId);
     if (!provider) throw new Error('Provider not found');
 
-    const settings = await this.readClaudeSettings();
-    settings.env = settings.env || {};
-    Object.assign(settings.env, provider.settingsConfig?.env || {});
-    if (provider.base_url) settings.env.ANTHROPIC_BASE_URL = provider.base_url;
-    if (provider.api_key) settings.env.ANTHROPIC_AUTH_TOKEN = provider.api_key;
-    if (provider.model_mapping) {
-      const mapping = typeof provider.model_mapping === 'string'
-        ? JSON.parse(provider.model_mapping)
-        : provider.model_mapping;
-      if (mapping.main) settings.env.ANTHROPIC_MODEL = mapping.main;
-      if (mapping.sonnet) settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL = mapping.sonnet;
-      if (mapping.opus) settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL = mapping.opus;
-      if (mapping.haiku) settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = mapping.haiku;
-    }
-    settings.env.CC_SWITCH_PROVIDER_ID = providerId;
-    await this.writeClaudeSettings(settings);
-    return { ok: true, provider, env: settings.env };
+    await this.writeProviderState(provider.id);
+    return { ok: true, provider, env: this.providerEnvironment(provider) };
   }
 
-  async listAgents() {
+  async listMcpServers(cwd) {
+    const result = { servers: [], disabled: [], invalid: [], scope: 'global' };
     try {
-      if (!existsSync(this.agentsDir)) return { agents: [] };
-      const files = await fs.readdir(this.agentsDir);
-      const agents = [];
+      if (!existsSync(this.claudeJsonPath)) return result;
+      const config = parseJsonObject(await fs.readFile(this.claudeJsonPath, 'utf8'), {});
+      const projectConfig = findProjectConfig(config, cwd);
+      const projectServers = projectConfig?.mcpServers;
+      const hasProjectServers = projectServers && typeof projectServers === 'object'
+        && Object.keys(projectServers).length > 0;
+      const serverConfig = hasProjectServers
+        ? projectServers
+        : (config.mcpServers && typeof config.mcpServers === 'object' ? config.mcpServers : {});
+      const disabledServers = new Set(
+        Array.isArray(hasProjectServers ? projectConfig.disabledMcpServers : config.disabledMcpServers)
+          ? (hasProjectServers ? projectConfig.disabledMcpServers : config.disabledMcpServers)
+          : [],
+      );
 
-      for (const file of files) {
-        if (!file.endsWith('.md')) continue;
-        const filePath = path.join(this.agentsDir, file);
-        const stat = await fs.stat(filePath);
-        if (!stat.isFile()) continue;
-        const content = await fs.readFile(filePath, 'utf-8');
-        const name = path.basename(file, '.md');
-        let description = '';
-        for (const line of content.split('\n').slice(0, 10)) {
-          if (line.startsWith('description:') || line.startsWith('Description:')) {
-            description = line.replace(/^(description|Description):\s*/, '').trim();
-            break;
-          }
+      result.scope = hasProjectServers ? 'project' : 'global';
+      for (const [id, server] of Object.entries(serverConfig)) {
+        if (disabledServers.has(id)) {
+          result.disabled.push(id);
+        } else if (isValidMcpServerConfig(server)) {
+          result.servers.push({
+            id,
+            name: id,
+            enabled: true,
+            scope: result.scope,
+            config: redactMcpConfig(server),
+          });
+        } else {
+          result.invalid.push({ id, reason: 'Missing command/url or invalid config' });
         }
-        agents.push({ id: name, name, description: description || `Agent: ${name}`, file: filePath });
+      }
+    } catch (error) {
+      console.error('[Desktop MCP] Failed to read Claude MCP state:', error.message);
+    }
+    return result;
+  }
+
+  async readSkillsDirectory(directory, scope) {
+    if (!existsSync(directory)) return {};
+    const skills = {};
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+
+    for (const entry of entries) {
+      let skillPath = path.join(directory, entry.name);
+      let type = 'file';
+      if (entry.isDirectory()) {
+        type = 'directory';
+        const candidates = ['SKILL.md', 'skill.md'];
+        const candidate = candidates.find(name => existsSync(path.join(skillPath, name)));
+        if (!candidate) continue;
+        skillPath = path.join(skillPath, candidate);
+      } else if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) {
+        continue;
       }
 
-      return { agents };
+      const content = await fs.readFile(skillPath, 'utf8');
+      const stat = await fs.stat(skillPath);
+      const fallbackName = type === 'directory'
+        ? entry.name
+        : entry.name.replace(/\.md$/i, '');
+      const name = frontmatterValue(content, 'name') || fallbackName;
+      const description = frontmatterValue(content, 'description');
+      skills[name] = {
+        id: `${scope}-${name}`,
+        name,
+        type,
+        scope,
+        path: type === 'directory' ? path.dirname(skillPath) : skillPath,
+        enabled: true,
+        ...(description ? { description } : {}),
+        createdAt: stat.birthtime.toISOString(),
+        modifiedAt: stat.mtime.toISOString(),
+      };
+    }
+
+    return skills;
+  }
+
+  async listSkills(cwd) {
+    const workspace = normalizeCwd(cwd || process.cwd());
+    try {
+      return {
+        global: await this.readSkillsDirectory(path.join(this.claudeDir, 'skills'), 'global'),
+        local: await this.readSkillsDirectory(path.join(workspace, '.claude', 'skills'), 'local'),
+      };
+    } catch (error) {
+      console.error('[Desktop Skills] Failed to read Claude Skills:', error.message);
+      return { global: {}, local: {} };
+    }
+  }
+
+  async listAgents(cwd) {
+    try {
+      const directories = [
+        { directory: path.join(normalizeCwd(cwd || process.cwd()), '.claude', 'agents'), source: 'project' },
+        { directory: this.agentsDir, source: 'user' },
+      ];
+      const byId = new Map();
+      for (const { directory, source } of directories) {
+        if (!existsSync(directory)) continue;
+        const files = await fs.readdir(directory);
+        for (const file of files) {
+          if (!file.endsWith('.md')) continue;
+          const filePath = path.join(directory, file);
+          const stat = await fs.stat(filePath);
+          if (!stat.isFile()) continue;
+          const content = await fs.readFile(filePath, 'utf-8');
+          const name = path.basename(file, '.md');
+          const description = frontmatterValue(content, 'description')
+            || content.split('\n').slice(0, 10).find(line => /^description:/i.test(line))?.replace(/^description:\s*/i, '').trim()
+            || `Agent: ${name}`;
+          byId.set(name, { id: name, name, description, file: filePath, source });
+        }
+      }
+      return { agents: [...byId.values()] };
     } catch (err) {
       console.error('[Desktop Agents] Failed to read agents:', err.message);
       return { agents: [] };
     }
   }
 
-  async getAgent(name) {
-    const filePath = path.join(this.agentsDir, `${name}.md`);
-    const resolvedPath = path.resolve(filePath);
-    const resolvedDir = path.resolve(this.agentsDir);
-    if (!pathInside(resolvedDir, resolvedPath)) throw new Error('Invalid agent name');
-    const content = await fs.readFile(filePath, 'utf-8');
-    return { name, content, file: filePath };
+  async getAgent(name, cwd) {
+    if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\')) {
+      throw new Error('Invalid agent name');
+    }
+    const directories = [
+      path.join(normalizeCwd(cwd || process.cwd()), '.claude', 'agents'),
+      this.agentsDir,
+    ];
+    for (const directory of directories) {
+      const filePath = path.join(directory, `${name}.md`);
+      const resolvedPath = path.resolve(filePath);
+      const resolvedDir = path.resolve(directory);
+      if (!pathInside(resolvedDir, resolvedPath)) continue;
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        return { name, content, file: filePath };
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+    throw new Error('Agent not found');
   }
 
   async listCommands() {
@@ -255,29 +438,44 @@ export class LocalConfigService {
     return { commands };
   }
 
+  async readPromptDirectory(directory, source) {
+    if (!existsSync(directory)) return [];
+    const files = await fs.readdir(directory);
+    const prompts = [];
+    for (const file of files) {
+      if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
+      const filePath = path.join(directory, file);
+      const stat = await fs.stat(filePath);
+      if (!stat.isFile()) continue;
+      const content = await fs.readFile(filePath, 'utf-8');
+      const name = file.replace(/\.(md|txt)$/, '');
+      prompts.push({ name, content, file: filePath, source, readOnly: source === 'claude' });
+    }
+    return prompts;
+  }
+
   async listPrompts() {
     try {
-      if (!existsSync(this.promptsDir)) return { prompts: [] };
-      const files = await fs.readdir(this.promptsDir);
-      const prompts = [];
-      for (const file of files) {
-        if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
-        const filePath = path.join(this.promptsDir, file);
-        const content = await fs.readFile(filePath, 'utf-8');
-        const name = file.replace(/\.(md|txt)$/, '');
-        prompts.push({ name, content, file: filePath });
+      const promptsByName = new Map();
+      for (const prompt of await this.readPromptDirectory(this.claudePromptsDir, 'claude')) {
+        promptsByName.set(prompt.name, prompt);
       }
-      return { prompts };
+      // ccNexus-owned prompts override the display entry with the same name,
+      // while leaving the original Claude prompt untouched on disk.
+      for (const prompt of await this.readPromptDirectory(this.promptsDir, 'ccnexus')) {
+        promptsByName.set(prompt.name, prompt);
+      }
+      return { prompts: [...promptsByName.values()] };
     } catch (err) {
       console.error('[Desktop Prompts] Failed to read prompts:', err.message);
       return { prompts: [] };
     }
   }
 
-  promptPath(name) {
-    const filePath = path.join(this.promptsDir, `${name}.md`);
+  promptPath(name, directory = this.promptsDir) {
+    const filePath = path.join(directory, `${name}.md`);
     const resolvedPath = path.resolve(filePath);
-    const resolvedDir = path.resolve(this.promptsDir);
+    const resolvedDir = path.resolve(directory);
     if (!pathInside(resolvedDir, resolvedPath)) throw new Error('Invalid prompt name');
     return filePath;
   }

@@ -26,6 +26,11 @@ test('calculateContextPercentage recalculates when the selected model capacity c
   assert.equal(calculateContextPercentage(0, 200_000), 0);
 });
 
+test('calculateContextPercentage keeps ccgui ratio precision for small 1M-context usage', () => {
+  assert.equal(calculateContextPercentage(14_771, 1_000_000), 1.4771);
+  assert.notEqual(calculateContextPercentage(14_771, 1_000_000), 2);
+});
+
 test('extractUsedTokens follows ccgui provider-aware usage formula', () => {
   const usage = {
     input_tokens: 100,
