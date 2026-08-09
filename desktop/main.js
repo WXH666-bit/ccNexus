@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import electronUpdater from 'electron-updater';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,12 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { createDesktopRuntime } from './runtime/index.js';
 import { createDesktopChatController } from './runtime/chatController.js';
 import { createDesktopSessionController } from './runtime/sessionController.js';
+import { createAppUpdater } from './update/appUpdater.js';
 import { hideDefaultApplicationMenu } from './runtime/windowMenu.js';
 import { LocalConfigService } from './runtime/localConfigService.js';
 import { DesktopSessionService } from './runtime/sessionService.js';
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { autoUpdater } = electronUpdater;
 const preloadPath = path.join(__dirname, 'preload.cjs');
 const indexHtml = path.resolve(__dirname, '../dist/index.html');
 const desktopStateFile = path.join(process.env.HOME || os.homedir() || process.cwd(), '.ccnexus', 'desktop-state.json');
@@ -35,6 +38,16 @@ const chatController = createDesktopChatController({
 });
 
 let mainWindow = null;
+const appUpdater = createAppUpdater({
+  autoUpdater,
+  isPackaged: app.isPackaged,
+  currentVersion: app.getVersion(),
+  emit: state => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('desktop:update-status', state);
+    }
+  },
+});
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -83,6 +96,11 @@ ipcMain.handle('desktop:get-runtime-info', () => ({
   isPackaged: app.isPackaged,
   cwd: workspaceFiles.getWorkspace().cwd,
 }));
+
+ipcMain.handle('desktop:get-update-state', () => appUpdater.getState());
+ipcMain.handle('desktop:check-for-updates', () => appUpdater.checkForUpdates());
+ipcMain.handle('desktop:download-update', () => appUpdater.downloadUpdate());
+ipcMain.handle('desktop:install-update', () => appUpdater.installUpdate());
 
 ipcMain.handle('desktop:open-project', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -226,6 +244,8 @@ app.whenReady().then(async () => {
   runtime.setCwd(workspace.cwd);
   desktopSessions.setCwd(workspace.cwd);
   createMainWindow();
+  appUpdater.initialize();
+  void appUpdater.checkForUpdates();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -237,6 +257,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  appUpdater.dispose();
   chatController.dispose();
   runtime.shutdown();
 });
