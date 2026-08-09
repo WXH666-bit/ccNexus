@@ -9,6 +9,7 @@ test('release workflow builds and publishes a stable Windows GitHub Release from
   const workflow = readFileSync(workflowUrl, 'utf8');
 
   assert.match(workflow, /push:\s*[\r\n]+\s+tags:\s*\[["']v\*["']\]/);
+  assert.match(workflow, /workflow_dispatch:\s*(?:[\r\n]|$)/);
   assert.match(workflow, /runs-on:\s*windows-latest/);
   assert.match(workflow, /contents:\s*write/);
   assert.match(workflow, /pnpm install\s+--frozen-lockfile/);
