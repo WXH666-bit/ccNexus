@@ -64,6 +64,11 @@ export default function ModelSelect({
 
   useEffect(() => {
     void refreshProviderEnv();
+    const handleProviderChanged = () => {
+      void refreshProviderEnv();
+    };
+    window.addEventListener('ccnexus:provider-changed', handleProviderChanged);
+    return () => window.removeEventListener('ccnexus:provider-changed', handleProviderChanged);
   }, [refreshProviderEnv]);
 
   useEffect(() => {

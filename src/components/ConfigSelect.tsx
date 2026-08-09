@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Settings2,
   ChevronRight,
+  Check,
   User,
   Server,
   Cpu,
@@ -32,6 +33,9 @@ interface Agent {
 interface Provider {
   id: string;
   name: string;
+  isActive?: boolean;
+  isLocalProvider?: boolean;
+  isCliLoginProvider?: boolean;
   base_url?: string;
 }
 
@@ -64,6 +68,7 @@ interface Props {
   onAlwaysThinkingChange: (thinking: boolean) => void;
   showToolAnchors: boolean;
   onShowToolAnchorsChange: (visible: boolean) => void;
+  onProviderSwitch?: () => void;
 }
 
 type MenuState = 'closed' | 'main' | 'agents' | 'providers' | 'processes';
@@ -77,11 +82,13 @@ export default function ConfigSelect({
   onAlwaysThinkingChange,
   showToolAnchors,
   onShowToolAnchorsChange,
+  onProviderSwitch,
 }: Props) {
   const { t } = useTranslation();
   const [menuState, setMenuState] = useState<MenuState>('closed');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [currentProviderId, setCurrentProviderId] = useState<string | null>(null);
   const [processes, setProcesses] = useState<Process[]>([]);
   const [processTotals, setProcessTotals] = useState<ProcessTotals>({ daemon: 0, channel: 0, orphan: 0, all: 0 });
   const [processesLoading, setProcessesLoading] = useState(false);
@@ -111,10 +118,31 @@ export default function ConfigSelect({
   useEffect(() => {
     if (menuState === 'providers') {
       getProviders()
-        .then(data => setProviders(data.providers || []))
+        .then(data => {
+          setProviders(data.providers || []);
+          setCurrentProviderId(data.currentProviderId || null);
+        })
         .catch(() => setProviders([]));
     }
   }, [menuState]);
+
+  const handleProviderSelect = async (providerId: string) => {
+    try {
+      const result = await switchProvider(providerId) as { changed?: boolean } | undefined;
+      setCurrentProviderId(providerId);
+      setProviders(previous => previous.map(provider => ({
+        ...provider,
+        isActive: provider.id === providerId,
+      })));
+      setMenuState('closed');
+      window.dispatchEvent(new CustomEvent('ccnexus:provider-changed', {
+        detail: { providerId, changed: result?.changed !== false },
+      }));
+      if (result?.changed !== false) onProviderSwitch?.();
+    } catch (err) {
+      console.error('Failed to switch provider:', err);
+    }
+  };
 
   const loadProcesses = async () => {
     setProcessesLoading(true);
@@ -189,6 +217,12 @@ export default function ConfigSelect({
     return proc.tabName ? `${prefix} · ${proc.tabName}` : prefix;
   };
 
+  const providerLabel = (provider: Provider) => {
+    if (provider.isLocalProvider) return t('config.localSettingsProvider');
+    if (provider.isCliLoginProvider) return t('config.cliLoginProvider');
+    return provider.name;
+  };
+
   const renderProcessGroup = (kind: Process['kind'], items: Process[]) => {
     if (items.length === 0) return null;
     return (
@@ -254,7 +288,7 @@ export default function ConfigSelect({
                 </button>
                 <button className="config-menu-item" onClick={() => setMenuState('providers')}>
                   <Server size={16} />
-                  <span>{t('config.provider')}</span>
+                  <span>{t('config.switchProvider', { defaultValue: '切换当前供应商' })}</span>
                   <ChevronRight size={14} />
                 </button>
                 <button className="config-menu-item" onClick={() => setMenuState('processes')}>
@@ -340,20 +374,20 @@ export default function ConfigSelect({
             <>
               <div className="config-menu-header">
                 <button className="back-btn" onClick={() => setMenuState('main')}>←</button>
-                <span>{t('config.provider')}</span>
+                <span>{t('config.switchProvider', { defaultValue: '切换当前供应商' })}</span>
               </div>
               <div className="config-menu-items">
-                {providers.map(provider => (
+                {providers.length === 0 ? (
+                  <div className="config-menu-item disabled">{t('config.noProviders')}</div>
+                ) : providers.map(provider => (
                   <button
                     key={provider.id}
-                    className="config-menu-item"
-                    onClick={async () => {
-                      await switchProvider(provider.id);
-                      setMenuState('closed');
-                      window.location.reload();
-                    }}
+                    className={`config-menu-item ${provider.id === currentProviderId || provider.isActive ? 'active' : ''}`}
+                    onClick={() => void handleProviderSelect(provider.id)}
                   >
-                    {provider.name}
+                    <Server size={16} />
+                    <span className="provider-menu-name">{providerLabel(provider)}</span>
+                    {(provider.id === currentProviderId || provider.isActive) && <Check size={15} />}
                   </button>
                 ))}
               </div>

@@ -127,13 +127,18 @@ ipcMain.handle('desktop:get-providers', async () => localConfig.getProviders());
 ipcMain.handle('desktop:switch-provider', async (event, args = {}) => {
   const before = await localConfig.getProviders();
   const result = await localConfig.switchProvider(args.providerId);
-  if (before.currentProviderId !== result.provider?.id) {
+  const changed = before.currentProviderId !== result.provider?.id;
+  if (changed) {
     chatController.resetForProviderChange();
     if (!event.sender.isDestroyed()) {
       event.sender.send('desktop:chat-message', { type: 'status', status: 'idle' });
     }
   }
-  return result;
+  return {
+    ...result,
+    changed,
+    previousProviderId: before.currentProviderId || null,
+  };
 });
 
 ipcMain.handle('desktop:get-agents', async () => localConfig.listAgents(workspaceFiles.getWorkspace().cwd));

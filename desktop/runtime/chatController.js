@@ -158,7 +158,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     }
 
     const canUseTool = createPermissionHandler(emit, () => querySessionId);
-    const { currentEnv } = await localConfig.getProviders();
+    const { currentEnv, providerMode } = await localConfig.getProviders();
     const queryEnv = { ...process.env, ...(currentEnv || {}) };
     const effectiveClientOptions = await buildClaudeClientOptions({
       cwd: workspaceFiles.getWorkspace().cwd,
@@ -171,6 +171,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     const queryOpts = buildClaudeQueryOptions({
       cwd: workspaceFiles.getWorkspace().cwd,
       env: queryEnv,
+      providerMode,
       canUseTool,
       clientOptions: effectiveClientOptions,
     });
@@ -330,7 +331,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
 
   async function getContextUsage({ sessionId = null, model = 'default' } = {}) {
     const workspace = workspaceFiles.getWorkspace();
-    const { currentEnv } = await localConfig.getProviders();
+    const { currentEnv, providerMode } = await localConfig.getProviders();
     const queryEnv = { ...process.env, ...(currentEnv || {}) };
     const clientOptions = await buildClaudeClientOptions({
       cwd: workspace.cwd,
@@ -340,6 +341,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     const queryOptions = buildClaudeQueryOptions({
       cwd: workspace.cwd,
       env: queryEnv,
+      providerMode,
       clientOptions,
     });
     if (sessionId) queryOptions.resume = sessionId;

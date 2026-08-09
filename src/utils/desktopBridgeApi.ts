@@ -1,6 +1,9 @@
 interface ProviderItem {
   id: string;
   name: string;
+  isActive?: boolean;
+  isLocalProvider?: boolean;
+  isCliLoginProvider?: boolean;
   base_url?: string;
   api_key?: string;
   model_mapping?: string | Record<string, string>;
@@ -39,6 +42,7 @@ export async function getProviders() {
     providers: ProviderItem[];
     currentProviderId?: string | null;
     currentEnv?: Record<string, string | undefined>;
+    providerMode?: string | null;
   };
 }
 

@@ -142,7 +142,7 @@ test('desktop local config reads ccgui codemoss provider state for model mapping
     const providers = await service.getProviders();
 
     assert.equal(providers.currentProviderId, 'deepseek-provider');
-    assert.equal(providers.providers[0].id, 'deepseek-provider');
+    assert.equal(providers.providers.find(provider => provider.isActive)?.id, 'deepseek-provider');
     assert.equal(providers.currentEnv.ANTHROPIC_MODEL, 'deepseek-v4-pro[1M]');
     assert.equal(providers.currentEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
   } finally {
@@ -268,6 +268,72 @@ test('provider switching persists only ccNexus-owned provider state', async () =
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
+});
+
+test('desktop provider menu exposes ccgui special runtime modes without writing Claude settings', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-special-provider-'));
+
+  try {
+    await mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+    const originalSettings = JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'local-token',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'local-sonnet',
+      },
+    });
+    await writeFile(settingsPath, originalSettings, 'utf8');
+
+    const service = new LocalConfigService({ homeDir });
+    const initial = await service.getProviders();
+    assert.deepEqual(initial.providers.slice(0, 2).map(provider => provider.id), [
+      '__local_settings_json__',
+      '__cli_login__',
+    ]);
+    assert.equal(initial.currentProviderId, '__local_settings_json__');
+    assert.equal(initial.providers.find(provider => provider.id === '__local_settings_json__').isActive, true);
+
+    await service.switchProvider('__cli_login__');
+    const cli = await service.getProviders();
+    assert.equal(cli.currentProviderId, '__cli_login__');
+    assert.equal(cli.providers.find(provider => provider.id === '__cli_login__').isActive, true);
+    assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')), originalSettings);
+
+    const providerState = JSON.parse(await import('node:fs/promises').then(({ readFile }) => (
+      readFile(path.join(homeDir, '.ccnexus', 'provider-state.json'), 'utf8')
+    )));
+    assert.equal(providerState.providerId, '__cli_login__');
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('CLI login runtime environment disables host-managed credentials without changing settings', async () => {
+  const { buildClaudeQueryOptions } = await import('../server/queryOptions.js');
+  const options = buildClaudeQueryOptions({
+    cwd: 'C:\\workspace',
+    providerMode: '__cli_login__',
+    env: {
+      ANTHROPIC_API_KEY: 'stale-api-key',
+      ANTHROPIC_AUTH_TOKEN: 'stale-auth-token',
+      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
+    },
+    clientOptions: { model: 'claude-sonnet-4-6' },
+  });
+
+  assert.equal(options.env.ANTHROPIC_API_KEY, '');
+  assert.equal(options.env.ANTHROPIC_AUTH_TOKEN, '');
+  assert.equal(options.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, undefined);
+  assert.equal(options.env.CLAUDE_CODE_ENTRYPOINT, 'cli');
+});
+
+test('provider switch UI follows ccgui runtime lifecycle instead of reloading the renderer', () => {
+  const source = read('src/components/ConfigSelect.tsx');
+  assert.match(source, /isLocalProvider/);
+  assert.match(source, /isCliLoginProvider/);
+  assert.doesNotMatch(source, /window\.location\.reload\(\)/);
+  assert.match(source, /onProviderSwitch/);
 });
 
 test('desktop workspace file service scans files for completion through the same workspace root', async () => {

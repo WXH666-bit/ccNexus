@@ -1052,6 +1052,7 @@ export default function ChatView() {
           setShowStatusPanel={setShowStatusPanel}
           showToolAnchors={showToolAnchors}
           setShowToolAnchors={setShowToolAnchors}
+          onProviderSwitch={handleNewSession}
           usageUsedTokens={usageUsedTokens}
           sessionKey={currentSession?.id ?? urlSessionId ?? null}
         />

@@ -44,11 +44,25 @@ interface CcNexusDesktopApi {
   }>;
   scanFiles: (options?: { q?: string; limit?: number }) => Promise<{ files: string[] }>;
   getProviders: () => Promise<{
-    providers: unknown[];
+    providers: Array<{
+      id: string;
+      name: string;
+      isActive?: boolean;
+      isLocalProvider?: boolean;
+      isCliLoginProvider?: boolean;
+      [key: string]: unknown;
+    }>;
     currentProviderId?: string | null;
     currentEnv?: Record<string, string | undefined>;
+    providerMode?: string | null;
   }>;
-  switchProvider: (providerId: string) => Promise<unknown>;
+  switchProvider: (providerId: string) => Promise<{
+    ok: boolean;
+    changed?: boolean;
+    previousProviderId?: string | null;
+    provider?: { id: string; name: string; [key: string]: unknown };
+    providerMode?: string;
+  }>;
   getAgents: () => Promise<{ agents: unknown[] }>;
   getAgent: (name: string) => Promise<unknown>;
   getMcpServers: () => Promise<unknown>;

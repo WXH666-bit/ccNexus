@@ -23,6 +23,7 @@ interface Props {
   setLongContextEnabled: (enabled: boolean) => void;
   showToolAnchors: boolean;
   setShowToolAnchors: (visible: boolean) => void;
+  onProviderSwitch?: () => void;
   onSubmit: (queue?: boolean) => void;
   onEnhancePrompt: () => void;
   onStop: () => void;
@@ -66,6 +67,7 @@ export default function ButtonArea({
   setLongContextEnabled,
   showToolAnchors,
   setShowToolAnchors,
+  onProviderSwitch,
   onSubmit,
   onEnhancePrompt,
   onStop,
@@ -82,6 +84,7 @@ export default function ButtonArea({
           onAlwaysThinkingChange={setAlwaysThinking}
           showToolAnchors={showToolAnchors}
           onShowToolAnchorsChange={setShowToolAnchors}
+          onProviderSwitch={onProviderSwitch}
         />
         <ModeSelect value={mode} onChange={setMode} />
         <ModelSelect

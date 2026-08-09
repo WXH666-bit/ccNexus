@@ -4396,12 +4396,30 @@ body {
   text-align: left;
 }
 
+.config-menu-item > svg:last-child {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .config-menu-item:hover {
   background: var(--bg-hover);
 }
 
 .config-menu-item.active {
   background: var(--bg-active);
+}
+
+.config-menu-item .provider-menu-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-menu-item.disabled {
+  color: var(--text-tertiary);
+  cursor: default;
 }
 
 .config-menu-item.toggle-item {

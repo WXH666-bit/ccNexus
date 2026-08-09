@@ -34,6 +34,7 @@ interface ChatInputBoxProps {
   setShowStatusPanel: (visible: boolean) => void;
   showToolAnchors: boolean;
   setShowToolAnchors: (visible: boolean) => void;
+  onProviderSwitch?: () => void;
   usageUsedTokens?: number;
   sessionKey?: string | null;
 }
@@ -114,6 +115,7 @@ export default function ChatInputBox({
   setShowStatusPanel,
   showToolAnchors,
   setShowToolAnchors,
+  onProviderSwitch,
   usageUsedTokens,
   sessionKey,
 }: ChatInputBoxProps) {
@@ -350,6 +352,7 @@ export default function ChatInputBox({
         setLongContextEnabled={setLongContextEnabled}
         showToolAnchors={showToolAnchors}
         setShowToolAnchors={setShowToolAnchors}
+        onProviderSwitch={onProviderSwitch}
         onSubmit={submit}
         onEnhancePrompt={enhancePrompt}
         onStop={onStop}

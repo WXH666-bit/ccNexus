@@ -52,6 +52,44 @@ function normalizeProvider(id, provider = {}, source = 'codemoss') {
   };
 }
 
+const SPECIAL_PROVIDER_IDS = Object.freeze({
+  LOCAL_SETTINGS: '__local_settings_json__',
+  CLI_LOGIN: '__cli_login__',
+});
+
+function createLocalSettingsProvider(settings, isActive) {
+  const env = settings?.env && typeof settings.env === 'object' ? settings.env : {};
+  const modelEnv = Object.fromEntries(
+    ['ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL']
+      .filter(key => env[key] !== undefined && env[key] !== null)
+      .map(key => [key, String(env[key])]),
+  );
+  return {
+    id: SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS,
+    name: '使用本地 settings.json',
+    source: 'runtime',
+    isActive,
+    isLocalProvider: true,
+    settingsConfig: { env: modelEnv },
+  };
+}
+
+function createCliLoginProvider(isActive) {
+  return {
+    id: SPECIAL_PROVIDER_IDS.CLI_LOGIN,
+    name: '使用 CLI 登录信息',
+    source: 'runtime',
+    isActive,
+    isCliLoginProvider: true,
+    settingsConfig: { env: {} },
+  };
+}
+
+function isSpecialProviderId(providerId) {
+  return providerId === SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS
+    || providerId === SPECIAL_PROVIDER_IDS.CLI_LOGIN;
+}
+
 function isValidMcpServerConfig(serverConfig) {
   if (!serverConfig || typeof serverConfig !== 'object') return false;
   const hasCommand = typeof serverConfig.command === 'string' && serverConfig.command.length > 0;
@@ -230,37 +268,85 @@ export class LocalConfigService {
     return env;
   }
 
+  providerRuntimeEnvironment(provider, settings = {}) {
+    if (isSpecialProviderId(provider?.id)) {
+      return settings?.env && typeof settings.env === 'object' ? { ...settings.env } : {};
+    }
+    return this.providerEnvironment(provider);
+  }
+
   async getProviders() {
     const codemossConfig = await this.readCodemossConfig();
     const codemossProviders = this.getCodemossClaudeProviders(codemossConfig);
     const ccSwitchProviders = await this.readCcSwitchProviders();
-    const providers = [...codemossProviders, ...ccSwitchProviders];
+    const managedProviders = [...codemossProviders, ...ccSwitchProviders];
     const codemossProviderId = this.getCodemossCurrentProviderId(codemossConfig);
     const providerState = await this.readProviderState();
     const settings = await this.readClaudeSettings();
-    const persistedProviderId = providers.some(provider => provider.id === providerState.providerId)
+    const knownProviderIds = new Set([
+      SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS,
+      SPECIAL_PROVIDER_IDS.CLI_LOGIN,
+      ...managedProviders.map(provider => provider.id),
+    ]);
+    const persistedProviderId = knownProviderIds.has(providerState.providerId)
       ? providerState.providerId
       : null;
-    const currentProviderId = persistedProviderId || codemossProviderId || settings.env?.CC_SWITCH_PROVIDER_ID || null;
+    const configuredProviderId = [codemossProviderId, settings.env?.CC_SWITCH_PROVIDER_ID]
+      .find(providerId => typeof providerId === 'string' && knownProviderIds.has(providerId));
+    const currentProviderId = persistedProviderId
+      || configuredProviderId
+      || (existsSync(this.claudeSettingsPath) ? SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS : null);
+    const providers = [
+      createLocalSettingsProvider(settings, currentProviderId === SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS),
+      createCliLoginProvider(currentProviderId === SPECIAL_PROVIDER_IDS.CLI_LOGIN),
+      ...managedProviders.map(provider => ({
+        ...provider,
+        isActive: provider.id === currentProviderId,
+      })),
+    ];
     const currentProvider = providers.find(provider => provider.id === currentProviderId);
     return {
       providers,
       currentProviderId,
-      currentEnv: currentProvider ? this.providerEnvironment(currentProvider) : settings.env || {},
+      currentEnv: currentProvider
+        ? this.providerRuntimeEnvironment(currentProvider, settings)
+        : settings.env || {},
+      providerMode: currentProviderId || null,
     };
   }
 
   async switchProvider(providerId) {
     if (!providerId) throw new Error('Provider ID required');
-    const providers = [
+    const managedProviders = [
       ...this.getCodemossClaudeProviders(await this.readCodemossConfig()),
       ...await this.readCcSwitchProviders(),
     ];
-    const provider = providers.find(item => item.id === providerId || item.name === providerId);
+    const settings = await this.readClaudeSettings();
+    let provider;
+    if (providerId === SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS) {
+      if (!existsSync(this.claudeSettingsPath)) {
+        throw new Error('Claude settings.json not found');
+      }
+      try {
+        JSON.parse(await fs.readFile(this.claudeSettingsPath, 'utf8'));
+      } catch {
+        throw new Error('Claude settings.json is invalid JSON');
+      }
+      provider = createLocalSettingsProvider(settings, true);
+    } else if (providerId === SPECIAL_PROVIDER_IDS.CLI_LOGIN) {
+      provider = createCliLoginProvider(true);
+    } else {
+      provider = managedProviders.find(item => item.id === providerId || item.name === providerId);
+    }
     if (!provider) throw new Error('Provider not found');
 
     await this.writeProviderState(provider.id);
-    return { ok: true, provider, env: this.providerEnvironment(provider) };
+    return {
+      ok: true,
+      provider,
+      env: this.providerRuntimeEnvironment(provider, settings),
+      providerMode: provider.id,
+    };
   }
 
   async listMcpServers(cwd) {

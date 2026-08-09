@@ -47,7 +47,7 @@ function modelRoutingKey(modelId) {
   return 'ANTHROPIC_DEFAULT_SONNET_MODEL';
 }
 
-function buildCliEnv(env = {}, { modelId = '', resolvedModel = '' } = {}) {
+function buildCliEnv(env = {}, { modelId = '', resolvedModel = '', providerMode = '' } = {}) {
   const nextEnv = {};
   for (const [key, value] of Object.entries(env || {})) {
     if (!CLI_ENV_OVERRIDE_KEYS.has(key.toUpperCase())) {
@@ -62,10 +62,18 @@ function buildCliEnv(env = {}, { modelId = '', resolvedModel = '' } = {}) {
 
   nextEnv.CLAUDE_CODE_ENTRYPOINT = 'cli';
   nextEnv.USER_TYPE = 'external';
-  if (CLOUD_PROVIDER_FLAGS.some((flag) => isEnvFlagEnabled(nextEnv[flag]))) {
+  const cliLoginMode = providerMode === '__cli_login__';
+  if (cliLoginMode || CLOUD_PROVIDER_FLAGS.some((flag) => isEnvFlagEnabled(nextEnv[flag]))) {
     delete nextEnv.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST;
   } else {
     nextEnv.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1';
+  }
+
+  // Match ccgui's CLI-login mode: let Claude Code resolve its native OAuth
+  // credentials instead of inheriting a stale host API key or auth token.
+  if (cliLoginMode) {
+    nextEnv.ANTHROPIC_API_KEY = '';
+    nextEnv.ANTHROPIC_AUTH_TOKEN = '';
   }
   return nextEnv;
 }
@@ -91,7 +99,7 @@ function buildWebviewControlledSettingsOverride(modelId) {
   return { env: settingsEnv };
 }
 
-export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = {} }) {
+export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = {}, providerMode = '' }) {
   const permissionMode = normalizePermissionMode(clientOptions.mode);
   const modelId = typeof clientOptions.model === 'string' ? clientOptions.model.trim() : '';
   const model = normalizeModel(modelId, env);
@@ -106,7 +114,7 @@ export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = 
     maxTurns: 100,
     enableFileCheckpointing: true,
     includePartialMessages: clientOptions.streaming !== false,
-    env: buildCliEnv(env, { modelId, resolvedModel: model }),
+    env: buildCliEnv(env, { modelId, resolvedModel: model, providerMode }),
     settings: buildWebviewControlledSettingsOverride(modelId),
     additionalDirectories: buildAdditionalDirectories(cwd, env, clientOptions.additionalDirectories),
     systemPrompt: {
