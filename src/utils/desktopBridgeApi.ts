@@ -50,6 +50,26 @@ export async function getWorkspace() {
   return await requireDesktopApi().getWorkspace() as { cwd: string; rootName: string };
 }
 
+export function getUpdateState() {
+  return requireDesktopApi().getUpdateState();
+}
+
+export function checkForUpdates() {
+  return requireDesktopApi().checkForUpdates();
+}
+
+export function downloadUpdate() {
+  return requireDesktopApi().downloadUpdate();
+}
+
+export function installUpdate() {
+  return requireDesktopApi().installUpdate();
+}
+
+export function onUpdateStatus(callback: (state: AppUpdateState) => void) {
+  return requireDesktopApi().onUpdateStatus(callback);
+}
+
 export async function switchProvider(providerId: string) {
   return await requireDesktopApi().switchProvider(providerId);
 }

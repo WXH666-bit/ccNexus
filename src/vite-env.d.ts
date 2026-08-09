@@ -1,5 +1,22 @@
 /// <reference types="vite/client" />
 
+type AppUpdateStatus = 'idle' | 'checking' | 'not-available' | 'available' | 'downloading' | 'downloaded' | 'error';
+
+interface AppUpdateState {
+  status: AppUpdateStatus;
+  isPackaged: boolean;
+  currentVersion: string;
+  targetVersion: string | null;
+  releaseName: string | null;
+  releaseNotes: string | null;
+  percent: number;
+  bytesPerSecond: number;
+  transferred: number;
+  total: number;
+  error: string | null;
+  lastCheckedAt: number | null;
+}
+
 interface CcNexusDesktopApi {
   getRuntimeInfo: () => Promise<{
     appName: string;
@@ -7,6 +24,11 @@ interface CcNexusDesktopApi {
     isPackaged: boolean;
     cwd: string;
   }>;
+  getUpdateState: () => Promise<AppUpdateState>;
+  checkForUpdates: () => Promise<AppUpdateState>;
+  downloadUpdate: () => Promise<AppUpdateState>;
+  installUpdate: () => Promise<AppUpdateState>;
+  onUpdateStatus: (callback: (state: AppUpdateState) => void) => () => void;
   openProject: () => Promise<{ canceled: boolean; path?: string; cwd?: string; rootName?: string }>;
   getWorkspace: () => Promise<{ cwd: string; rootName: string }>;
   setWorkspace: (path: string) => Promise<{ cwd: string; rootName: string }>;

@@ -2,6 +2,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('ccNexusDesktop', {
   getRuntimeInfo: () => ipcRenderer.invoke('desktop:get-runtime-info'),
+  getUpdateState: () => ipcRenderer.invoke('desktop:get-update-state'),
+  checkForUpdates: () => ipcRenderer.invoke('desktop:check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('desktop:download-update'),
+  installUpdate: () => ipcRenderer.invoke('desktop:install-update'),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('desktop:update-status', listener);
+    return () => ipcRenderer.removeListener('desktop:update-status', listener);
+  },
   openProject: () => ipcRenderer.invoke('desktop:open-project'),
   getWorkspace: () => ipcRenderer.invoke('desktop:get-workspace'),
   setWorkspace: (path) => ipcRenderer.invoke('desktop:set-workspace', { path }),

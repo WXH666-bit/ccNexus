@@ -38,3 +38,27 @@ test('update state is pushed only through the existing BrowserWindow renderer bo
   assert.match(main, /mainWindow\.isDestroyed\(\)/);
   assert.doesNotMatch(read('desktop/update/appUpdater.js'), /@anthropic-ai\/claude-agent-sdk|chatController|daemonBridge/);
 });
+
+test('preload and renderer helper expose a typed, removable update bridge', () => {
+  const preload = read('desktop/preload.cjs');
+  const types = read('src/vite-env.d.ts');
+  const helper = read('src/utils/desktopBridgeApi.ts');
+
+  assert.match(preload, /getUpdateState:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('desktop:get-update-state'\)/);
+  assert.match(preload, /checkForUpdates:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('desktop:check-for-updates'\)/);
+  assert.match(preload, /downloadUpdate:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('desktop:download-update'\)/);
+  assert.match(preload, /installUpdate:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('desktop:install-update'\)/);
+  assert.match(preload, /onUpdateStatus:/);
+  assert.match(preload, /ipcRenderer\.on\('desktop:update-status'/);
+  assert.match(preload, /ipcRenderer\.removeListener\('desktop:update-status'/);
+
+  assert.match(types, /type AppUpdateStatus/);
+  assert.match(types, /interface AppUpdateState/);
+  assert.match(types, /getUpdateState:\s*\(\)\s*=>\s*Promise<AppUpdateState>/);
+  assert.match(types, /onUpdateStatus:\s*\(callback:/);
+
+  for (const functionName of ['getUpdateState', 'checkForUpdates', 'downloadUpdate', 'installUpdate', 'onUpdateStatus']) {
+    assert.match(helper, new RegExp(`export function ${functionName}`));
+    assert.match(helper, new RegExp(String.raw`requireDesktopApi\(\)\.${functionName}`));
+  }
+});
