@@ -50,8 +50,11 @@ export default function AppUpdateSection() {
   const { t } = useTranslation();
   const [state, setState] = useState<AppUpdateState>(INITIAL_UPDATE_STATE);
   const [busy, setBusy] = useState(false);
+  const desktopBridgeAvailable = typeof window !== 'undefined' && Boolean(window.ccNexusDesktop);
 
   useEffect(() => {
+    if (!desktopBridgeAvailable) return;
+
     let active = true;
     const unsubscribe = onUpdateStatus(nextState => {
       if (active) setState(nextState);
@@ -75,7 +78,7 @@ export default function AppUpdateSection() {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [desktopBridgeAvailable]);
 
   const runAction = async (action: () => Promise<AppUpdateState>) => {
     if (busy) return;
@@ -96,6 +99,8 @@ export default function AppUpdateSection() {
   const progress = Math.min(100, Math.max(0, Number.isFinite(state.percent) ? state.percent : 0));
   const isDownloading = state.status === 'downloading';
   const isChecking = state.status === 'checking';
+
+  if (!desktopBridgeAvailable) return null;
 
   return (
     <div className="setting-group app-update-card">

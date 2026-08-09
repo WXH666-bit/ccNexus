@@ -26,6 +26,12 @@ test('basic settings renders an application update section with all bridge actio
   assert.match(basic, /<AppUpdateSection\s*\/>/);
 });
 
+test('web settings skip update bridge work when Electron preload is unavailable', () => {
+  const component = read('src/components/settings/AppUpdateSection.tsx');
+  assert.match(component, /if\s*\(!desktopBridgeAvailable\)\s*return;/);
+  assert.match(component, /if\s*\(!desktopBridgeAvailable\)\s*return null;/);
+});
+
 test('both locales contain the complete update card vocabulary', () => {
   const en = readJson('src/i18n/locales/en.json');
   const zh = readJson('src/i18n/locales/zh.json');
