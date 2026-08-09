@@ -72,6 +72,11 @@
     "win": {
       "target": "nsis"
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true
+    },
     "publish": {
       "provider": "github",
       "owner": "WXH666-bit",

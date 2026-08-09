@@ -36,6 +36,14 @@ test('package pins the Claude SDK and publishes stable updates through public Gi
   assert.equal(pkg.build.win.target, 'nsis');
 });
 
+test('NSIS uses an assisted installer with a selectable directory and launch choice', () => {
+  assert.deepEqual(pkg.build.nsis, {
+    oneClick: false,
+    allowToChangeInstallationDirectory: true,
+    runAfterFinish: true,
+  });
+});
+
 test('vite emits relative renderer assets for packaged file loading', () => {
   assert.match(viteConfig, /base:\s*['"]\.\/['"]/);
 });
