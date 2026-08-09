@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const viteConfig = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
 
 test('package has desktop packaging scripts and electron-builder config', () => {
   assert.equal(pkg.main, 'desktop/main.js');
@@ -33,4 +34,8 @@ test('package pins the Claude SDK and publishes stable updates through public Gi
     releaseType: 'release',
   });
   assert.equal(pkg.build.win.target, 'nsis');
+});
+
+test('vite emits relative renderer assets for packaged file loading', () => {
+  assert.match(viteConfig, /base:\s*['"]\.\/['"]/);
 });
