@@ -49,7 +49,7 @@ GitHub Release (vX.Y.Z)
         │
         │ latest.yml + NSIS installer + checksum/blockmap
         ▼
-desktop/runtime/appUpdater.js
+desktop/update/appUpdater.js
         │
         ├── main-process update state
         ├── electron-updater events
@@ -64,7 +64,7 @@ Settings / BasicConfigSection update UI
 
 ### 5.1 主进程更新服务
 
-新增 `desktop/runtime/appUpdater.js`，职责仅限于应用更新：
+新增 `desktop/update/appUpdater.js`，职责仅限于应用更新：
 
 - 读取当前版本和 `app.isPackaged`。
 - 在非打包开发模式下跳过网络检查。
@@ -143,7 +143,7 @@ Release Notes 属于远程内容，展示时按不可信文本处理；如果支
 新增 `.github/workflows/release.yml`：
 
 - 触发条件：推送 `v*` tag。
-- Windows runner 上执行 `npm ci`、Vite build 和 electron-builder NSIS build。
+- Windows runner 上使用现有 pnpm 工具链执行 `pnpm install --frozen-lockfile`、Vite build 和 electron-builder NSIS build。
 - 使用 `contents: write` 权限创建/更新 Release。
 - 使用 `--publish always` 发布安装包和 updater 元数据。
 - Release 必须是正式发布状态，不能停留在 Draft。
@@ -185,7 +185,7 @@ Release Notes 属于远程内容，展示时按不可信文本处理；如果支
 ## 10. 预计改动范围
 
 - `package.json`：依赖、发布配置和版本脚本。
-- `desktop/runtime/appUpdater.js`：主进程更新服务。
+- `desktop/update/appUpdater.js`：主进程更新服务。
 - `desktop/main.js`：初始化 updater、注册 IPC 和安装退出流程。
 - `desktop/preload.cjs`：暴露窄更新 API。
 - `src/vite-env.d.ts`、`src/utils/desktopBridgeApi.ts`：类型和 renderer bridge。
@@ -195,3 +195,7 @@ Release Notes 属于远程内容，展示时按不可信文本处理；如果支
 - `tests/`：状态、IPC、构建配置和 updater 行为测试。
 
 不修改 Claude Code 配置文件、provider 文件、凭据、MCP 配置或项目 `.claude` 内容。
+
+## 11. Claude Agent SDK 版本绑定
+
+`@anthropic-ai/claude-agent-sdk` 不参与独立更新。当前已验证版本固定为 `0.3.218`；后续 SDK 升级必须作为新的 ccNexus 应用版本修改依赖、重新打包并完成回归验证，再通过 GitHub Release 发布。客户端 updater 只更新包含该 SDK 版本的完整 ccNexus 安装包。

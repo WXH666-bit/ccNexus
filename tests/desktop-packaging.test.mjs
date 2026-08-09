@@ -22,3 +22,15 @@ test('package has desktop packaging scripts and electron-builder config', () => 
   assert.ok(pkg.build.files.includes('src/utils/contextUsage.js'));
   assert.ok(pkg.build.files.includes('package.json'));
 });
+
+test('package pins the Claude SDK and publishes stable updates through public GitHub Releases', () => {
+  assert.equal(pkg.dependencies['@anthropic-ai/claude-agent-sdk'], '0.3.218');
+  assert.ok(pkg.dependencies['electron-updater']);
+  assert.deepEqual(pkg.build.publish, {
+    provider: 'github',
+    owner: 'WXH666-bit',
+    repo: 'ccNexus',
+    releaseType: 'release',
+  });
+  assert.equal(pkg.build.win.target, 'nsis');
+});
