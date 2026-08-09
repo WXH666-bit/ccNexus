@@ -2867,6 +2867,154 @@ html, body, #root {
   border: 1px dashed var(--border-color);
 }
 
+.app-update-card {
+  max-width: 620px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.app-update-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.app-update-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.app-update-title svg { color: var(--accent-blue); }
+.app-update-description {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.app-update-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.app-update-status.status-available,
+.app-update-status.status-downloaded { color: var(--accent-blue); border-color: var(--accent-blue); }
+.app-update-status.status-error { color: var(--accent-red); border-color: var(--accent-red); }
+.app-update-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.app-update-version {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.app-update-version strong { color: var(--text-primary); font-weight: 600; }
+.app-update-version-target strong { color: var(--accent-blue); }
+.app-update-release-name {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.app-update-notes {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+.app-update-notes-label {
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.app-update-notes-body {
+  max-height: 130px;
+  overflow-y: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.app-update-progress {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+.app-update-progress-heading,
+.app-update-progress-details {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.app-update-progress-heading strong { color: var(--accent-blue); font-weight: 600; }
+.app-update-progress-track {
+  height: 5px;
+  margin: 8px 0 6px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+}
+.app-update-progress-track span {
+  display: block;
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+.app-update-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--accent-red);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.app-update-error svg { flex: 0 0 auto; margin-top: 1px; }
+.app-update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.app-update-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 11px;
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.app-update-action-secondary { background: transparent; color: var(--accent-blue); }
+.app-update-action:hover:not(:disabled) { background: var(--accent-blue-hover); border-color: var(--accent-blue-hover); }
+.app-update-action-secondary:hover:not(:disabled) { background: var(--bg-hover); }
+.app-update-action:disabled { cursor: default; opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) {
+  .app-update-progress-track span { transition: none; }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    P1 Features — Rewind, Search, Anchor, SubAgents, Undo, Plan, AskUser
    ═══════════════════════════════════════════════════════════════ */

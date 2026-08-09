@@ -98,6 +98,26 @@
       "language": "Language",
       "autoSave": "Auto Save"
     },
+    "update": {
+      "title": "Application updates",
+      "stable": "Stable releases from GitHub",
+      "development": "Updates are available in packaged builds.",
+      "currentVersion": "Current version",
+      "latestVersion": "Latest version",
+      "check": "Check for updates",
+      "checking": "Checking for updates...",
+      "notAvailable": "You're up to date",
+      "available": "Update available",
+      "download": "Download update",
+      "downloading": "Downloading update...",
+      "downloaded": "Update ready to install",
+      "install": "Restart and install",
+      "releaseNotes": "Release notes",
+      "progress": "Progress",
+      "speed": "Speed",
+      "error": "Update check failed",
+      "retry": "Try again"
+    },
     "permissions": {
       "title": "Permissions",
       "desc": "Configure default permission behavior for tool calls",

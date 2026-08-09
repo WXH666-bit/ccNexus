@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getWorkspace } from '../../utils/desktopBridgeApi';
 import { CLAUDE_MODELS } from '../../utils/modelResolution';
+import AppUpdateSection from './AppUpdateSection';
 
 export default function BasicConfigSection() {
   const { t, i18n } = useTranslation();
@@ -63,6 +64,8 @@ export default function BasicConfigSection() {
           {t('settings.basic.autoSave')}
         </label>
       </div>
+
+      <AppUpdateSection />
     </div>
   );
 }

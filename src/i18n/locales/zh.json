@@ -98,6 +98,26 @@
       "language": "语言",
       "autoSave": "自动保存"
     },
+    "update": {
+      "title": "应用更新",
+      "stable": "来自 GitHub 的稳定版本",
+      "development": "打包后的应用才支持检查更新。",
+      "currentVersion": "当前版本",
+      "latestVersion": "最新版本",
+      "check": "检查更新",
+      "checking": "正在检查更新...",
+      "notAvailable": "当前已是最新版本",
+      "available": "发现新版本",
+      "download": "下载更新",
+      "downloading": "正在下载更新...",
+      "downloaded": "更新已下载，等待安装",
+      "install": "重启并安装",
+      "releaseNotes": "更新说明",
+      "progress": "下载进度",
+      "speed": "速度",
+      "error": "更新检查失败",
+      "retry": "重试"
+    },
     "permissions": {
       "title": "权限配置",
       "desc": "配置工具调用的默认权限行为",
