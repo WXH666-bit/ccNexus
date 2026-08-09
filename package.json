@@ -36,7 +36,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^43.2.0",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "26.15.3",
     "highlight.js": "^11.10.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

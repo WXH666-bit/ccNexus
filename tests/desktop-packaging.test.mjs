@@ -10,6 +10,7 @@ test('package has desktop packaging scripts and electron-builder config', () => 
   assert.equal(pkg.scripts['desktop:pack'], 'npm run build && electron-builder --dir');
   assert.equal(pkg.scripts['desktop:dist'], 'npm run build && electron-builder');
   assert.ok(pkg.devDependencies['electron-builder']);
+  assert.equal(pkg.devDependencies['electron-builder'], '26.15.3');
   assert.equal(pkg.build.appId, 'com.ccnexus.app');
   assert.equal(pkg.build.productName, 'ccNexus');
   assert.ok(pkg.build.files.includes('dist/**'));
