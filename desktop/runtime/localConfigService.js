@@ -32,6 +32,36 @@ function parseJsonObject(raw, fallback = {}) {
   }
 }
 
+async function readJsonObject(filePath, { allowMissing = false } = {}) {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = parseJsonObject(raw, null);
+    if (!parsed || Array.isArray(parsed)) {
+      throw new Error(`Invalid JSON object: ${filePath}`);
+    }
+    return parsed;
+  } catch (error) {
+    if (allowMissing && error.code === 'ENOENT') return {};
+    throw error;
+  }
+}
+
+async function writeJsonAtomic(filePath, value) {
+  const directory = path.dirname(filePath);
+  const temporaryFile = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.mkdir(directory, { recursive: true });
+  try {
+    await fs.writeFile(temporaryFile, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await fs.rename(temporaryFile, filePath);
+  } finally {
+    try {
+      await fs.unlink(temporaryFile);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
 const SPECIAL_PROVIDER_IDS = Object.freeze({
   LOCAL_SETTINGS: '__local_settings_json__',
   CLI_LOGIN: '__cli_login__',
@@ -98,6 +128,69 @@ function findProjectConfig(config, cwd) {
   return null;
 }
 
+function findProjectEntry(config, cwd) {
+  const normalizedCwd = normalizeCwd(cwd).replace(/\\/g, '/').replace(/\/$/, '');
+  if (!normalizedCwd) throw new Error('Workspace path is required for project MCP scope');
+  if (!config.projects || typeof config.projects !== 'object' || Array.isArray(config.projects)) {
+    config.projects = {};
+  }
+
+  for (const [projectPath, projectConfig] of Object.entries(config.projects)) {
+    if (projectPath.replace(/\\/g, '/').replace(/\/$/, '') === normalizedCwd) {
+      if (!projectConfig || typeof projectConfig !== 'object' || Array.isArray(projectConfig)) {
+        config.projects[projectPath] = {};
+      }
+      return { key: projectPath, value: config.projects[projectPath] };
+    }
+  }
+
+  config.projects[normalizedCwd] = {};
+  return { key: normalizedCwd, value: config.projects[normalizedCwd] };
+}
+
+function ensureMcpScope(config, cwd, scope) {
+  if (scope === 'global') return config;
+  if (scope !== 'project') throw new Error('Invalid MCP scope');
+  return findProjectEntry(config, cwd).value;
+}
+
+function ensureMcpServersContainer(scopeConfig) {
+  if (!scopeConfig.mcpServers || typeof scopeConfig.mcpServers !== 'object' || Array.isArray(scopeConfig.mcpServers)) {
+    scopeConfig.mcpServers = {};
+  }
+  return scopeConfig.mcpServers;
+}
+
+function ensureDisabledList(scopeConfig) {
+  if (!Array.isArray(scopeConfig.disabledMcpServers)) scopeConfig.disabledMcpServers = [];
+  return scopeConfig.disabledMcpServers;
+}
+
+function removeDisabledId(scopeConfig, id) {
+  if (!Array.isArray(scopeConfig.disabledMcpServers)) return;
+  scopeConfig.disabledMcpServers = scopeConfig.disabledMcpServers.filter(item => item !== id);
+}
+
+function validateMcpId(id) {
+  if (typeof id !== 'string' || !id.trim() || id.length > 200 || /[\0\r\n]/.test(id)) {
+    throw new Error('Invalid MCP server id');
+  }
+  return id.trim();
+}
+
+function normalizeMcpWriteConfig(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('MCP server config must be an object');
+  }
+  const normalized = JSON.parse(JSON.stringify(config));
+  delete normalized.id;
+  delete normalized.name;
+  delete normalized.scope;
+  delete normalized.enabled;
+  if (!isValidMcpServerConfig(normalized)) throw new Error('MCP server config requires a valid command or url');
+  return normalized;
+}
+
 function redactMcpConfig(config) {
   const visible = { ...config };
   for (const key of ['env', 'headers']) {
@@ -105,6 +198,76 @@ function redactMcpConfig(config) {
     visible[key] = Object.fromEntries(Object.keys(visible[key]).map(name => [name, '***']));
   }
   return visible;
+}
+
+function validateSkillName(name) {
+  if (typeof name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) || name.includes('..')) {
+    throw new Error(`Invalid skill name: ${name}`);
+  }
+  return name;
+}
+
+function javaStringHashCode(value) {
+  let hash = 0;
+  const text = String(value);
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function skillDirectories(homeDir, scope, cwd) {
+  if (scope === 'global') {
+    return {
+      active: path.join(homeDir, '.claude', 'skills'),
+      managed: path.join(homeDir, '.codemoss', 'skills', 'global'),
+    };
+  }
+  if (scope !== 'local') throw new Error('Invalid skill scope');
+  const workspace = normalizeCwd(cwd || process.cwd());
+  if (!workspace) throw new Error('Workspace path is required for local skills');
+  const workspaceName = path.basename(workspace) || 'workspace';
+  return {
+    active: path.join(workspace, '.claude', 'skills'),
+    managed: path.join(homeDir, '.codemoss', 'skills', `${workspaceName}_${javaStringHashCode(workspace)}`),
+  };
+}
+
+function skillPath(directory, name) {
+  const resolvedDirectory = path.resolve(directory);
+  const resolvedPath = path.resolve(directory, name);
+  if (!pathInside(resolvedDirectory, resolvedPath) || resolvedPath === resolvedDirectory) {
+    throw new Error('Invalid skill path');
+  }
+  return resolvedPath;
+}
+
+async function copyDirectory(source, target) {
+  const entries = await fs.readdir(source, { withFileTypes: true });
+  await fs.mkdir(target, { recursive: true });
+  for (const entry of entries) {
+    if (entry.name === '.' || entry.name === '..') continue;
+    const sourcePath = path.join(source, entry.name);
+    const targetPath = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirectory(sourcePath, targetPath);
+    } else if (entry.isFile()) {
+      await fs.copyFile(sourcePath, targetPath);
+    } else {
+      throw new Error(`Unsupported file in Skill: ${entry.name}`);
+    }
+  }
+}
+
+async function moveDirectory(source, target) {
+  try {
+    await fs.rename(source, target);
+  } catch (error) {
+    if (!['EXDEV', 'EPERM', 'EEXIST'].includes(error.code)) throw error;
+    if (existsSync(target)) throw new Error('A Skill with the same name already exists at the target');
+    await copyDirectory(source, target);
+    await fs.rm(source, { recursive: true, force: true });
+  }
 }
 
 function frontmatterValue(content, key) {
@@ -120,6 +283,7 @@ export class LocalConfigService {
     this.claudeDir = path.join(homeDir, '.claude');
     this.claudeJsonPath = path.join(homeDir, '.claude.json');
     this.claudeSettingsPath = path.join(this.claudeDir, 'settings.json');
+    this.codemossSkillsDir = path.join(homeDir, '.codemoss', 'skills');
     this.providerStatePath = path.join(homeDir, '.ccnexus', 'provider-state.json');
     this.agentsDir = path.join(this.claudeDir, 'agents');
     this.commandsDir = path.join(this.claudeDir, 'commands');
@@ -150,6 +314,33 @@ export class LocalConfigService {
       console.error('[Desktop Providers] Failed to read ccNexus provider state:', error.message);
       return {};
     }
+  }
+
+  async updateClaudeJson(mutator) {
+    if (typeof mutator !== 'function') throw new Error('Claude config mutator is required');
+    const current = await readJsonObject(this.claudeJsonPath, { allowMissing: true });
+    const draft = JSON.parse(JSON.stringify(current));
+    const next = await mutator(draft);
+    const result = next === undefined ? draft : next;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      throw new Error('Claude config mutator must return an object');
+    }
+    await writeJsonAtomic(this.claudeJsonPath, result);
+    return result;
+  }
+
+  async syncMcpToClaudeSettings() {
+    const claudeConfig = await readJsonObject(this.claudeJsonPath, { allowMissing: true });
+    const settings = await readJsonObject(this.claudeSettingsPath, { allowMissing: true });
+
+    for (const key of ['mcpServers', 'disabledMcpServers']) {
+      if (Object.prototype.hasOwnProperty.call(claudeConfig, key)) {
+        settings[key] = JSON.parse(JSON.stringify(claudeConfig[key]));
+      }
+    }
+
+    await writeJsonAtomic(this.claudeSettingsPath, settings);
+    return settings;
   }
 
   async writeProviderState(providerId) {
@@ -230,97 +421,376 @@ export class LocalConfigService {
   }
 
   async listMcpServers(cwd) {
-    const result = { servers: [], disabled: [], invalid: [], scope: 'global' };
+    const result = {
+      servers: [],
+      disabled: [],
+      invalid: [],
+      scope: 'merged',
+      scopeSummary: { global: 0, project: 0 },
+    };
     try {
       if (!existsSync(this.claudeJsonPath)) return result;
-      const config = parseJsonObject(await fs.readFile(this.claudeJsonPath, 'utf8'), {});
+      const config = await readJsonObject(this.claudeJsonPath);
       const projectConfig = findProjectConfig(config, cwd);
-      const projectServers = projectConfig?.mcpServers;
-      const hasProjectServers = projectServers && typeof projectServers === 'object'
-        && Object.keys(projectServers).length > 0;
-      const serverConfig = hasProjectServers
-        ? projectServers
-        : (config.mcpServers && typeof config.mcpServers === 'object' ? config.mcpServers : {});
-      const disabledServers = new Set(
-        Array.isArray(hasProjectServers ? projectConfig.disabledMcpServers : config.disabledMcpServers)
-          ? (hasProjectServers ? projectConfig.disabledMcpServers : config.disabledMcpServers)
-          : [],
-      );
+      const globalServers = config.mcpServers && typeof config.mcpServers === 'object' && !Array.isArray(config.mcpServers)
+        ? config.mcpServers
+        : {};
+      const projectServers = projectConfig?.mcpServers && typeof projectConfig.mcpServers === 'object' && !Array.isArray(projectConfig.mcpServers)
+        ? projectConfig.mcpServers
+        : {};
+      const mergedServers = new Map(Object.entries(globalServers).map(([id, server]) => [id, { server, scope: 'global' }]));
+      for (const [id, server] of Object.entries(projectServers)) {
+        mergedServers.set(id, { server, scope: 'project' });
+      }
 
-      result.scope = hasProjectServers ? 'project' : 'global';
-      for (const [id, server] of Object.entries(serverConfig)) {
+      const globalDisabled = new Set(Array.isArray(config.disabledMcpServers) ? config.disabledMcpServers : []);
+      const projectDisabled = new Set(Array.isArray(projectConfig?.disabledMcpServers) ? projectConfig.disabledMcpServers : []);
+      const disabledServers = new Set([...globalDisabled, ...projectDisabled]);
+
+      for (const [id, { server, scope }] of mergedServers) {
+        const redactedConfig = redactMcpConfig(server);
         if (disabledServers.has(id)) {
-          result.disabled.push(id);
+          result.disabled.push({
+            id,
+            scope: projectDisabled.has(id) ? 'project' : scope,
+            reason: 'Server is disabled',
+          });
+          result.scopeSummary[scope] += 1;
         } else if (isValidMcpServerConfig(server)) {
           result.servers.push({
             id,
             name: id,
             enabled: true,
-            scope: result.scope,
-            config: redactMcpConfig(server),
+            scope,
+            config: redactedConfig,
+            redactedConfig,
           });
+          result.scopeSummary[scope] += 1;
         } else {
-          result.invalid.push({ id, reason: 'Missing command/url or invalid config' });
+          result.invalid.push({
+            id,
+            scope,
+            reason: 'Missing command/url or invalid config',
+            config: redactedConfig,
+          });
+          result.scopeSummary[scope] += 1;
         }
+      }
+
+      for (const id of disabledServers) {
+        if (mergedServers.has(id)) continue;
+        result.disabled.push({
+          id,
+          scope: projectDisabled.has(id) ? 'project' : 'global',
+          reason: 'Server is disabled',
+        });
       }
     } catch (error) {
       console.error('[Desktop MCP] Failed to read Claude MCP state:', error.message);
+      result.error = error.message;
     }
     return result;
   }
 
-  async readSkillsDirectory(directory, scope) {
+  async getMcpServerRuntimeSnapshot(cwd) {
+    const result = {
+      servers: [],
+      disabled: [],
+      invalid: [],
+    };
+    try {
+      if (!existsSync(this.claudeJsonPath)) return result;
+      const config = await readJsonObject(this.claudeJsonPath);
+      const projectConfig = findProjectConfig(config, cwd);
+      const globalServers = config.mcpServers && typeof config.mcpServers === 'object' && !Array.isArray(config.mcpServers)
+        ? config.mcpServers
+        : {};
+      const projectServers = projectConfig?.mcpServers && typeof projectConfig.mcpServers === 'object' && !Array.isArray(projectConfig.mcpServers)
+        ? projectConfig.mcpServers
+        : {};
+      const mergedServers = new Map(Object.entries(globalServers).map(([id, server]) => [id, { server, scope: 'global' }]));
+      for (const [id, server] of Object.entries(projectServers)) {
+        mergedServers.set(id, { server, scope: 'project' });
+      }
+      const globalDisabled = new Set(Array.isArray(config.disabledMcpServers) ? config.disabledMcpServers : []);
+      const projectDisabled = new Set(Array.isArray(projectConfig?.disabledMcpServers) ? projectConfig.disabledMcpServers : []);
+      const disabledServers = new Set([...globalDisabled, ...projectDisabled]);
+
+      for (const [id, { server, scope }] of mergedServers) {
+        const runtimeServer = {
+          id,
+          name: id,
+          scope,
+          config: JSON.parse(JSON.stringify(server)),
+        };
+        if (disabledServers.has(id)) {
+          result.disabled.push({
+            id,
+            scope: projectDisabled.has(id) ? 'project' : scope,
+            reason: 'Server is disabled',
+          });
+        } else if (isValidMcpServerConfig(server)) {
+          result.servers.push(runtimeServer);
+        } else {
+          result.invalid.push({
+            id,
+            scope,
+            reason: 'Missing command/url or invalid config',
+            config: runtimeServer.config,
+          });
+        }
+      }
+
+      for (const id of disabledServers) {
+        if (mergedServers.has(id)) continue;
+        result.disabled.push({
+          id,
+          scope: projectDisabled.has(id) ? 'project' : 'global',
+          reason: 'Server is disabled',
+        });
+      }
+    } catch (error) {
+      console.error('[Desktop MCP] Failed to read runtime MCP state:', error.message);
+      result.error = error.message;
+    }
+    return result;
+  }
+
+  async getMcpServerForEdit({ id, scope = 'global', cwd } = {}) {
+    const serverId = validateMcpId(id);
+    const config = await readJsonObject(this.claudeJsonPath);
+    const scopeConfig = scope === 'global' ? config : findProjectConfig(config, cwd);
+    if (scope !== 'global' && scope !== 'project') throw new Error('Invalid MCP scope');
+    const server = scopeConfig?.mcpServers?.[serverId];
+    if (!server || typeof server !== 'object' || Array.isArray(server)) {
+      throw new Error('MCP server not found');
+    }
+    return {
+      id: serverId,
+      name: serverId,
+      scope,
+      config: JSON.parse(JSON.stringify(server)),
+    };
+  }
+
+  async saveMcpServer({ id, config, scope = 'global', cwd } = {}) {
+    const serverId = validateMcpId(id);
+    const serverConfig = normalizeMcpWriteConfig(config);
+    await this.updateClaudeJson((next) => {
+      const scopeConfig = ensureMcpScope(next, cwd, scope);
+      ensureMcpServersContainer(scopeConfig)[serverId] = serverConfig;
+      removeDisabledId(scopeConfig, serverId);
+      return next;
+    });
+    await this.syncMcpToClaudeSettings();
+    return this.listMcpServers(cwd);
+  }
+
+  async deleteMcpServer({ id, scope = 'global', cwd } = {}) {
+    const serverId = validateMcpId(id);
+    await this.updateClaudeJson((next) => {
+      const scopeConfig = ensureMcpScope(next, cwd, scope);
+      const servers = ensureMcpServersContainer(scopeConfig);
+      if (!Object.prototype.hasOwnProperty.call(servers, serverId)) {
+        throw new Error('MCP server not found');
+      }
+      delete servers[serverId];
+      removeDisabledId(scopeConfig, serverId);
+      return next;
+    });
+    await this.syncMcpToClaudeSettings();
+    return this.listMcpServers(cwd);
+  }
+
+  async toggleMcpServer({ id, enabled, scope = 'global', cwd } = {}) {
+    const serverId = validateMcpId(id);
+    if (typeof enabled !== 'boolean') throw new Error('MCP enabled state must be boolean');
+    await this.updateClaudeJson((next) => {
+      const scopeConfig = ensureMcpScope(next, cwd, scope);
+      const servers = ensureMcpServersContainer(scopeConfig);
+      if (!Object.prototype.hasOwnProperty.call(servers, serverId)) {
+        throw new Error('MCP server not found');
+      }
+      const disabled = ensureDisabledList(scopeConfig);
+      if (enabled) {
+        removeDisabledId(scopeConfig, serverId);
+        if (scope === 'project') removeDisabledId(next, serverId);
+      } else if (!disabled.includes(serverId)) {
+        disabled.push(serverId);
+      }
+      return next;
+    });
+    await this.syncMcpToClaudeSettings();
+    return this.listMcpServers(cwd);
+  }
+
+  async readSkillsDirectory(directory, scope, enabled) {
     if (!existsSync(directory)) return {};
     const skills = {};
     const entries = await fs.readdir(directory, { withFileTypes: true });
 
     for (const entry of entries) {
-      let skillPath = path.join(directory, entry.name);
-      let type = 'file';
-      if (entry.isDirectory()) {
-        type = 'directory';
-        const candidates = ['SKILL.md', 'skill.md'];
-        const candidate = candidates.find(name => existsSync(path.join(skillPath, name)));
-        if (!candidate) continue;
-        skillPath = path.join(skillPath, candidate);
-      } else if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) {
-        continue;
-      }
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const directoryPath = path.join(directory, entry.name);
+      const skillFileName = ['SKILL.md', 'skill.md'].find(name => existsSync(path.join(directoryPath, name)));
+      if (!skillFileName) continue;
 
-      const content = await fs.readFile(skillPath, 'utf8');
-      const stat = await fs.stat(skillPath);
-      const fallbackName = type === 'directory'
-        ? entry.name
-        : entry.name.replace(/\.md$/i, '');
-      const name = frontmatterValue(content, 'name') || fallbackName;
+      const skillFilePath = path.join(directoryPath, skillFileName);
+      const content = await fs.readFile(skillFilePath, 'utf8');
+      const stat = await fs.stat(directoryPath);
+      const displayName = frontmatterValue(content, 'name') || entry.name;
       const description = frontmatterValue(content, 'description');
-      skills[name] = {
-        id: `${scope}-${name}`,
-        name,
-        type,
+      const id = `${scope}-${entry.name}${enabled ? '' : '-disabled'}`;
+      const skill = {
+        id,
+        skillName: entry.name,
+        name: displayName,
+        type: 'directory',
         scope,
-        path: type === 'directory' ? path.dirname(skillPath) : skillPath,
-        enabled: true,
-        ...(description ? { description } : {}),
+        path: directoryPath,
+        enabled,
+        ...(description ? { description } : { warning: 'invalid_frontmatter' }),
         createdAt: stat.birthtime.toISOString(),
         modifiedAt: stat.mtime.toISOString(),
       };
+      skills[id] = skill;
+      // Keep the old name lookup available without duplicating the item in Object.values().
+      Object.defineProperty(skills, entry.name, {
+        configurable: true,
+        enumerable: false,
+        value: skill,
+      });
     }
 
     return skills;
   }
 
   async listSkills(cwd) {
-    const workspace = normalizeCwd(cwd || process.cwd());
     try {
-      return {
-        global: await this.readSkillsDirectory(path.join(this.claudeDir, 'skills'), 'global'),
-        local: await this.readSkillsDirectory(path.join(workspace, '.claude', 'skills'), 'local'),
+      const directories = {
+        global: skillDirectories(this.homeDir, 'global', cwd),
+        local: skillDirectories(this.homeDir, 'local', cwd),
       };
+      const result = {};
+      for (const [scope, locations] of Object.entries(directories)) {
+        result[scope] = {};
+        for (const records of [
+          await this.readSkillsDirectory(locations.active, scope, true),
+          await this.readSkillsDirectory(locations.managed, scope, false),
+        ]) {
+          for (const key of Object.keys(records)) result[scope][key] = records[key];
+          for (const key of Object.getOwnPropertyNames(records)) {
+            if (Object.prototype.propertyIsEnumerable.call(records, key)) continue;
+            Object.defineProperty(result[scope], key, {
+              configurable: true,
+              enumerable: false,
+              value: records[key],
+            });
+          }
+        }
+      }
+      return result;
     } catch (error) {
       console.error('[Desktop Skills] Failed to read Claude Skills:', error.message);
       return { global: {}, local: {} };
     }
+  }
+
+  async importSkills({ sourcePaths = [], scope = 'global', cwd } = {}) {
+    const paths = Array.isArray(sourcePaths) ? sourcePaths : [];
+    const locations = skillDirectories(this.homeDir, scope, cwd);
+    const imported = [];
+    const errors = [];
+    await fs.mkdir(locations.active, { recursive: true });
+
+    for (const sourcePath of paths) {
+      try {
+        if (typeof sourcePath !== 'string' || !sourcePath.trim()) throw new Error('Source path is required');
+        const source = path.resolve(sourcePath);
+        const sourceStat = await fs.stat(source);
+        if (!sourceStat.isDirectory()) throw new Error('Only Skill directories can be imported');
+        const name = validateSkillName(path.basename(source));
+        const target = skillPath(locations.active, name);
+        if (existsSync(target)) throw new Error(`Skill already exists: ${name}`);
+        const skillFile = ['SKILL.md', 'skill.md'].find(file => existsSync(path.join(source, file)));
+        if (!skillFile) throw new Error('Skill directory must contain SKILL.md or skill.md');
+
+        const temporary = path.join(locations.active, `.${name}.ccnexus-import-${process.pid}-${Date.now()}`);
+        try {
+          await copyDirectory(source, temporary);
+          await fs.rename(temporary, target);
+        } finally {
+          if (existsSync(temporary)) await fs.rm(temporary, { recursive: true, force: true });
+        }
+        const skillState = await this.readSkillsDirectory(locations.active, scope, true);
+        imported.push(skillState[`${scope}-${name}`] || {
+          id: `${scope}-${name}`,
+          name,
+          type: 'directory',
+          scope,
+          path: target,
+          enabled: true,
+        });
+      } catch (error) {
+        errors.push({ path: sourcePath, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return {
+      success: imported.length > 0,
+      count: imported.length,
+      total: paths.length,
+      imported,
+      ...(errors.length ? { errors } : {}),
+    };
+  }
+
+  async deleteSkill({ name, scope = 'global', enabled = true, cwd } = {}) {
+    const safeName = validateSkillName(name);
+    const locations = skillDirectories(this.homeDir, scope, cwd);
+    const directory = enabled ? locations.active : locations.managed;
+    const target = skillPath(directory, safeName);
+    if (!existsSync(target)) return { success: false, error: `Skill does not exist: ${safeName}` };
+    await fs.rm(target, { recursive: true, force: true });
+    return { success: true, name: safeName, scope, enabled };
+  }
+
+  async toggleSkill({ name, scope = 'global', enabled = true, cwd } = {}) {
+    const safeName = validateSkillName(name);
+    if (typeof enabled !== 'boolean') throw new Error('Skill enabled state must be boolean');
+    const locations = skillDirectories(this.homeDir, scope, cwd);
+    const sourceDirectory = enabled ? locations.active : locations.managed;
+    const targetDirectory = enabled ? locations.managed : locations.active;
+    const source = skillPath(sourceDirectory, safeName);
+    const target = skillPath(targetDirectory, safeName);
+    if (!existsSync(source)) {
+      return { success: false, error: `Skill does not exist in the ${enabled ? 'active' : 'management'} directory: ${safeName}` };
+    }
+    if (existsSync(target)) {
+      return { success: false, conflict: true, error: `A Skill with the same name already exists at the target: ${safeName}` };
+    }
+    await fs.mkdir(targetDirectory, { recursive: true });
+    await moveDirectory(source, target);
+    return { success: true, name: safeName, scope, enabled: !enabled, path: target };
+  }
+
+  async openSkill({ skillPath, cwd } = {}) {
+    if (typeof skillPath !== 'string' || !skillPath.trim()) throw new Error('Skill path is required');
+    const requested = path.resolve(skillPath);
+    const locations = [
+      skillDirectories(this.homeDir, 'global', cwd),
+      skillDirectories(this.homeDir, 'local', cwd),
+    ];
+    const allowed = locations.some(({ active, managed }) => pathInside(path.resolve(active), requested) || pathInside(path.resolve(managed), requested));
+    if (!allowed) throw new Error('Skill path is outside Claude Skill directories');
+    if (!existsSync(requested)) throw new Error('Skill path does not exist');
+    const stat = await fs.stat(requested);
+    let target = requested;
+    if (stat.isDirectory()) {
+      const candidate = ['SKILL.md', 'skill.md'].find(name => existsSync(path.join(requested, name)));
+      if (candidate) target = path.join(requested, candidate);
+    }
+    return { success: true, path: target };
   }
 
   async listAgents(cwd) {

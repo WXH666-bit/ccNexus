@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import electronUpdater from 'electron-updater';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -13,6 +13,7 @@ import { LocalConfigService } from './runtime/localConfigService.js';
 import { DesktopSessionService } from './runtime/sessionService.js';
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 import { AppearancePreferences } from './runtime/appearancePreferences.js';
+import { McpStatusService } from './runtime/mcpStatusService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { autoUpdater } = electronUpdater;
@@ -33,6 +34,7 @@ const appearancePreferences = new AppearancePreferences({
   backgroundFile: appearanceBackgroundFile,
 });
 const localConfig = new LocalConfigService();
+const mcpStatus = new McpStatusService();
 const desktopSessions = new DesktopSessionService({ cwd: process.cwd() });
 const sessionController = createDesktopSessionController({
   runtime,
@@ -235,7 +237,81 @@ ipcMain.handle('desktop:get-agent', async (_event, args = {}) => localConfig.get
 
 ipcMain.handle('desktop:get-mcp-servers', async () => localConfig.listMcpServers(workspaceFiles.getWorkspace().cwd));
 
+ipcMain.handle('desktop:save-mcp-server', async (_event, args = {}) => localConfig.saveMcpServer({
+  ...args,
+  cwd: workspaceFiles.getWorkspace().cwd,
+}));
+
+ipcMain.handle('desktop:delete-mcp-server', async (_event, args = {}) => localConfig.deleteMcpServer({
+  ...args,
+  cwd: workspaceFiles.getWorkspace().cwd,
+}));
+
+ipcMain.handle('desktop:toggle-mcp-server', async (_event, args = {}) => localConfig.toggleMcpServer({
+  ...args,
+  cwd: workspaceFiles.getWorkspace().cwd,
+}));
+
+ipcMain.handle('desktop:get-mcp-status', async () => {
+  const snapshot = await localConfig.getMcpServerRuntimeSnapshot(workspaceFiles.getWorkspace().cwd);
+  return mcpStatus.getStatuses(snapshot);
+});
+
+ipcMain.handle('desktop:get-mcp-tools', async (_event, args = {}) => {
+  const snapshot = await localConfig.getMcpServerRuntimeSnapshot(workspaceFiles.getWorkspace().cwd);
+  const server = snapshot.servers.find(item => item.id === args.id
+    && (!args.scope || item.scope === args.scope));
+  if (!server) {
+    return {
+      id: String(args.id || ''),
+      scope: args.scope === 'project' ? 'project' : 'global',
+      serverType: null,
+      tools: [],
+      error: 'MCP server not found or disabled',
+    };
+  }
+  return mcpStatus.getTools(server);
+});
+
+ipcMain.handle('desktop:get-mcp-server-for-edit', async (_event, args = {}) => localConfig.getMcpServerForEdit({
+  ...args,
+  cwd: workspaceFiles.getWorkspace().cwd,
+}));
+
 ipcMain.handle('desktop:get-skills', async () => localConfig.listSkills(workspaceFiles.getWorkspace().cwd));
+
+ipcMain.handle('desktop:import-skills', async (_event, args = {}) => {
+  const scope = args.scope === 'local' ? 'local' : 'global';
+  const selection = await dialog.showOpenDialog(mainWindow, {
+    title: scope === 'local' ? '导入项目 Skill' : '导入全局 Skill',
+    properties: ['openDirectory', 'multiSelections'],
+  });
+  if (selection.canceled) return { canceled: true, success: false, count: 0, total: 0, imported: [] };
+  return localConfig.importSkills({
+    sourcePaths: selection.filePaths,
+    scope,
+    cwd: workspaceFiles.getWorkspace().cwd,
+  });
+});
+
+ipcMain.handle('desktop:delete-skill', async (_event, args = {}) => localConfig.deleteSkill({
+  ...args,
+  cwd: workspaceFiles.getWorkspace().cwd,
+}));
+
+ipcMain.handle('desktop:toggle-skill', async (_event, args = {}) => localConfig.toggleSkill({
+  ...args,
+  cwd: workspaceFiles.getWorkspace().cwd,
+}));
+
+ipcMain.handle('desktop:open-skill', async (_event, args = {}) => {
+  const result = await localConfig.openSkill({
+    skillPath: args.path,
+    cwd: workspaceFiles.getWorkspace().cwd,
+  });
+  const error = await shell.openPath(result.path);
+  return error ? { ...result, success: false, error } : result;
+});
 
 ipcMain.handle('desktop:get-commands', async () => localConfig.listCommands());
 

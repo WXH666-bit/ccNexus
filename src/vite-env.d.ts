@@ -113,7 +113,17 @@ interface CcNexusDesktopApi {
   getAgents: () => Promise<{ agents: unknown[] }>;
   getAgent: (name: string) => Promise<unknown>;
   getMcpServers: () => Promise<unknown>;
+  saveMcpServer: (server: { id: string; config: Record<string, unknown>; scope: 'global' | 'project' }) => Promise<unknown>;
+  deleteMcpServer: (server: { id: string; scope: 'global' | 'project' }) => Promise<unknown>;
+  toggleMcpServer: (server: { id: string; scope: 'global' | 'project'; enabled: boolean }) => Promise<unknown>;
+  getMcpStatus: () => Promise<unknown>;
+  getMcpTools: (server: { id: string; scope?: 'global' | 'project' }) => Promise<unknown>;
+  getMcpServerForEdit: (server: { id: string; scope: 'global' | 'project' }) => Promise<unknown>;
   getSkills: () => Promise<unknown>;
+  importSkills: (scope: 'global' | 'local') => Promise<unknown>;
+  deleteSkill: (skill: { name: string; scope: 'global' | 'local'; enabled: boolean }) => Promise<unknown>;
+  toggleSkill: (skill: { name: string; scope: 'global' | 'local'; enabled: boolean }) => Promise<unknown>;
+  openSkill: (skill: { path: string }) => Promise<unknown>;
   getCommands: () => Promise<{ commands: unknown[] }>;
   getPrompts: () => Promise<{ prompts: unknown[] }>;
   savePrompt: (prompt: { name: string; content: string }) => Promise<unknown>;

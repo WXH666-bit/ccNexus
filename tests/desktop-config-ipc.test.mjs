@@ -18,6 +18,16 @@ test('desktop main and preload expose local config and completion IPC', () => {
   assert.doesNotMatch(main, /desktop:add-provider|desktop:update-provider|desktop:delete-provider/);
   assert.match(main, /ipcMain\.handle\('desktop:get-agents'/);
   assert.match(main, /ipcMain\.handle\('desktop:get-agent'/);
+  assert.match(main, /ipcMain\.handle\('desktop:save-mcp-server'/);
+  assert.match(main, /ipcMain\.handle\('desktop:delete-mcp-server'/);
+  assert.match(main, /ipcMain\.handle\('desktop:toggle-mcp-server'/);
+  assert.match(main, /ipcMain\.handle\('desktop:get-mcp-status'/);
+  assert.match(main, /ipcMain\.handle\('desktop:get-mcp-tools'/);
+  assert.match(main, /ipcMain\.handle\('desktop:get-mcp-server-for-edit'/);
+  assert.match(main, /ipcMain\.handle\('desktop:import-skills'/);
+  assert.match(main, /ipcMain\.handle\('desktop:delete-skill'/);
+  assert.match(main, /ipcMain\.handle\('desktop:toggle-skill'/);
+  assert.match(main, /ipcMain\.handle\('desktop:open-skill'/);
   assert.match(main, /ipcMain\.handle\('desktop:get-commands'/);
   assert.match(main, /ipcMain\.handle\('desktop:get-prompts'/);
   assert.match(main, /ipcMain\.handle\('desktop:save-prompt'/);
@@ -29,6 +39,16 @@ test('desktop main and preload expose local config and completion IPC', () => {
   assert.doesNotMatch(preload, /addProvider:|updateProvider:|deleteProvider:/);
   assert.match(preload, /getAgents:/);
   assert.match(preload, /getAgent:/);
+  assert.match(preload, /saveMcpServer:/);
+  assert.match(preload, /deleteMcpServer:/);
+  assert.match(preload, /toggleMcpServer:/);
+  assert.match(preload, /getMcpStatus:/);
+  assert.match(preload, /getMcpTools:/);
+  assert.match(preload, /getMcpServerForEdit:/);
+  assert.match(preload, /importSkills:/);
+  assert.match(preload, /deleteSkill:/);
+  assert.match(preload, /toggleSkill:/);
+  assert.match(preload, /openSkill:/);
   assert.match(preload, /getCommands:/);
   assert.match(preload, /getPrompts:/);
   assert.match(preload, /savePrompt:/);
@@ -43,6 +63,16 @@ test('client data api uses desktop IPC without broker fetch fallback', () => {
   assert.match(api, /requireDesktopApi\(\)\.switchProvider/);
   assert.doesNotMatch(api, /requireDesktopApi\(\)\.(addProvider|updateProvider|deleteProvider)/);
   assert.match(api, /requireDesktopApi\(\)\.getAgents/);
+  assert.match(api, /requireDesktopApi\(\)\.saveMcpServer/);
+  assert.match(api, /requireDesktopApi\(\)\.deleteMcpServer/);
+  assert.match(api, /requireDesktopApi\(\)\.toggleMcpServer/);
+  assert.match(api, /requireDesktopApi\(\)\.getMcpStatus/);
+  assert.match(api, /requireDesktopApi\(\)\.getMcpTools/);
+  assert.match(api, /requireDesktopApi\(\)\.getMcpServerForEdit/);
+  assert.match(api, /requireDesktopApi\(\)\.importSkills/);
+  assert.match(api, /requireDesktopApi\(\)\.deleteSkill/);
+  assert.match(api, /requireDesktopApi\(\)\.toggleSkill/);
+  assert.match(api, /requireDesktopApi\(\)\.openSkill/);
   assert.match(api, /requireDesktopApi\(\)\.getCommands/);
   assert.match(api, /requireDesktopApi\(\)\.getPrompts/);
   assert.match(api, /requireDesktopApi\(\)\.savePrompt/);
@@ -106,6 +136,47 @@ test('desktop local config service mirrors existing Claude-side readers without 
   }
 });
 
+test('Claude config write helpers preserve unrelated fields and sync only MCP fields', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-claude-config-write-'));
+  const claudeJsonPath = path.join(homeDir, '.claude.json');
+  const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+
+  try {
+    await mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    await writeFile(claudeJsonPath, JSON.stringify({
+      customState: { keep: true },
+      mcpServers: { existing: { command: 'node', args: ['existing.mjs'] } },
+      disabledMcpServers: ['old-disabled'],
+    }), 'utf8');
+    await writeFile(settingsPath, JSON.stringify({
+      env: { ANTHROPIC_MODEL: 'keep-model' },
+      hooks: { keep: true },
+    }), 'utf8');
+
+    const service = new LocalConfigService({ homeDir });
+    await service.updateClaudeJson(config => {
+      config.mcpServers.added = { command: 'node', args: ['added.mjs'] };
+      config.disabledMcpServers = ['added-disabled'];
+      return config;
+    });
+
+    const updatedClaudeJson = JSON.parse(readFileSync(claudeJsonPath, 'utf8'));
+    assert.deepEqual(updatedClaudeJson.customState, { keep: true });
+    assert.deepEqual(updatedClaudeJson.mcpServers.added, { command: 'node', args: ['added.mjs'] });
+    assert.deepEqual(updatedClaudeJson.disabledMcpServers, ['added-disabled']);
+
+    await service.syncMcpToClaudeSettings();
+    const updatedSettings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    assert.deepEqual(updatedSettings.env, { ANTHROPIC_MODEL: 'keep-model' });
+    assert.deepEqual(updatedSettings.hooks, { keep: true });
+    assert.deepEqual(updatedSettings.mcpServers, updatedClaudeJson.mcpServers);
+    assert.deepEqual(updatedSettings.disabledMcpServers, ['added-disabled']);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
 test('desktop provider modes ignore external and ccNexus provider records', async () => {
   const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-provider-mode-isolation-'));
@@ -147,7 +218,7 @@ test('desktop provider modes ignore external and ccNexus provider records', asyn
   }
 });
 
-test('desktop local config exposes ccgui-style read-only MCP and Skills state', async () => {
+test('desktop local config exposes merged Claude MCP and Skills state', async () => {
   const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-mcp-skills-state-'));
   const cwd = path.join(homeDir, 'workspace');
@@ -185,13 +256,77 @@ test('desktop local config exposes ccgui-style read-only MCP and Skills state', 
     const service = new LocalConfigService({ homeDir });
     const before = readFileSync(claudeJsonPath, 'utf8');
     const mcp = await service.listMcpServers(cwd);
+    const runtimeMcp = await service.getMcpServerRuntimeSnapshot(cwd);
+    const editable = await service.getMcpServerForEdit({ id: 'globalDocs', scope: 'global', cwd });
     const skills = await service.listSkills(cwd);
 
-    assert.deepEqual(mcp.servers.map(server => server.id), ['projectDocs']);
-    assert.deepEqual(mcp.disabled, []);
+    assert.deepEqual(mcp.servers.map(server => server.id), ['globalDocs', 'projectDocs']);
+    assert.deepEqual(mcp.disabled, [{ id: 'disabledGlobal', scope: 'global', reason: 'Server is disabled' }]);
+    assert.deepEqual(runtimeMcp.servers.map(server => server.id), ['globalDocs', 'projectDocs']);
+    assert.deepEqual(runtimeMcp.disabled, mcp.disabled);
+    assert.equal(editable.config.command, 'node');
     assert.equal(skills.global.reviewer.description, 'Review changes');
     assert.equal(skills.local['local-check'].description, 'Check local files');
     assert.equal(readFileSync(claudeJsonPath, 'utf8'), before);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('Claude MCP management writes only the requested scope and refreshes settings', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-mcp-management-'));
+  const cwd = path.join(homeDir, 'workspace');
+  const claudeJsonPath = path.join(homeDir, '.claude.json');
+  const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+
+  try {
+    await mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    await writeFile(claudeJsonPath, JSON.stringify({
+      unrelated: { keep: true },
+      mcpServers: { shared: { command: 'node', args: ['global.mjs'] } },
+      projects: {
+        [cwd]: {
+          unrelatedProject: 'keep',
+          mcpServers: {},
+          disabledMcpServers: [],
+        },
+      },
+    }), 'utf8');
+    await writeFile(settingsPath, JSON.stringify({ env: { KEEP: 'yes' } }), 'utf8');
+
+    const service = new LocalConfigService({ homeDir });
+    await service.saveMcpServer({
+      id: 'global-tool',
+      config: { command: 'node', args: ['global-tool.mjs'] },
+      scope: 'global',
+      cwd,
+    });
+    await service.saveMcpServer({
+      id: 'project-tool',
+      config: { command: 'node', args: ['project-tool.mjs'] },
+      scope: 'project',
+      cwd,
+    });
+
+    let config = JSON.parse(readFileSync(claudeJsonPath, 'utf8'));
+    assert.deepEqual(config.unrelated, { keep: true });
+    assert.deepEqual(config.projects[cwd].unrelatedProject, 'keep');
+    assert.deepEqual(config.mcpServers['global-tool'], { command: 'node', args: ['global-tool.mjs'] });
+    assert.deepEqual(config.projects[cwd].mcpServers['project-tool'], { command: 'node', args: ['project-tool.mjs'] });
+
+    await service.toggleMcpServer({ id: 'project-tool', enabled: false, scope: 'project', cwd });
+    let state = await service.listMcpServers(cwd);
+    assert.ok(state.disabled.some(item => item.id === 'project-tool' && item.scope === 'project'));
+
+    await service.toggleMcpServer({ id: 'project-tool', enabled: true, scope: 'project', cwd });
+    state = await service.listMcpServers(cwd);
+    assert.ok(state.servers.some(server => server.id === 'project-tool'));
+
+    await service.deleteMcpServer({ id: 'project-tool', scope: 'project', cwd });
+    config = JSON.parse(readFileSync(claudeJsonPath, 'utf8'));
+    assert.equal(config.projects[cwd].mcpServers['project-tool'], undefined);
+    assert.deepEqual(JSON.parse(readFileSync(settingsPath, 'utf8')).env, { KEEP: 'yes' });
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

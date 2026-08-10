@@ -78,17 +78,76 @@ export async function getAgents() {
 export async function getMcpServers() {
   return await requireDesktopApi().getMcpServers() as {
     servers: Array<{ id: string; name: string; enabled: boolean; scope: string; config: Record<string, unknown> }>;
-    disabled: string[];
-    invalid: Array<{ id: string; reason: string }>;
+    disabled: Array<{ id: string; scope: string; reason: string }>;
+    invalid: Array<{ id: string; scope: string; reason: string; config: Record<string, unknown> }>;
     scope: string;
+    scopeSummary?: { global: number; project: number };
+    error?: string;
+  };
+}
+
+export async function saveMcpServer(server: { id: string; config: Record<string, unknown>; scope: 'global' | 'project' }) {
+  return await requireDesktopApi().saveMcpServer(server);
+}
+
+export async function deleteMcpServer(server: { id: string; scope: 'global' | 'project' }) {
+  return await requireDesktopApi().deleteMcpServer(server);
+}
+
+export async function toggleMcpServer(server: { id: string; scope: 'global' | 'project'; enabled: boolean }) {
+  return await requireDesktopApi().toggleMcpServer(server);
+}
+
+export async function getMcpStatus() {
+  return await requireDesktopApi().getMcpStatus() as Array<{
+    id: string;
+    scope: 'global' | 'project';
+    status: 'connected' | 'failed' | 'pending';
+    serverInfo?: Record<string, unknown> | null;
+    error?: string | null;
+  }>;
+}
+
+export async function getMcpTools(server: { id: string; scope?: 'global' | 'project' }) {
+  return await requireDesktopApi().getMcpTools(server) as {
+    id: string;
+    scope: 'global' | 'project';
+    serverType: string | null;
+    tools: Array<Record<string, unknown>>;
+    error?: string | null;
+  };
+}
+
+export async function getMcpServerForEdit(server: { id: string; scope: 'global' | 'project' }) {
+  return await requireDesktopApi().getMcpServerForEdit(server) as {
+    id: string;
+    name: string;
+    scope: 'global' | 'project';
+    config: Record<string, unknown>;
   };
 }
 
 export async function getSkills() {
   return await requireDesktopApi().getSkills() as {
-    global: Record<string, { id: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
-    local: Record<string, { id: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
+    global: Record<string, { id: string; skillName?: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
+    local: Record<string, { id: string; skillName?: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
   };
+}
+
+export async function importSkills(scope: 'global' | 'local') {
+  return await requireDesktopApi().importSkills(scope);
+}
+
+export async function deleteSkill(skill: { name: string; scope: 'global' | 'local'; enabled: boolean }) {
+  return await requireDesktopApi().deleteSkill(skill);
+}
+
+export async function toggleSkill(skill: { name: string; scope: 'global' | 'local'; enabled: boolean }) {
+  return await requireDesktopApi().toggleSkill(skill);
+}
+
+export async function openSkill(skillPath: string) {
+  return await requireDesktopApi().openSkill({ path: skillPath });
 }
 
 export async function getCommands() {
