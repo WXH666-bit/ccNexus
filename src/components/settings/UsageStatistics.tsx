@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, ChevronLeft, ChevronRight, Folder, FolderOpen, LayoutDashboard, List, RefreshCw, Sparkles } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, Folder, FolderOpen, LayoutDashboard, List, RefreshCw, Sparkles, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getUsageStatistics } from '../../utils/desktopBridgeApi';
 
@@ -14,9 +14,16 @@ interface UsageTotals {
 interface UsageDay {
   date: string;
   sessions: number;
+  requestCount?: number;
   usage: UsageTotals;
   cost: number;
   modelsUsed?: string[];
+}
+
+interface UsageToday extends UsageTotals {
+  requestCount: number;
+  sessions: number;
+  cost: number;
 }
 
 interface UsageSession {
@@ -47,6 +54,7 @@ interface UsageStatisticsData {
   estimatedCost: number;
   sessions: UsageSession[];
   dailyUsage: UsageDay[];
+  todayUsage: UsageToday;
   byModel: UsageModel[];
   lastUpdated?: number;
   weeklyComparison?: {
@@ -68,6 +76,13 @@ const EMPTY_USAGE: UsageTotals = {
   totalTokens: 0,
 };
 
+const EMPTY_TODAY_USAGE: UsageToday = {
+  ...EMPTY_USAGE,
+  requestCount: 0,
+  sessions: 0,
+  cost: 0,
+};
+
 function formatTokens(value: number) {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -77,6 +92,14 @@ function formatTokens(value: number) {
 
 function formatCost(value: number) {
   return `$${value.toFixed(4)}`;
+}
+
+function formatExactTokens(value: number) {
+  return Math.round(value).toLocaleString();
+}
+
+function formatWan(value: number) {
+  return value >= 10_000 ? `≈ ${(value / 10_000).toFixed(2)} 万` : '';
 }
 
 function addUsage(target: UsageTotals, source: UsageTotals) {
@@ -91,6 +114,17 @@ function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
   return next.getTime();
+}
+
+function dateKeyStart(dateKey: string) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  if (!year || !month || !day) return Number.NaN;
+  return new Date(year, month - 1, day).getTime();
+}
+
+function calculateCacheHitRate(usage: UsageTotals) {
+  const denominator = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
+  return denominator > 0 ? (usage.cacheReadTokens / denominator) * 100 : 0;
 }
 
 function formatDate(timestamp: number) {
@@ -132,18 +166,20 @@ export default function UsageStatistics() {
     const sumSince = (since: number) => {
       const usage = { ...EMPTY_USAGE };
       for (const day of statistics?.dailyUsage || []) {
-        if (new Date(day.date).getTime() >= since) addUsage(usage, day.usage);
+        if (dateKeyStart(day.date) >= since) addUsage(usage, day.usage);
       }
       return usage;
     };
-    return { today: sumSince(todayStart), week: sumSince(weekStart), month: sumSince(monthStart) };
+    return { week: sumSince(weekStart), month: sumSince(monthStart) };
   }, [statistics]);
 
+  const todayUsage = statistics?.todayUsage || EMPTY_TODAY_USAGE;
+
   const cacheHitRate = useMemo(() => {
-    const usage = statistics?.totalUsage || EMPTY_USAGE;
-    const denominator = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
-    return denominator > 0 ? (usage.cacheReadTokens / denominator) * 100 : 0;
+    return calculateCacheHitRate(statistics?.totalUsage || EMPTY_USAGE);
   }, [statistics]);
+
+  const todayCacheHitRate = useMemo(() => calculateCacheHitRate(todayUsage), [todayUsage]);
 
   const filteredSessions = useMemo(() => {
     const cutoff = dateRange === 'all'
@@ -160,7 +196,7 @@ export default function UsageStatistics() {
     const cutoff = dateRange === 'all'
       ? 0
       : Date.now() - (dateRange === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000;
-    return (statistics?.dailyUsage || []).filter(day => new Date(day.date).getTime() >= cutoff);
+    return (statistics?.dailyUsage || []).filter(day => dateKeyStart(day.date) >= cutoff);
   }, [dateRange, statistics]);
 
   const pageSize = 12;
@@ -227,6 +263,34 @@ export default function UsageStatistics() {
 
           {activeTab === 'overview' && (
             <>
+              <section className="usage-today-summary" aria-label="今日用量统计">
+                <div className="usage-today-header">
+                  <div className="usage-today-primary">
+                    <div className="usage-today-icon"><Zap size={24} /></div>
+                    <div>
+                      <span className="usage-today-label">今日真实消耗 Tokens</span>
+                      <div className="usage-today-value">
+                        {formatExactTokens(todayUsage.totalTokens)}
+                        {formatWan(todayUsage.totalTokens) && <span className="usage-today-wan">{formatWan(todayUsage.totalTokens)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="usage-today-side">
+                    <div><span>总请求数</span><strong>{formatExactTokens(todayUsage.requestCount)}</strong></div>
+                    <div><span>估算成本</span><strong className="usage-today-cost">{formatCost(todayUsage.cost)}</strong></div>
+                  </div>
+                </div>
+                <div className="usage-today-breakdown">
+                  <div className="usage-today-metric"><span>输入</span><strong>{formatTokens(todayUsage.inputTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>输出</span><strong>{formatTokens(todayUsage.outputTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>缓存创建</span><strong>{formatTokens(todayUsage.cacheWriteTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>缓存读取</span><strong>{formatTokens(todayUsage.cacheReadTokens)}</strong></div>
+                  <div className="usage-today-metric usage-today-cache">
+                    <div><span>缓存命中率</span><strong>{todayCacheHitRate.toFixed(1)}%</strong></div>
+                    <div className="usage-today-progress"><span style={{ width: `${Math.min(100, todayCacheHitRate)}%` }} /></div>
+                  </div>
+                </div>
+              </section>
               <div className="usage-stats">
                 <div className="stat-card"><h4>总费用</h4><div className="stat-value">{formatCost(statistics.estimatedCost)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.cost)} 较上周</span></div></div>
                 <div className="stat-card"><h4>总会话</h4><div className="stat-value">{statistics.totalSessions}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.sessions)} 较上周</span></div></div>
@@ -243,7 +307,7 @@ export default function UsageStatistics() {
                   <div key={className} className="usage-token-row"><div><span>{label}</span><strong>{formatTokens(value)}</strong></div><div className="usage-token-track"><span className={className} style={{ width: `${statistics.totalUsage.totalTokens ? Math.min(100, (value / statistics.totalUsage.totalTokens) * 100) : 0}%` }} /></div></div>
                 ))}
               </div>
-              <div className="usage-period-summary"><span>今日 {formatTokens(periods.today.totalTokens)}</span><span>本周 {formatTokens(periods.week.totalTokens)}</span><span>本月 {formatTokens(periods.month.totalTokens)}</span></div>
+              <div className="usage-period-summary"><span>本周 {formatTokens(periods.week.totalTokens)}</span><span>本月 {formatTokens(periods.month.totalTokens)}</span></div>
             </>
           )}
 

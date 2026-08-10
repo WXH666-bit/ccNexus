@@ -3,15 +3,33 @@ import { HashRouter } from 'react-router-dom';
 import App from './App';
 import './i18n';
 import './index.css';
+import {
+  applyAppearancePreferences,
+  getLocalAppearancePreferences,
+} from './utils/appearancePreferences';
 
-// Apply saved theme and font size on load
-const savedTheme = localStorage.getItem('theme') || 'dark';
-const savedFontSize = localStorage.getItem('fontSize') || '14';
-document.documentElement.setAttribute('data-theme', savedTheme);
-document.documentElement.style.setProperty('--base-font-size', `${savedFontSize}px`);
+async function bootstrap() {
+  const localAppearance = getLocalAppearancePreferences();
+  applyAppearancePreferences(localAppearance);
 
-createRoot(document.getElementById('root')!).render(
-  <HashRouter>
-    <App />
-  </HashRouter>
-);
+  const savedFontSize = localStorage.getItem('fontSize') || '14';
+  document.documentElement.style.setProperty('--base-font-size', `${savedFontSize}px`);
+
+  let appearance = localAppearance;
+  if (window.ccNexusDesktop) {
+    try {
+      appearance = await window.ccNexusDesktop.getAppearancePreferences();
+    } catch {
+      // Browser/dev mode can run without the Electron appearance bridge.
+    }
+  }
+  applyAppearancePreferences(appearance);
+
+  createRoot(document.getElementById('root')!).render(
+    <HashRouter>
+      <App />
+    </HashRouter>
+  );
+}
+
+void bootstrap();

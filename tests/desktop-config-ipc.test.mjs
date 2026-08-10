@@ -15,6 +15,7 @@ test('desktop main and preload expose local config and completion IPC', () => {
   assert.match(main, /LocalConfigService/);
   assert.match(main, /ipcMain\.handle\('desktop:get-providers'/);
   assert.match(main, /ipcMain\.handle\('desktop:switch-provider'/);
+  assert.doesNotMatch(main, /desktop:add-provider|desktop:update-provider|desktop:delete-provider/);
   assert.match(main, /ipcMain\.handle\('desktop:get-agents'/);
   assert.match(main, /ipcMain\.handle\('desktop:get-agent'/);
   assert.match(main, /ipcMain\.handle\('desktop:get-commands'/);
@@ -25,6 +26,7 @@ test('desktop main and preload expose local config and completion IPC', () => {
 
   assert.match(preload, /getProviders:/);
   assert.match(preload, /switchProvider:/);
+  assert.doesNotMatch(preload, /addProvider:|updateProvider:|deleteProvider:/);
   assert.match(preload, /getAgents:/);
   assert.match(preload, /getAgent:/);
   assert.match(preload, /getCommands:/);
@@ -39,6 +41,7 @@ test('client data api uses desktop IPC without broker fetch fallback', () => {
 
   assert.match(api, /requireDesktopApi\(\)\.getProviders/);
   assert.match(api, /requireDesktopApi\(\)\.switchProvider/);
+  assert.doesNotMatch(api, /requireDesktopApi\(\)\.(addProvider|updateProvider|deleteProvider)/);
   assert.match(api, /requireDesktopApi\(\)\.getAgents/);
   assert.match(api, /requireDesktopApi\(\)\.getCommands/);
   assert.match(api, /requireDesktopApi\(\)\.getPrompts/);
@@ -103,48 +106,42 @@ test('desktop local config service mirrors existing Claude-side readers without 
   }
 });
 
-test('desktop local config reads ccgui codemoss provider state for model mapping', async () => {
+test('desktop provider modes ignore external and ccNexus provider records', async () => {
   const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-codemoss-config-'));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-provider-mode-isolation-'));
 
   try {
+    await mkdir(path.join(homeDir, '.cc-switch'), { recursive: true });
     await mkdir(path.join(homeDir, '.codemoss'), { recursive: true });
+    await mkdir(path.join(homeDir, '.ccnexus'), { recursive: true });
     await mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    await writeFile(path.join(homeDir, '.cc-switch', 'cc-switch.db'), 'external provider database', 'utf8');
     await writeFile(
       path.join(homeDir, '.codemoss', 'config.json'),
-      JSON.stringify({
-        claude: {
-          current: 'deepseek-provider',
-          providers: {
-            'deepseek-provider': {
-              name: 'DeepSeek',
-              settingsConfig: {
-                env: {
-                  ANTHROPIC_MODEL: 'deepseek-v4-pro[1M]',
-                  ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro[1M]',
-                  ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro[1M]',
-                  ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash',
-                },
-              },
-            },
-          },
-        },
-      }),
+      JSON.stringify({ claude: { current: 'codemoss-provider', providers: {
+        'codemoss-provider': { name: 'codemoss provider', settingsConfig: { env: { ANTHROPIC_MODEL: 'external-model' } } },
+      } } }),
       'utf8',
     );
     await writeFile(
-      path.join(homeDir, '.claude', 'settings.json'),
-      JSON.stringify({ env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'stale-sonnet' } }),
+      path.join(homeDir, '.ccnexus', 'providers.json'),
+      JSON.stringify([{ id: 'ccnexus-provider', name: 'ccNexus provider' }]),
       'utf8',
     );
+    const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+    await writeFile(settingsPath, JSON.stringify({ env: { ANTHROPIC_MODEL: 'local-model' } }), 'utf8');
 
     const service = new LocalConfigService({ homeDir });
     const providers = await service.getProviders();
 
-    assert.equal(providers.currentProviderId, 'deepseek-provider');
-    assert.equal(providers.providers.find(provider => provider.isActive)?.id, 'deepseek-provider');
-    assert.equal(providers.currentEnv.ANTHROPIC_MODEL, 'deepseek-v4-pro[1M]');
-    assert.equal(providers.currentEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'deepseek-v4-flash');
+    assert.deepEqual(providers.providers.map(provider => provider.id), [
+      '__local_settings_json__',
+      '__cli_login__',
+    ]);
+    assert.equal(providers.currentProviderId, '__local_settings_json__');
+    await assert.rejects(() => service.switchProvider('codemoss-provider'), /Provider not found/);
+    await assert.rejects(() => service.switchProvider('ccnexus-provider'), /Provider not found/);
+    assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')), JSON.stringify({ env: { ANTHROPIC_MODEL: 'local-model' } }));
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -200,12 +197,13 @@ test('desktop local config exposes ccgui-style read-only MCP and Skills state', 
   }
 });
 
-test('desktop local config follows ccgui cc-switch database filename and settings_config shape', () => {
+test('desktop provider service has no external provider-store integration', () => {
   const serviceSource = read('desktop/runtime/localConfigService.js');
 
-  assert.match(serviceSource, /cc-switch\.db/);
-  assert.doesNotMatch(serviceSource, /data\.db/);
-  assert.match(serviceSource, /settings_config/);
+  assert.doesNotMatch(serviceSource, /cc-switch\.db|readCcSwitchProviders|sql\.js/);
+  assert.doesNotMatch(serviceSource, /codemossConfigPath|readCodemossConfig|getCodemoss/);
+  assert.doesNotMatch(serviceSource, /ccnexusProvidersPath|readCcnexusProviders|writeCcnexusProviders/);
+  assert.doesNotMatch(serviceSource, /readManagedProviders/);
 });
 
 test('desktop main owns provider and prompt operations through LocalConfigService', () => {
@@ -234,37 +232,26 @@ test('provider switching resets the persistent runtime before the next query', (
   assert.match(mainSource, /chatController\.resetForProviderChange\(\)/);
 });
 
-test('provider switching persists only ccNexus-owned provider state', async () => {
+test('provider switching persists only the selected ccgui runtime mode', async () => {
   const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-provider-state-'));
 
   try {
-    await mkdir(path.join(homeDir, '.codemoss'), { recursive: true });
-    await writeFile(
-      path.join(homeDir, '.codemoss', 'config.json'),
-      JSON.stringify({
-        claude: {
-          current: 'provider-a',
-          providers: {
-            'provider-a': { name: 'Provider A', settingsConfig: { env: { ANTHROPIC_MODEL: 'model-a' } } },
-            'provider-b': { name: 'Provider B', settingsConfig: { env: { ANTHROPIC_MODEL: 'model-b' } } },
-          },
-        },
-      }),
-      'utf8',
-    );
     await mkdir(path.join(homeDir, '.claude'), { recursive: true });
     const settingsPath = path.join(homeDir, '.claude', 'settings.json');
     const originalSettings = JSON.stringify({ env: { ANTHROPIC_MODEL: 'original' } });
     await writeFile(settingsPath, originalSettings, 'utf8');
 
     const service = new LocalConfigService({ homeDir });
-    await service.switchProvider('provider-b');
+    await service.switchProvider('__cli_login__');
 
     assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')), originalSettings);
     const providers = await service.getProviders();
-    assert.equal(providers.currentProviderId, 'provider-b');
-    assert.equal(providers.currentEnv.ANTHROPIC_MODEL, 'model-b');
+    assert.equal(providers.currentProviderId, '__cli_login__');
+    assert.deepEqual(providers.providers.map(provider => provider.id), [
+      '__local_settings_json__',
+      '__cli_login__',
+    ]);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -306,6 +293,95 @@ test('desktop provider menu exposes ccgui special runtime modes without writing 
     assert.equal(providerState.providerId, '__cli_login__');
   } finally {
     await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test.skip('obsolete provider CRUD contract (ccgui exposes runtime modes only)', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-provider-crud-'));
+
+  try {
+    await mkdir(path.join(homeDir, '.claude'), { recursive: true });
+    const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+    const originalSettings = JSON.stringify({ env: { ANTHROPIC_MODEL: 'local-model' } });
+    await writeFile(settingsPath, originalSettings, 'utf8');
+
+    const service = new LocalConfigService({ homeDir });
+    const created = await service.addProvider({
+      name: '团队网关',
+      remark: '本地测试供应商',
+      api_key: 'secret-token',
+      base_url: 'https://gateway.example.test/anthropic',
+      model_mapping: { sonnet: 'team-sonnet', opus: 'team-opus' },
+    });
+
+    assert.equal(created.source, 'ccnexus');
+    assert.equal(created.name, '团队网关');
+    assert.match(created.id, /^[0-9a-f-]{36}$/);
+    assert.equal((await service.getProviders()).providers.find(provider => provider.id === created.id).source, 'ccnexus');
+    assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')), originalSettings);
+    assert.ok(await import('node:fs/promises').then(({ readFile }) => readFile(
+      path.join(homeDir, '.ccnexus', 'providers.json'),
+      'utf8',
+    )));
+
+    const updated = await service.updateProvider(created.id, {
+      name: '团队网关（更新）',
+      remark: '已更新',
+      api_key: 'updated-token',
+      base_url: 'https://gateway.example.test/v2',
+      model_mapping: { sonnet: 'updated-sonnet' },
+    });
+    assert.equal(updated.name, '团队网关（更新）');
+    assert.equal(updated.settingsConfig.env.ANTHROPIC_MODEL, undefined);
+    assert.equal(updated.model_mapping.sonnet, 'updated-sonnet');
+
+    await assert.rejects(
+      () => service.addProvider({ name: '团队网关（更新）', api_key: 'another-token' }),
+      /already exists/i,
+    );
+    await assert.rejects(
+      () => service.updateProvider('__cli_login__', { name: '不能修改' }),
+      /special provider/i,
+    );
+    await assert.rejects(
+      () => service.deleteProvider('__local_settings_json__'),
+      /special provider/i,
+    );
+
+    await service.switchProvider(created.id);
+    const deletion = await service.deleteProvider(created.id);
+    assert.equal(deletion.ok, true);
+    assert.equal(deletion.fallbackProviderId, '__local_settings_json__');
+    assert.equal((await service.getProviders()).currentProviderId, '__local_settings_json__');
+    assert.equal(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')), originalSettings);
+    await assert.rejects(
+      () => import('node:fs/promises').then(({ readFile }) => readFile(path.join(homeDir, '.ccnexus', 'providers.json'), 'utf8')),
+      /ENOENT|no such file/i,
+    );
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('provider management UI exposes only the two Claude runtime modes', () => {
+  const uiSource = read('src/components/settings/ProviderManageSection.tsx');
+
+  assert.match(uiSource, /__local_settings_json__/);
+  assert.match(uiSource, /__cli_login__/);
+  assert.match(uiSource, /switchProvider/);
+  assert.doesNotMatch(uiSource, /addProvider|updateProvider|deleteProvider|regularProviders|ProviderDialog/);
+  assert.doesNotMatch(uiSource, /setDialogOpen|setEditingProviderId|ProviderDialog/);
+  assert.doesNotMatch(uiSource, /deleteConfirm|handleDelete/);
+  assert.doesNotMatch(uiSource, /PROVIDER_PRESETS|智谱|Kimi|DeepSeek|MiniMax|OpenRouter/);
+});
+
+test('provider locale files contain the two Claude runtime mode vocabulary', () => {
+  const zh = JSON.parse(read('src/i18n/locales/zh.json'));
+  const en = JSON.parse(read('src/i18n/locales/en.json'));
+  for (const key of ['title', 'desc', 'localSettings', 'localSettingsDesc', 'cliLogin', 'cliLoginDesc', 'use', 'authorize', 'current']) {
+    assert.equal(typeof zh.settings.providers[key], 'string', `missing zh provider key: ${key}`);
+    assert.equal(typeof en.settings.providers[key], 'string', `missing en provider key: ${key}`);
   }
 });
 

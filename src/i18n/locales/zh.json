@@ -139,9 +139,13 @@
     "providers": {
       "title": "供应商管理",
       "desc": "配置 AI 模型供应商",
-      "add": "添加供应商",
-      "switch": "切换供应商",
-      "current": "当前供应商"
+      "current": "当前供应商",
+      "localSettings": "使用本地 settings.json",
+      "localSettingsDesc": "读取现有的 Claude Code settings.json，不会覆盖它。",
+      "cliLogin": "使用 CLI 登录信息",
+      "cliLoginDesc": "在当前桌面应用中复用 Claude Code CLI 登录状态。",
+      "use": "使用",
+      "authorize": "授权并启用"
     },
     "mcp": {
       "title": "MCP 服务器",
@@ -182,6 +186,19 @@
         "small": "小",
         "normal": "正常",
         "large": "大"
+      },
+      "background": {
+        "title": "聊天背景",
+        "desc": "只影响聊天工作区，不会修改 Claude Code 或 cc-switch 配置。",
+        "choose": "添加背景图片",
+        "replace": "更换背景图片",
+        "reset": "恢复默认",
+        "empty": "尚未添加自定义背景",
+        "desktopOnly": "自定义图片背景仅在桌面应用中可用",
+        "opacity": "图片透明度",
+        "blur": "背景模糊",
+        "overlay": "遮罩强度",
+        "invalid": "无法读取此图片，请选择 PNG、JPG、WebP 或 GIF 图片。"
       }
     },
     "prompt": {

@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   checkForUpdates: () => ipcRenderer.invoke('desktop:check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('desktop:download-update'),
   installUpdate: () => ipcRenderer.invoke('desktop:install-update'),
+  getAppearancePreferences: () => ipcRenderer.invoke('desktop:get-appearance-preferences'),
+  setTheme: (theme) => ipcRenderer.invoke('desktop:set-theme', theme),
+  saveAppearancePreferences: (preferences) => ipcRenderer.invoke('desktop:save-appearance-preferences', preferences),
+  chooseAppearanceBackground: () => ipcRenderer.invoke('desktop:choose-appearance-background'),
+  clearAppearanceBackground: () => ipcRenderer.invoke('desktop:clear-appearance-background'),
   onUpdateStatus: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('desktop:update-status', listener);

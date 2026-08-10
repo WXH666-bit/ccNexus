@@ -12,18 +12,26 @@ import { hideDefaultApplicationMenu } from './runtime/windowMenu.js';
 import { LocalConfigService } from './runtime/localConfigService.js';
 import { DesktopSessionService } from './runtime/sessionService.js';
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
+import { AppearancePreferences } from './runtime/appearancePreferences.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { autoUpdater } = electronUpdater;
 const preloadPath = path.join(__dirname, 'preload.cjs');
 const indexHtml = path.resolve(__dirname, '../dist/index.html');
-const desktopStateFile = path.join(process.env.HOME || os.homedir() || process.cwd(), '.ccnexus', 'desktop-state.json');
+const appDataDirectory = path.join(process.env.HOME || os.homedir() || process.cwd(), '.ccnexus');
+const desktopStateFile = path.join(appDataDirectory, 'desktop-state.json');
+const appearanceStateFile = path.join(appDataDirectory, 'appearance.json');
+const appearanceBackgroundFile = path.join(appDataDirectory, 'chat-background');
 
 const runtime = createDesktopRuntime({
   cwd: process.cwd(),
   provider: 'claude',
 });
 const workspaceFiles = new WorkspaceFileService({ cwd: process.cwd(), stateFile: desktopStateFile });
+const appearancePreferences = new AppearancePreferences({
+  stateFile: appearanceStateFile,
+  backgroundFile: appearanceBackgroundFile,
+});
 const localConfig = new LocalConfigService();
 const desktopSessions = new DesktopSessionService({ cwd: process.cwd() });
 const sessionController = createDesktopSessionController({
@@ -38,6 +46,12 @@ const chatController = createDesktopChatController({
 });
 
 let mainWindow = null;
+let currentAppearance = { theme: 'dark' };
+const TITLE_BAR_HEIGHT = 42;
+const TITLE_BAR_THEMES = {
+  dark: { color: '#1e1f22', symbolColor: '#9aa0a6' },
+  light: { color: '#ffffff', symbolColor: '#5f6368' },
+};
 const appUpdater = createAppUpdater({
   autoUpdater,
   isPackaged: app.isPackaged,
@@ -49,19 +63,30 @@ const appUpdater = createAppUpdater({
   },
 });
 
-function createMainWindow() {
+function applyWindowTheme(theme) {
+  const palette = theme === 'light' ? TITLE_BAR_THEMES.light : TITLE_BAR_THEMES.dark;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  mainWindow.setBackgroundColor(palette.color);
+  if (typeof mainWindow.setTitleBarOverlay === 'function') {
+    mainWindow.setTitleBarOverlay({ ...palette, height: TITLE_BAR_HEIGHT });
+  }
+}
+
+function createMainWindow(initialTheme = currentAppearance.theme) {
+  const palette = initialTheme === 'light' ? TITLE_BAR_THEMES.light : TITLE_BAR_THEMES.dark;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
     minWidth: 960,
     minHeight: 640,
     title: 'ccNexus',
-    backgroundColor: '#1e1f22',
+    backgroundColor: palette.color,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#1e1f22',
-      symbolColor: '#9aa0a6',
-      height: 42,
+      color: palette.color,
+      symbolColor: palette.symbolColor,
+      height: TITLE_BAR_HEIGHT,
     },
     webPreferences: {
       nodeIntegration: false,
@@ -70,6 +95,7 @@ function createMainWindow() {
       sandbox: true,
     },
   });
+  applyWindowTheme(initialTheme);
 
   const devUrl = 'http://127.0.0.1:5000/chat';
   if (app.isPackaged) {
@@ -101,6 +127,50 @@ ipcMain.handle('desktop:get-update-state', () => appUpdater.getState());
 ipcMain.handle('desktop:check-for-updates', () => appUpdater.checkForUpdates());
 ipcMain.handle('desktop:download-update', () => appUpdater.downloadUpdate());
 ipcMain.handle('desktop:install-update', () => appUpdater.installUpdate());
+
+ipcMain.handle('desktop:get-appearance-preferences', async () => {
+  currentAppearance = await appearancePreferences.get();
+  return currentAppearance;
+});
+
+ipcMain.handle('desktop:set-theme', async (_event, theme) => {
+  currentAppearance = await appearancePreferences.setTheme(theme);
+  applyWindowTheme(currentAppearance.theme);
+  return currentAppearance;
+});
+
+ipcMain.handle('desktop:save-appearance-preferences', async (_event, preferences = {}) => {
+  currentAppearance = await appearancePreferences.update(preferences);
+  return currentAppearance;
+});
+
+ipcMain.handle('desktop:choose-appearance-background', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择聊天背景图片',
+    properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return { canceled: true, preferences: await appearancePreferences.get() };
+  }
+
+  try {
+    currentAppearance = await appearancePreferences.importBackground(result.filePaths[0]);
+    return { canceled: false, preferences: currentAppearance };
+  } catch (error) {
+    return {
+      canceled: false,
+      preferences: await appearancePreferences.get(),
+      error: error instanceof Error ? error.message : '无法读取背景图片',
+    };
+  }
+});
+
+ipcMain.handle('desktop:clear-appearance-background', async () => {
+  currentAppearance = await appearancePreferences.clearBackground();
+  return currentAppearance;
+});
 
 ipcMain.handle('desktop:open-project', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -240,15 +310,17 @@ ipcMain.on('desktop:chat-command', (event, message = {}) => {
 
 app.whenReady().then(async () => {
   hideDefaultApplicationMenu(Menu);
+  const appearance = await appearancePreferences.load();
+  currentAppearance = appearance;
   const workspace = await workspaceFiles.restoreWorkspace();
   runtime.setCwd(workspace.cwd);
   desktopSessions.setCwd(workspace.cwd);
-  createMainWindow();
+  createMainWindow(appearance.theme);
   appUpdater.initialize();
   void appUpdater.checkForUpdates();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(currentAppearance.theme);
   });
 });
 

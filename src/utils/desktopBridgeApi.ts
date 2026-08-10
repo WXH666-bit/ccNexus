@@ -4,9 +4,6 @@ interface ProviderItem {
   isActive?: boolean;
   isLocalProvider?: boolean;
   isCliLoginProvider?: boolean;
-  base_url?: string;
-  api_key?: string;
-  model_mapping?: string | Record<string, string>;
 }
 
 interface AgentItem {

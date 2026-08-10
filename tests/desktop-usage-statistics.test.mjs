@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,6 +53,93 @@ test('desktop usage aggregation follows ccgui message-id deduplication and model
     assert.equal(statistics.byModel[0].model, 'deepseek-v4-pro');
     assert.equal(statistics.byModel[0].sessionCount, 1);
     assert.equal(statistics.dailyUsage[0].sessions, 1);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop usage aggregation returns an accurate local-day summary', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-today-'));
+  const workspace = path.join(homeDir, 'workspace');
+
+  try {
+    const service = new DesktopSessionService({ homeDir, cwd: workspace });
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayTimestamp = startOfToday.getTime() + 60 * 60 * 1000;
+    const yesterdayTimestamp = startOfToday.getTime() - 60 * 60 * 1000;
+    const todayUsage = {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_creation_input_tokens: 5,
+      cache_read_input_tokens: 20,
+    };
+    const crossDayUsage = {
+      input_tokens: 200,
+      output_tokens: 20,
+      cache_creation_input_tokens: 10,
+      cache_read_input_tokens: 30,
+    };
+
+    await service.saveSession({ id: 'today-session', title: 'Today', updatedAt: todayTimestamp });
+    await service.appendMessage('today-session', {
+      id: 'today-message',
+      role: 'assistant',
+      model: 'claude-sonnet-4-6',
+      usage: todayUsage,
+      timestamp: todayTimestamp,
+      content: [{ type: 'text', text: 'today' }],
+    });
+    await service.appendMessage('today-session', {
+      id: 'today-message',
+      role: 'assistant',
+      model: 'claude-sonnet-4-6',
+      usage: todayUsage,
+      timestamp: todayTimestamp + 1,
+      content: [{ type: 'thinking', thinking: 'duplicate content block' }],
+    });
+
+    await service.saveSession({ id: 'cross-day-session', title: 'Cross day', updatedAt: todayTimestamp });
+    await service.appendMessage('cross-day-session', {
+      id: 'yesterday-message',
+      role: 'assistant',
+      model: 'claude-sonnet-4-6',
+      usage: crossDayUsage,
+      timestamp: yesterdayTimestamp,
+      content: [{ type: 'text', text: 'yesterday' }],
+    });
+    await service.appendMessage('cross-day-session', {
+      id: 'today-cross-day-message',
+      role: 'assistant',
+      model: 'claude-sonnet-4-6',
+      usage: crossDayUsage,
+      timestamp: todayTimestamp + 2,
+      content: [{ type: 'text', text: 'today again' }],
+    });
+
+    const statistics = await service.getUsageStatistics({ dateRange: 'all' });
+    assert.deepEqual(statistics.todayUsage, {
+      inputTokens: 300,
+      outputTokens: 30,
+      cacheWriteTokens: 15,
+      cacheReadTokens: 50,
+      totalTokens: 395,
+      requestCount: 2,
+      sessions: 2,
+      cost: 0.00142125,
+    });
+
+    const todayKey = [
+      startOfToday.getFullYear(),
+      String(startOfToday.getMonth() + 1).padStart(2, '0'),
+      String(startOfToday.getDate()).padStart(2, '0'),
+    ].join('-');
+    const today = statistics.dailyUsage.find(day => day.date === todayKey);
+    const yesterday = statistics.dailyUsage.find(day => day.date !== todayKey);
+    assert.equal(today.requestCount, 2);
+    assert.equal(today.sessions, 2);
+    assert.equal(yesterday.sessions, 1);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -143,4 +231,13 @@ test('desktop usage aggregation supports ccgui current and all-project scopes', 
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
+});
+
+test('usage statistics UI renders the backend today summary contract', () => {
+  const source = readFileSync(path.join(process.cwd(), 'src/components/settings/UsageStatistics.tsx'), 'utf8');
+  assert.match(source, /todayUsage/);
+  assert.match(source, /todayUsage\.requestCount/);
+  assert.match(source, /todayUsage\.cost/);
+  assert.match(source, /usage-today-summary/);
+  assert.match(source, /todayCacheHitRate/);
 });

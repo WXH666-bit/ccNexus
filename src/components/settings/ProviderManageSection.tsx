@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Check, RefreshCw, Server } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Check, RefreshCw, Server, Terminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getProviders, switchProvider } from '../../utils/desktopBridgeApi';
+
+const LOCAL_SETTINGS_ID = '__local_settings_json__';
+const CLI_LOGIN_ID = '__cli_login__';
 
 interface Provider {
   id: string;
   name: string;
-  source?: string;
-  settingsConfig?: { env?: Record<string, string> };
-  base_url?: string;
+  isActive?: boolean;
+  isLocalProvider?: boolean;
+  isCliLoginProvider?: boolean;
 }
 
 interface ProviderResponse {
@@ -46,9 +49,11 @@ export default function ProviderManageSection() {
     setSwitchingId(providerId);
     setError('');
     try {
-      await switchProvider(providerId);
-      setCurrentProviderId(providerId);
-      window.dispatchEvent(new CustomEvent('ccnexus:provider-changed', { detail: { providerId } }));
+      const result = await switchProvider(providerId);
+      setCurrentProviderId(result.provider?.id || providerId);
+      window.dispatchEvent(new CustomEvent('ccnexus:provider-changed', {
+        detail: { providerId: result.provider?.id || providerId },
+      }));
     } catch (switchError) {
       setError(switchError instanceof Error ? switchError.message : String(switchError));
     } finally {
@@ -56,56 +61,103 @@ export default function ProviderManageSection() {
     }
   };
 
+  const localProvider = providers.find(provider => provider.id === LOCAL_SETTINGS_ID)
+    || { id: LOCAL_SETTINGS_ID, name: t('settings.providers.localSettings'), isLocalProvider: true };
+  const cliProvider = providers.find(provider => provider.id === CLI_LOGIN_ID)
+    || { id: CLI_LOGIN_ID, name: t('settings.providers.cliLogin'), isCliLoginProvider: true };
+
   return (
-    <div className="settings-section-content">
+    <div className="settings-section-content provider-management">
       <div className="settings-section-heading-row">
         <div>
           <h3>{t('settings.providers.title')}</h3>
           <p className="settings-desc">{t('settings.providers.desc')}</p>
         </div>
-        <button className="icon-button" onClick={() => void loadProviders()} disabled={loading} title={t('common.refresh', { defaultValue: 'Refresh' })}>
+        <button
+          className="icon-button"
+          onClick={() => void loadProviders()}
+          disabled={loading}
+          title={t('common.refresh', { defaultValue: 'Refresh' })}
+        >
           <RefreshCw size={16} className={loading ? 'spin' : ''} />
         </button>
       </div>
 
       {loading ? (
         <div className="empty-state"><p>{t('common.loading')}</p></div>
-      ) : error ? (
-        <div className="empty-state"><p>{error}</p></div>
-      ) : providers.length === 0 ? (
-        <div className="empty-state">
-          <Server size={42} className="empty-icon" />
-          <p>{t('settings.providers.empty', { defaultValue: 'No providers found' })}</p>
-        </div>
       ) : (
-        <div className="provider-list">
-          {providers.map(provider => {
-            const active = provider.id === currentProviderId;
-            const model = provider.settingsConfig?.env?.ANTHROPIC_MODEL
-              || provider.settingsConfig?.env?.ANTHROPIC_DEFAULT_SONNET_MODEL;
-            return (
-              <div key={provider.id} className={`provider-card ${active ? 'active' : ''}`}>
-                <div className="provider-info">
-                  <Server size={20} />
-                  <div>
-                    <h4>{provider.name}</h4>
-                    <span className="provider-key">{model || provider.base_url || provider.source || provider.id}</span>
-                  </div>
-                </div>
-                <div className="provider-actions">
-                  {active ? (
-                    <span className="active-badge"><Check size={12} />{t('settings.providers.current')}</span>
-                  ) : (
-                    <button className="btn btn-secondary btn-sm" onClick={() => void handleSwitch(provider.id)} disabled={switchingId !== null}>
-                      {switchingId === provider.id ? t('common.loading') : t('settings.providers.switch')}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <>
+          {error && <div className="provider-error" role="alert">{error}</div>}
+          <div className="provider-special-list">
+            <SpecialProviderCard
+              provider={localProvider}
+              active={currentProviderId === LOCAL_SETTINGS_ID}
+              icon={<Server size={19} />}
+              title={t('settings.providers.localSettings')}
+              description={t('settings.providers.localSettingsDesc')}
+              actionLabel={t('settings.providers.use')}
+              currentLabel={t('settings.providers.current')}
+              disabled={switchingId !== null}
+              switching={switchingId === LOCAL_SETTINGS_ID}
+              onSwitch={() => void handleSwitch(LOCAL_SETTINGS_ID)}
+            />
+            <SpecialProviderCard
+              provider={cliProvider}
+              active={currentProviderId === CLI_LOGIN_ID}
+              icon={<Terminal size={19} />}
+              title={t('settings.providers.cliLogin')}
+              description={t('settings.providers.cliLoginDesc')}
+              actionLabel={t('settings.providers.authorize')}
+              currentLabel={t('settings.providers.current')}
+              disabled={switchingId !== null}
+              switching={switchingId === CLI_LOGIN_ID}
+              onSwitch={() => void handleSwitch(CLI_LOGIN_ID)}
+            />
+          </div>
+        </>
       )}
+    </div>
+  );
+}
+
+function SpecialProviderCard({
+  provider,
+  active,
+  icon,
+  title,
+  description,
+  actionLabel,
+  currentLabel,
+  disabled,
+  switching,
+  onSwitch,
+}: {
+  provider: Provider;
+  active: boolean;
+  icon: ReactNode;
+  title: string;
+  description: string;
+  actionLabel: string;
+  currentLabel: string;
+  disabled: boolean;
+  switching: boolean;
+  onSwitch: () => void;
+}) {
+  return (
+    <div className={`provider-special-card ${active ? 'active' : ''}`}>
+      <div className="provider-special-icon">{icon}</div>
+      <div className="provider-special-copy">
+        <h4>{title}</h4>
+        <p>{description}</p>
+      </div>
+      {active ? (
+        <span className="active-badge"><Check size={12} />{currentLabel}</span>
+      ) : (
+        <button className="provider-secondary-button" onClick={onSwitch} disabled={disabled}>
+          {switching ? '...' : actionLabel}
+        </button>
+      )}
+      {provider.id === LOCAL_SETTINGS_ID && <span className="provider-readonly-label">settings.json</span>}
     </div>
   );
 }

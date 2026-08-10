@@ -1,11 +1,7 @@
 import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-
-const require = createRequire(import.meta.url);
-const initSqlJs = require('sql.js');
 
 const BUILT_IN_COMMANDS = [
   { name: 'help', description: 'Show help information', args: '' },
@@ -34,22 +30,6 @@ function parseJsonObject(raw, fallback = {}) {
   } catch {
     return fallback;
   }
-}
-
-function normalizeProvider(id, provider = {}, source = 'codemoss') {
-  const settingsConfig = provider.settingsConfig && typeof provider.settingsConfig === 'object'
-    ? provider.settingsConfig
-    : {};
-  return {
-    ...provider,
-    id,
-    name: provider.name || provider.remark || id,
-    source,
-    settingsConfig: {
-      ...settingsConfig,
-      env: { ...(settingsConfig.env || {}) },
-    },
-  };
 }
 
 const SPECIAL_PROVIDER_IDS = Object.freeze({
@@ -137,8 +117,6 @@ function frontmatterValue(content, key) {
 export class LocalConfigService {
   constructor({ homeDir = process.env.HOME || os.homedir() || '/tmp' } = {}) {
     this.homeDir = homeDir;
-    this.ccSwitchDbPath = path.join(homeDir, '.cc-switch', 'cc-switch.db');
-    this.codemossConfigPath = path.join(homeDir, '.codemoss', 'config.json');
     this.claudeDir = path.join(homeDir, '.claude');
     this.claudeJsonPath = path.join(homeDir, '.claude.json');
     this.claudeSettingsPath = path.join(this.claudeDir, 'settings.json');
@@ -151,44 +129,6 @@ export class LocalConfigService {
     this.promptsDir = path.join(this.homeDir, '.ccnexus', 'prompts');
   }
 
-  async readCcSwitchProviders() {
-    try {
-      if (!existsSync(this.ccSwitchDbPath)) return [];
-      const SQL = await initSqlJs();
-      const dbBuffer = await fs.readFile(this.ccSwitchDbPath);
-      const db = new SQL.Database(dbBuffer);
-      const result = db.exec("SELECT * FROM providers WHERE app_type = 'claude' ORDER BY name");
-      if (result.length === 0) {
-        db.close();
-        return [];
-      }
-      const columns = result[0].columns;
-      const providers = result[0].values.map((row) => {
-        const item = {};
-        columns.forEach((column, index) => {
-          item[column] = row[index];
-        });
-        const settingsConfig = parseJsonObject(item.settings_config, {});
-        const env = { ...(settingsConfig.env || {}) };
-        if (item.base_url && !env.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = item.base_url;
-        if (item.api_key && !env.ANTHROPIC_AUTH_TOKEN) env.ANTHROPIC_AUTH_TOKEN = item.api_key;
-        return normalizeProvider(item.id || item.name, {
-          ...item,
-          name: item.name || item.id,
-          settingsConfig: {
-            ...settingsConfig,
-            env,
-          },
-        }, 'cc-switch');
-      });
-      db.close();
-      return providers;
-    } catch (err) {
-      console.error('[Desktop Providers] Failed to read cc-switch database:', err.message);
-      return [];
-    }
-  }
-
   async readClaudeSettings() {
     try {
       if (!existsSync(this.claudeSettingsPath)) return { env: {} };
@@ -198,32 +138,6 @@ export class LocalConfigService {
       console.error('[Desktop Providers] Failed to read Claude settings:', err.message);
       return { env: {} };
     }
-  }
-
-  async readCodemossConfig() {
-    try {
-      if (!existsSync(this.codemossConfigPath)) return {};
-      const content = await fs.readFile(this.codemossConfigPath, 'utf-8');
-      return parseJsonObject(content, {});
-    } catch (err) {
-      console.error('[Desktop Providers] Failed to read codemoss config:', err.message);
-      return {};
-    }
-  }
-
-  getCodemossClaudeProviders(config = {}) {
-    const claude = config.claude && typeof config.claude === 'object' ? config.claude : {};
-    const providers = claude.providers && typeof claude.providers === 'object' ? claude.providers : {};
-    return Object.entries(providers).map(([id, provider]) => normalizeProvider(id, provider, 'codemoss'));
-  }
-
-  getCodemossCurrentProviderId(config = {}) {
-    const claude = config.claude && typeof config.claude === 'object' ? config.claude : {};
-    if (Object.prototype.hasOwnProperty.call(claude, 'current') && claude.current !== null) {
-      return String(claude.current).trim();
-    }
-    const providerIds = Object.keys(claude.providers || {});
-    return providerIds[0] || '';
   }
 
   async readProviderState() {
@@ -246,63 +160,33 @@ export class LocalConfigService {
     }, null, 2), 'utf8');
   }
 
-  providerEnvironment(provider) {
-    const env = { ...(provider?.settingsConfig?.env || {}) };
-    if (provider?.base_url && !env.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = provider.base_url;
-    if (provider?.api_key && !env.ANTHROPIC_AUTH_TOKEN) env.ANTHROPIC_AUTH_TOKEN = provider.api_key;
-
-    if (provider?.model_mapping) {
-      try {
-        const mapping = typeof provider.model_mapping === 'string'
-          ? JSON.parse(provider.model_mapping)
-          : provider.model_mapping;
-        if (mapping?.main) env.ANTHROPIC_MODEL = mapping.main;
-        if (mapping?.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = mapping.sonnet;
-        if (mapping?.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = mapping.opus;
-        if (mapping?.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = mapping.haiku;
-      } catch {
-        // Ignore malformed optional provider mapping and keep its base env.
-      }
+  async clearProviderState() {
+    try {
+      await fs.unlink(this.providerStatePath);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
     }
-
-    return env;
   }
 
-  providerRuntimeEnvironment(provider, settings = {}) {
-    if (isSpecialProviderId(provider?.id)) {
-      return settings?.env && typeof settings.env === 'object' ? { ...settings.env } : {};
-    }
-    return this.providerEnvironment(provider);
+  providerRuntimeEnvironment(_provider, settings = {}) {
+    return settings?.env && typeof settings.env === 'object' ? { ...settings.env } : {};
   }
 
   async getProviders() {
-    const codemossConfig = await this.readCodemossConfig();
-    const codemossProviders = this.getCodemossClaudeProviders(codemossConfig);
-    const ccSwitchProviders = await this.readCcSwitchProviders();
-    const managedProviders = [...codemossProviders, ...ccSwitchProviders];
-    const codemossProviderId = this.getCodemossCurrentProviderId(codemossConfig);
     const providerState = await this.readProviderState();
     const settings = await this.readClaudeSettings();
     const knownProviderIds = new Set([
       SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS,
       SPECIAL_PROVIDER_IDS.CLI_LOGIN,
-      ...managedProviders.map(provider => provider.id),
     ]);
     const persistedProviderId = knownProviderIds.has(providerState.providerId)
       ? providerState.providerId
       : null;
-    const configuredProviderId = [codemossProviderId, settings.env?.CC_SWITCH_PROVIDER_ID]
-      .find(providerId => typeof providerId === 'string' && knownProviderIds.has(providerId));
     const currentProviderId = persistedProviderId
-      || configuredProviderId
       || (existsSync(this.claudeSettingsPath) ? SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS : null);
     const providers = [
       createLocalSettingsProvider(settings, currentProviderId === SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS),
       createCliLoginProvider(currentProviderId === SPECIAL_PROVIDER_IDS.CLI_LOGIN),
-      ...managedProviders.map(provider => ({
-        ...provider,
-        isActive: provider.id === currentProviderId,
-      })),
     ];
     const currentProvider = providers.find(provider => provider.id === currentProviderId);
     return {
@@ -317,10 +201,6 @@ export class LocalConfigService {
 
   async switchProvider(providerId) {
     if (!providerId) throw new Error('Provider ID required');
-    const managedProviders = [
-      ...this.getCodemossClaudeProviders(await this.readCodemossConfig()),
-      ...await this.readCcSwitchProviders(),
-    ];
     const settings = await this.readClaudeSettings();
     let provider;
     if (providerId === SPECIAL_PROVIDER_IDS.LOCAL_SETTINGS) {
@@ -336,7 +216,7 @@ export class LocalConfigService {
     } else if (providerId === SPECIAL_PROVIDER_IDS.CLI_LOGIN) {
       provider = createCliLoginProvider(true);
     } else {
-      provider = managedProviders.find(item => item.id === providerId || item.name === providerId);
+      provider = null;
     }
     if (!provider) throw new Error('Provider not found');
 

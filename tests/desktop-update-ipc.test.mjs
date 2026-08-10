@@ -23,7 +23,8 @@ test('main process owns the updater service and exposes the four update commands
 
 test('startup update check happens after the main window is created and does not block it', () => {
   const main = read('desktop/main.js');
-  const windowIndex = main.indexOf('createMainWindow();');
+  const windowMatch = main.match(/createMainWindow\([^)]*\);/);
+  const windowIndex = windowMatch?.index ?? -1;
   const checkIndex = main.indexOf('appUpdater.checkForUpdates()', windowIndex);
 
   assert.notEqual(windowIndex, -1);

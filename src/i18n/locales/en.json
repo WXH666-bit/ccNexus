@@ -139,9 +139,13 @@
     "providers": {
       "title": "Providers",
       "desc": "Configure AI model providers",
-      "add": "Add Provider",
-      "switch": "Switch Provider",
-      "current": "Current Provider"
+      "current": "Current Provider",
+      "localSettings": "Use local settings.json",
+      "localSettingsDesc": "Read your existing Claude Code settings.json without overwriting it.",
+      "cliLogin": "Use CLI login information",
+      "cliLoginDesc": "Reuse Claude Code CLI login state for this desktop session.",
+      "use": "Use",
+      "authorize": "Authorize and use"
     },
     "mcp": {
       "title": "MCP Servers",
@@ -182,6 +186,19 @@
         "small": "Small",
         "normal": "Normal",
         "large": "Large"
+      },
+      "background": {
+        "title": "Chat background",
+        "desc": "Only affects the chat workspace. Claude Code and cc-switch configuration stay unchanged.",
+        "choose": "Add background image",
+        "replace": "Change background image",
+        "reset": "Restore default",
+        "empty": "No custom background added",
+        "desktopOnly": "Custom image backgrounds are available in the desktop app.",
+        "opacity": "Image opacity",
+        "blur": "Background blur",
+        "overlay": "Overlay strength",
+        "invalid": "Unable to read this image. Choose a PNG, JPG, WebP, or GIF image."
       }
     },
     "prompt": {

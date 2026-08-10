@@ -2,6 +2,20 @@
 
 type AppUpdateStatus = 'idle' | 'checking' | 'not-available' | 'available' | 'downloading' | 'downloaded' | 'error';
 
+interface AppearanceBackgroundPreferences {
+  opacity: number;
+  blur: number;
+  overlay: number;
+  hasImage: boolean;
+  imageMime: string | null;
+  imageDataUrl: string | null;
+}
+
+interface AppearancePreferences {
+  theme: 'dark' | 'light';
+  background: AppearanceBackgroundPreferences;
+}
+
 interface AppUpdateState {
   status: AppUpdateStatus;
   isPackaged: boolean;
@@ -28,6 +42,17 @@ interface CcNexusDesktopApi {
   checkForUpdates: () => Promise<AppUpdateState>;
   downloadUpdate: () => Promise<AppUpdateState>;
   installUpdate: () => Promise<AppUpdateState>;
+  getAppearancePreferences: () => Promise<AppearancePreferences>;
+  setTheme: (theme: 'dark' | 'light') => Promise<AppearancePreferences>;
+  saveAppearancePreferences: (preferences: Partial<Omit<AppearancePreferences, 'background'>> & {
+    background?: Partial<AppearanceBackgroundPreferences>;
+  }) => Promise<AppearancePreferences>;
+  chooseAppearanceBackground: () => Promise<{
+    canceled: boolean;
+    preferences: AppearancePreferences;
+    error?: string;
+  }>;
+  clearAppearanceBackground: () => Promise<AppearancePreferences>;
   onUpdateStatus: (callback: (state: AppUpdateState) => void) => () => void;
   openProject: () => Promise<{ canceled: boolean; path?: string; cwd?: string; rootName?: string }>;
   getWorkspace: () => Promise<{ cwd: string; rootName: string }>;

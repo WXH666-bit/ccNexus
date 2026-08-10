@@ -109,7 +109,12 @@ function messageTimestamp(message, fallback) {
 }
 
 function dateKey(timestamp) {
-  return new Date(timestamp).toISOString().slice(0, 10);
+  const date = new Date(timestamp);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
 }
 
 const DEFAULT_CLAUDE_PRICING = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 };
@@ -424,6 +429,7 @@ export class DesktopSessionService {
     const daily = new Map();
     const modelUsage = new Map();
     const now = Date.now();
+    const todayKey = dateKey(now);
     const cutoffTime = dateRange === 'all'
       ? 0
       : now - (dateRange === '30d' ? 30 : 7) * 24 * 60 * 60 * 1000;
@@ -442,7 +448,6 @@ export class DesktopSessionService {
       const sessionUsage = emptyUsage();
       let sessionTimestamp = 0;
       let sessionCost = 0;
-      let usageCount = 0;
       let sessionModel = null;
       const seenUsageMessageIds = new Set();
       const usageRecords = [];
@@ -457,34 +462,45 @@ export class DesktopSessionService {
         if (!usage) continue;
         if (usageMessageId) seenUsageMessageIds.add(usageMessageId);
         const timestamp = messageTimestamp(message, session.updatedAt || now);
-        sessionTimestamp = sessionTimestamp === 0 ? timestamp : Math.min(sessionTimestamp, timestamp);
         const messageModel = typeof message.model === 'string' && message.model.trim()
           ? message.model.trim()
           : sessionModel || DEFAULT_CLAUDE_MODEL;
         if (!sessionModel && message.model) sessionModel = messageModel;
-        addUsage(sessionUsage, usage);
-        usageCount += 1;
         const messageCost = usageCost(usage, messageModel);
-        sessionCost += messageCost;
         usageRecords.push({ timestamp, usage, cost: messageCost, model: messageModel });
       }
 
-      if (usageCount === 0) continue;
-      if (cutoffTime > 0 && sessionTimestamp < cutoffTime) continue;
+      const records = cutoffTime > 0
+        ? usageRecords.filter(record => record.timestamp >= cutoffTime)
+        : usageRecords;
+      if (records.length === 0) continue;
 
-      for (const record of usageRecords) {
+      const usageDates = new Set();
+      for (const record of records) {
+        addUsage(sessionUsage, record.usage);
+        sessionTimestamp = sessionTimestamp === 0 ? record.timestamp : Math.min(sessionTimestamp, record.timestamp);
+        sessionCost += record.cost;
         addUsage(totalUsage, record.usage);
         const key = dateKey(record.timestamp);
-        const day = daily.get(key) || { date: key, sessions: 0, usage: emptyUsage(), cost: 0, modelsUsed: new Set() };
+        const day = daily.get(key) || {
+          date: key,
+          sessions: 0,
+          requestCount: 0,
+          usage: emptyUsage(),
+          cost: 0,
+          modelsUsed: new Set(),
+        };
         addUsage(day.usage, record.usage);
         day.cost += record.cost;
+        day.requestCount += 1;
         if (record.model) day.modelsUsed.add(record.model);
         daily.set(key, day);
+        usageDates.add(key);
       }
 
-      const sessionDate = dateKey(sessionTimestamp || session.updatedAt || now);
-      const day = daily.get(sessionDate);
-      if (day) day.sessions += 1;
+      for (const key of usageDates) {
+        daily.get(key).sessions += 1;
+      }
 
       const resolvedSessionModel = sessionModel || DEFAULT_CLAUDE_MODEL;
       const model = modelUsage.get(resolvedSessionModel) || {
@@ -528,6 +544,20 @@ export class DesktopSessionService {
     const dailyUsage = [...daily.values()]
       .map(day => ({ ...day, modelsUsed: [...day.modelsUsed] }))
       .sort((left, right) => left.date.localeCompare(right.date));
+    const today = daily.get(todayKey);
+    const todayUsage = today
+      ? {
+        ...today.usage,
+        requestCount: today.requestCount,
+        sessions: today.sessions,
+        cost: today.cost,
+      }
+      : {
+        ...emptyUsage(),
+        requestCount: 0,
+        sessions: 0,
+        cost: 0,
+      };
 
     const trend = (current, previous) => previous === 0 ? 0 : ((current - previous) / previous) * 100;
     const totalSessions = sessions.length;
@@ -545,6 +575,7 @@ export class DesktopSessionService {
         .reduce((total, session) => total + session.cost, 0),
       sessions,
       dailyUsage,
+      todayUsage,
       weeklyComparison: {
         currentWeek,
         lastWeek,
