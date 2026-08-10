@@ -1,7 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { buildClaudeQueryOptions } from '../server/queryOptions.js';
 import { buildClaudeClientOptions } from '../server/claudeRequestContext.js';
+
+test('packaged Windows query points the SDK at the unpacked Claude binary', () => {
+  const resourcesPath = 'C:\\Program Files\\ccNexus\\resources';
+  const expected = path.join(
+    resourcesPath,
+    'app.asar.unpacked',
+    'node_modules',
+    '@anthropic-ai',
+    'claude-agent-sdk-win32-x64',
+    'claude.exe',
+  );
+
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    clientOptions: {},
+    resourcesPath,
+    platform: 'win32',
+    arch: 'x64',
+    fileExists: filePath => filePath === expected,
+  });
+
+  assert.equal(options.pathToClaudeCodeExecutable, expected);
+});
 
 test('builds ccgui-style SDK options from client dialogue controls', () => {
   const canUseTool = async () => ({ behavior: 'allow' });

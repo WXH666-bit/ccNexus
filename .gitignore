@@ -3,6 +3,7 @@ dist
 release/
 release-verify/
 release-verify-*/
+release-validation/
 .DS_Store
 *.swp
 .git/*

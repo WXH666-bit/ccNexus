@@ -93,15 +93,20 @@
       "prompt": "提示词增强"
     },
     "basic": {
+      "closeBehavior": "\u5173\u95ed\u7a97\u53e3\u65f6",
+      "closeBehaviorDescription": "\u9009\u62e9\u70b9\u51fb\u00d7\u65f6\u662f\u9690\u85cf\u5230\u7cfb\u7edf\u6258\u76d8\u8fd8\u662f\u5b8c\u5168\u5173\u95ed\u5e94\u7528\u3002",
+      "closeBehaviors": {
+        "tray": "\u6700\u5c0f\u5316\u5230\u7cfb\u7edf\u6258\u76d8",
+        "exit": "\u9000\u51fa\u5e94\u7528"
+      },
       "workDir": "工作目录",
       "defaultModel": "默认模型",
-      "language": "语言",
-      "autoSave": "自动保存"
+      "language": "语言"
     },
     "update": {
       "title": "应用更新",
       "stable": "来自 GitHub 的稳定版本",
-      "development": "打包后的应用才支持检查更新。",
+      "developmentStatus": "开发模式",
       "currentVersion": "当前版本",
       "latestVersion": "最新版本",
       "check": "检查更新",
@@ -116,6 +121,7 @@
       "progress": "下载进度",
       "speed": "速度",
       "error": "更新检查失败",
+      "networkError": "无法连接 GitHub 更新服务，请检查网络或代理后重试",
       "retry": "重试"
     },
     "permissions": {

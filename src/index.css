@@ -2869,6 +2869,7 @@ html, body, #root {
 
 .app-update-card {
   max-width: 620px;
+  margin-top: 16px;
   padding: 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -2879,6 +2880,22 @@ html, body, #root {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+.app-update-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+.app-update-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-tertiary));
+  color: var(--accent-blue);
 }
 .app-update-title {
   display: flex;
@@ -2910,7 +2927,16 @@ html, body, #root {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 0;
+}
+.app-update-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
 }
 .app-update-version {
   display: flex;
@@ -2992,7 +3018,7 @@ html, body, #root {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 0;
 }
 .app-update-action {
   display: inline-flex;
@@ -3013,6 +3039,17 @@ html, body, #root {
 .app-update-action:disabled { cursor: default; opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) {
   .app-update-progress-track span { transition: none; }
+}
+
+@media (max-width: 560px) {
+  .app-update-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .app-update-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -6295,6 +6332,13 @@ textarea:focus-visible,
 .setting-group label {
   color: var(--text-secondary);
   line-height: 1.4;
+}
+
+.setting-help {
+  margin: 7px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .setting-group input[type="text"],

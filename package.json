@@ -1,6 +1,6 @@
 {
   "name": "ccnexus",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
@@ -64,6 +64,9 @@
       "src/utils/modelResolution.js",
       "src/utils/streamDeltaNormalizer.js",
       "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "directories": {
       "output": "release"

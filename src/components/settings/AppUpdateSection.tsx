@@ -8,6 +8,7 @@ import {
   installUpdate,
   onUpdateStatus,
 } from '../../utils/desktopBridgeApi';
+import { formatUpdateError } from '../../utils/updateError';
 
 const INITIAL_UPDATE_STATE: AppUpdateState = {
   status: 'idle',
@@ -41,35 +42,34 @@ function formatBytes(value: number) {
   return `${(value / (1024 ** unitIndex)).toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message) return error.message;
-  return String(error || 'Update failed');
-}
-
 export default function AppUpdateSection() {
   const { t } = useTranslation();
   const [state, setState] = useState<AppUpdateState>(INITIAL_UPDATE_STATE);
   const [busy, setBusy] = useState(false);
   const desktopBridgeAvailable = typeof window !== 'undefined' && Boolean(window.ccNexusDesktop);
+  const presentState = (nextState: AppUpdateState): AppUpdateState => ({
+    ...nextState,
+    error: nextState.error ? formatUpdateError(nextState.error, key => t(key)) : null,
+  });
 
   useEffect(() => {
     if (!desktopBridgeAvailable) return;
 
     let active = true;
     const unsubscribe = onUpdateStatus(nextState => {
-      if (active) setState(nextState);
+      if (active) setState(presentState(nextState));
     });
 
     void getUpdateState()
       .then(nextState => {
-        if (active) setState(nextState);
+        if (active) setState(presentState(nextState));
       })
       .catch(error => {
         if (active) {
           setState(previous => ({
             ...previous,
             status: 'error',
-            error: getErrorMessage(error),
+            error: formatUpdateError(error, key => t(key)),
           }));
         }
       });
@@ -78,18 +78,18 @@ export default function AppUpdateSection() {
       active = false;
       unsubscribe();
     };
-  }, [desktopBridgeAvailable]);
+  }, [desktopBridgeAvailable, t]);
 
   const runAction = async (action: () => Promise<AppUpdateState>) => {
     if (busy) return;
     setBusy(true);
     try {
-      setState(await action());
+      setState(presentState(await action()));
     } catch (error) {
       setState(previous => ({
         ...previous,
         status: 'error',
-        error: getErrorMessage(error),
+        error: formatUpdateError(error, key => t(key)),
       }));
     } finally {
       setBusy(false);
@@ -99,37 +99,71 @@ export default function AppUpdateSection() {
   const progress = Math.min(100, Math.max(0, Number.isFinite(state.percent) ? state.percent : 0));
   const isDownloading = state.status === 'downloading';
   const isChecking = state.status === 'checking';
+  const statusLabel = state.isPackaged
+    ? t(STATUS_LABELS[state.status])
+    : t('settings.update.developmentStatus');
 
   if (!desktopBridgeAvailable) return null;
 
   return (
-    <div className="setting-group app-update-card">
+    <section className="app-update-card" aria-labelledby="app-update-title">
       <div className="app-update-header">
-        <div>
-          <div className="app-update-title">
-            <RefreshCw size={15} aria-hidden="true" />
-            <span>{t('settings.update.title')}</span>
+        <div className="app-update-heading">
+          <span className="app-update-icon" aria-hidden="true">
+            <RefreshCw size={16} />
+          </span>
+          <div>
+            <div className="app-update-title" id="app-update-title">
+              <span>{t('settings.update.title')}</span>
+            </div>
+            {state.isPackaged && (
+              <p className="app-update-description">
+                {t('settings.update.stable')}
+              </p>
+            )}
           </div>
-          <p className="app-update-description">
-            {state.isPackaged ? t('settings.update.stable') : t('settings.update.development')}
-          </p>
         </div>
         <span className={`app-update-status status-${state.status}`}>
-          {t(STATUS_LABELS[state.status])}
+          {statusLabel}
         </span>
       </div>
 
-      <div className="app-update-versions">
-        <div className="app-update-version">
+      <div className="app-update-summary">
+        <div className="app-update-versions">
+          <div className="app-update-version">
           <span>{t('settings.update.currentVersion')}</span>
           <strong>{state.currentVersion || '—'}</strong>
-        </div>
-        {state.targetVersion && (
-          <div className="app-update-version app-update-version-target">
+          </div>
+          {state.targetVersion && (
+            <div className="app-update-version app-update-version-target">
             <span>{t('settings.update.latestVersion')}</span>
             <strong>{state.targetVersion}</strong>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
+
+        <div className="app-update-actions">
+          {state.isPackaged && state.status === 'available' && (
+            <button className="app-update-action" disabled={busy} onClick={() => void runAction(downloadUpdate)}>
+              <Download size={14} aria-hidden="true" />
+              {t('settings.update.download')}
+            </button>
+          )}
+
+          {state.isPackaged && state.status === 'downloaded' && (
+            <button className="app-update-action" disabled={busy} onClick={() => void runAction(installUpdate)}>
+              <RotateCw size={14} aria-hidden="true" />
+              {t('settings.update.install')}
+            </button>
+          )}
+
+          {state.isPackaged && !isChecking && !isDownloading && state.status !== 'available' && state.status !== 'downloaded' && (
+            <button className="app-update-action app-update-action-secondary" disabled={busy} onClick={() => void runAction(checkForUpdates)}>
+              <RefreshCw size={14} aria-hidden="true" />
+              {state.status === 'error' ? t('settings.update.retry') : t('settings.update.check')}
+            </button>
+          )}
+        </div>
       </div>
 
       {state.releaseName && <div className="app-update-release-name">{state.releaseName}</div>}
@@ -164,28 +198,6 @@ export default function AppUpdateSection() {
         </div>
       )}
 
-      <div className="app-update-actions">
-        {state.isPackaged && state.status === 'available' && (
-          <button className="app-update-action" disabled={busy} onClick={() => void runAction(downloadUpdate)}>
-            <Download size={14} aria-hidden="true" />
-            {t('settings.update.download')}
-          </button>
-        )}
-
-        {state.isPackaged && state.status === 'downloaded' && (
-          <button className="app-update-action" disabled={busy} onClick={() => void runAction(installUpdate)}>
-            <RotateCw size={14} aria-hidden="true" />
-            {t('settings.update.install')}
-          </button>
-        )}
-
-        {state.isPackaged && !isChecking && !isDownloading && state.status !== 'available' && state.status !== 'downloaded' && (
-          <button className="app-update-action app-update-action-secondary" disabled={busy} onClick={() => void runAction(checkForUpdates)}>
-            <RefreshCw size={14} aria-hidden="true" />
-            {state.status === 'error' ? t('settings.update.retry') : t('settings.update.check')}
-          </button>
-        )}
-      </div>
-    </div>
+    </section>
   );
 }

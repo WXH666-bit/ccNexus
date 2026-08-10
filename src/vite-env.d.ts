@@ -42,6 +42,14 @@ interface CcNexusDesktopApi {
   checkForUpdates: () => Promise<AppUpdateState>;
   downloadUpdate: () => Promise<AppUpdateState>;
   installUpdate: () => Promise<AppUpdateState>;
+  getWindowPreferences: () => Promise<{
+    closeBehavior: 'minimize-to-tray' | 'exit';
+  }>;
+  setWindowPreferences: (preferences: {
+    closeBehavior: 'minimize-to-tray' | 'exit';
+  }) => Promise<{
+    closeBehavior: 'minimize-to-tray' | 'exit';
+  }>;
   getAppearancePreferences: () => Promise<AppearancePreferences>;
   setTheme: (theme: 'dark' | 'light') => Promise<AppearancePreferences>;
   saveAppearancePreferences: (preferences: Partial<Omit<AppearancePreferences, 'background'>> & {

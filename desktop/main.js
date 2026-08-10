@@ -1,4 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  session,
+  shell,
+  Tray,
+} from 'electron';
 import electronUpdater from 'electron-updater';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -8,12 +18,19 @@ import { createDesktopRuntime } from './runtime/index.js';
 import { createDesktopChatController } from './runtime/chatController.js';
 import { createDesktopSessionController } from './runtime/sessionController.js';
 import { createAppUpdater } from './update/appUpdater.js';
+import { configureUpdaterNetwork } from './update/updateNetwork.js';
 import { hideDefaultApplicationMenu } from './runtime/windowMenu.js';
 import { LocalConfigService } from './runtime/localConfigService.js';
 import { DesktopSessionService } from './runtime/sessionService.js';
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 import { AppearancePreferences } from './runtime/appearancePreferences.js';
 import { McpStatusService } from './runtime/mcpStatusService.js';
+import {
+  DEFAULT_WINDOW_CLOSE_BEHAVIOR,
+  WINDOW_CLOSE_BEHAVIORS,
+  WindowPreferences,
+  shouldMinimizeToTray,
+} from './runtime/windowPreferences.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { autoUpdater } = electronUpdater;
@@ -23,6 +40,8 @@ const appDataDirectory = path.join(process.env.HOME || os.homedir() || process.c
 const desktopStateFile = path.join(appDataDirectory, 'desktop-state.json');
 const appearanceStateFile = path.join(appDataDirectory, 'appearance.json');
 const appearanceBackgroundFile = path.join(appDataDirectory, 'chat-background');
+const windowPreferencesFile = path.join(appDataDirectory, 'window-preferences.json');
+const FALLBACK_TRAY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 const runtime = createDesktopRuntime({
   cwd: process.cwd(),
@@ -33,6 +52,7 @@ const appearancePreferences = new AppearancePreferences({
   stateFile: appearanceStateFile,
   backgroundFile: appearanceBackgroundFile,
 });
+const windowPreferences = new WindowPreferences({ stateFile: windowPreferencesFile });
 const localConfig = new LocalConfigService();
 const mcpStatus = new McpStatusService();
 const desktopSessions = new DesktopSessionService({ cwd: process.cwd() });
@@ -49,6 +69,11 @@ const chatController = createDesktopChatController({
 
 let mainWindow = null;
 let currentAppearance = { theme: 'dark' };
+let currentWindowPreferences = { closeBehavior: DEFAULT_WINDOW_CLOSE_BEHAVIOR };
+let tray = null;
+let isQuitting = false;
+let cleanupComplete = false;
+let cleanupPromise = null;
 const TITLE_BAR_HEIGHT = 42;
 const TITLE_BAR_THEMES = {
   dark: { color: '#1e1f22', symbolColor: '#9aa0a6' },
@@ -75,9 +100,46 @@ function applyWindowTheme(theme) {
   }
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow(currentAppearance.theme);
+    return;
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.setSkipTaskbar?.(false);
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function resolveTrayIcon() {
+  try {
+    const icon = await app.getFileIcon(process.execPath, { size: 'small' });
+    if (!icon.isEmpty()) return icon;
+  } catch {
+    // Fall back to a tiny data URL when the platform cannot resolve the app icon.
+  }
+  return nativeImage.createFromDataURL(FALLBACK_TRAY_ICON);
+}
+
+async function createTray() {
+  if (tray) return tray;
+
+  tray = new Tray(await resolveTrayIcon());
+  tray.setToolTip('ccNexus');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开 ccNexus', click: showMainWindow },
+    { type: 'separator' },
+    { label: '退出 ccNexus', click: () => requestApplicationQuit() },
+  ]));
+  tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
+  return tray;
+}
+
 function createMainWindow(initialTheme = currentAppearance.theme) {
   const palette = initialTheme === 'light' ? TITLE_BAR_THEMES.light : TITLE_BAR_THEMES.dark;
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1280,
     height: 900,
     minWidth: 960,
@@ -97,13 +159,44 @@ function createMainWindow(initialTheme = currentAppearance.theme) {
       sandbox: true,
     },
   });
+  mainWindow = window;
+  window.on('close', (event) => {
+    if (!shouldMinimizeToTray({
+      closeBehavior: currentWindowPreferences.closeBehavior,
+      isQuitting,
+    })) return;
+
+    event.preventDefault();
+    window.hide();
+    window.setSkipTaskbar?.(true);
+  });
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+  });
   applyWindowTheme(initialTheme);
 
   const devUrl = 'http://127.0.0.1:5000/chat';
   if (app.isPackaged) {
-    mainWindow.loadFile(indexHtml, { hash: '/chat' });
+    window.loadFile(indexHtml, { hash: '/chat' });
   } else {
-    mainWindow.loadURL(devUrl);
+    window.loadURL(devUrl);
+  }
+}
+
+function requestApplicationQuit() {
+  isQuitting = true;
+  app.quit();
+}
+
+async function cleanupApplication() {
+  try { appUpdater.dispose(); } catch { /* ignore */ }
+  try { chatController.dispose(); } catch { /* ignore */ }
+  try { await runtime.shutdown(); } catch (error) {
+    console.error('[desktop] runtime shutdown failed:', error);
+  }
+  if (tray) {
+    tray.destroy();
+    tray = null;
   }
 }
 
@@ -172,6 +265,13 @@ ipcMain.handle('desktop:choose-appearance-background', async () => {
 ipcMain.handle('desktop:clear-appearance-background', async () => {
   currentAppearance = await appearancePreferences.clearBackground();
   return currentAppearance;
+});
+
+ipcMain.handle('desktop:get-window-preferences', () => currentWindowPreferences);
+
+ipcMain.handle('desktop:set-window-preferences', async (_event, preferences = {}) => {
+  currentWindowPreferences = await windowPreferences.update(preferences);
+  return currentWindowPreferences;
 });
 
 ipcMain.handle('desktop:open-project', async () => {
@@ -388,24 +488,43 @@ app.whenReady().then(async () => {
   hideDefaultApplicationMenu(Menu);
   const appearance = await appearancePreferences.load();
   currentAppearance = appearance;
+  currentWindowPreferences = await windowPreferences.load();
   const workspace = await workspaceFiles.restoreWorkspace();
   runtime.setCwd(workspace.cwd);
   desktopSessions.setCwd(workspace.cwd);
+  await createTray();
   createMainWindow(appearance.theme);
+  const updaterSession = session.fromPartition('electron-updater', { cache: false });
+  const updaterNetwork = await configureUpdaterNetwork({ updaterSession });
+  if (!updaterNetwork.configured && updaterNetwork.error) {
+    console.warn('[app-updater] network configuration failed:', updaterNetwork.error);
+  }
   appUpdater.initialize();
   void appUpdater.checkForUpdates();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(currentAppearance.theme);
+    showMainWindow();
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin' && (
+    !tray || currentWindowPreferences.closeBehavior === WINDOW_CLOSE_BEHAVIORS.EXIT
+  )) requestApplicationQuit();
 });
 
-app.on('before-quit', () => {
-  appUpdater.dispose();
-  chatController.dispose();
-  runtime.shutdown();
+app.on('before-quit', (event) => {
+  if (cleanupComplete) return;
+  event.preventDefault();
+  isQuitting = true;
+  if (cleanupPromise) return;
+
+  cleanupPromise = cleanupApplication();
+  void cleanupPromise.then(() => {
+    cleanupComplete = true;
+    app.quit();
+  }, () => {
+    cleanupComplete = true;
+    app.quit();
+  });
 });

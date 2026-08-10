@@ -1,16 +1,31 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getWorkspace } from '../../utils/desktopBridgeApi';
+import { getWindowPreferences, getWorkspace, setWindowPreferences } from '../../utils/desktopBridgeApi';
 import { CLAUDE_MODELS } from '../../utils/modelResolution';
 import AppUpdateSection from './AppUpdateSection';
+
+type WindowCloseBehavior = 'minimize-to-tray' | 'exit';
 
 export default function BasicConfigSection() {
   const { t, i18n } = useTranslation();
   const [workspace, setWorkspace] = useState('');
   const [model, setModel] = useState(() => localStorage.getItem('chatModel') || 'default');
+  const [closeBehavior, setCloseBehavior] = useState<WindowCloseBehavior>('minimize-to-tray');
 
   useEffect(() => {
     void getWorkspace().then(result => setWorkspace(result.cwd)).catch(() => setWorkspace(''));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getWindowPreferences()
+      .then(result => {
+        if (active) setCloseBehavior(result.closeBehavior);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleLanguageChange = (lang: string) => {
@@ -59,10 +74,20 @@ export default function BasicConfigSection() {
       </div>
 
       <div className="setting-group">
-        <label>
-          <input type="checkbox" defaultChecked />
-          {t('settings.basic.autoSave')}
-        </label>
+        <label htmlFor="window-close-behavior">{t('settings.basic.closeBehavior')}</label>
+        <select
+          id="window-close-behavior"
+          value={closeBehavior}
+          onChange={event => {
+            const nextBehavior = event.target.value as WindowCloseBehavior;
+            setCloseBehavior(nextBehavior);
+            void setWindowPreferences(nextBehavior).catch(() => {});
+          }}
+        >
+          <option value="minimize-to-tray">{t('settings.basic.closeBehaviors.tray')}</option>
+          <option value="exit">{t('settings.basic.closeBehaviors.exit')}</option>
+        </select>
+        <p className="setting-help">{t('settings.basic.closeBehaviorDescription')}</p>
       </div>
 
       <AppUpdateSection />

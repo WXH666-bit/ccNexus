@@ -23,14 +23,21 @@ test('main process owns the updater service and exposes the four update commands
 
 test('startup update check happens after the main window is created and does not block it', () => {
   const main = read('desktop/main.js');
-  const windowMatch = main.match(/createMainWindow\([^)]*\);/);
-  const windowIndex = windowMatch?.index ?? -1;
+  const startupIndex = main.indexOf('app.whenReady()');
+  const windowIndex = main.indexOf('createMainWindow(appearance.theme)', startupIndex);
   const checkIndex = main.indexOf('appUpdater.checkForUpdates()', windowIndex);
 
   assert.notEqual(windowIndex, -1);
   assert.notEqual(checkIndex, -1);
   assert.ok(checkIndex > windowIndex);
   assert.match(main.slice(checkIndex - 80, checkIndex + 80), /void\s+appUpdater\.checkForUpdates\(\)/);
+});
+
+test('startup update check configures the Electron updater session before contacting GitHub', () => {
+  const main = read('desktop/main.js');
+
+  assert.match(main, /session\.fromPartition\(['"]electron-updater['"]/);
+  assert.match(main, /await\s+configureUpdaterNetwork\(\{\s*updaterSession\s*\}\)/);
 });
 
 test('update state is pushed only through the existing BrowserWindow renderer boundary', () => {

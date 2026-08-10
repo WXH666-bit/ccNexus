@@ -202,11 +202,12 @@ export class DesktopProcessRegistry {
     return { ok: true, success: true, restart: true, pid: daemon?.pid, id: daemon?.id };
   }
 
-  shutdown() {
-    for (const daemon of this.sessionDaemons.values()) {
-      daemon.bridge?.shutdown?.();
-    }
+  async shutdown() {
+    const shutdowns = [...this.sessionDaemons.values()].map((daemon) => (
+      Promise.resolve().then(() => daemon.bridge?.shutdown?.())
+    ));
     this.sessionDaemons.clear();
     this.channels.clear();
+    await Promise.allSettled(shutdowns);
   }
 }

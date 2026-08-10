@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   saveAppearancePreferences: (preferences) => ipcRenderer.invoke('desktop:save-appearance-preferences', preferences),
   chooseAppearanceBackground: () => ipcRenderer.invoke('desktop:choose-appearance-background'),
   clearAppearanceBackground: () => ipcRenderer.invoke('desktop:clear-appearance-background'),
+  getWindowPreferences: () => ipcRenderer.invoke('desktop:get-window-preferences'),
+  setWindowPreferences: (preferences) => ipcRenderer.invoke('desktop:set-window-preferences', preferences),
   onUpdateStatus: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('desktop:update-status', listener);

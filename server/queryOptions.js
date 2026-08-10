@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { buildThinkingOptions } from './thinkingOptions.js';
 import { resolveBackendModel } from '../src/utils/modelResolution.js';
 import { buildClaudeSystemPromptAppend } from './systemPrompt.js';
@@ -99,7 +101,51 @@ function buildWebviewControlledSettingsOverride(modelId) {
   return { env: settingsEnv };
 }
 
-export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = {}, providerMode = '' }) {
+export function resolveClaudeCodeExecutablePath({
+  resourcesPath = process.resourcesPath,
+  platform = process.platform,
+  arch = process.arch,
+  fileExists = existsSync,
+} = {}) {
+  if (typeof resourcesPath !== 'string' || !resourcesPath.trim()) return null;
+
+  const packagePlatform = platform === 'win32'
+    ? 'win32'
+    : platform === 'darwin'
+      ? 'darwin'
+      : platform === 'linux'
+        ? 'linux'
+        : null;
+  if (!packagePlatform || typeof arch !== 'string' || !arch.trim()) return null;
+
+  const executableName = packagePlatform === 'win32' ? 'claude.exe' : 'claude';
+  const candidate = path.join(
+    resourcesPath,
+    'app.asar.unpacked',
+    'node_modules',
+    '@anthropic-ai',
+    `claude-agent-sdk-${packagePlatform}-${arch}`,
+    executableName,
+  );
+
+  try {
+    return fileExists(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildClaudeQueryOptions({
+  cwd,
+  env,
+  canUseTool,
+  clientOptions = {},
+  providerMode = '',
+  resourcesPath = process.resourcesPath,
+  platform = process.platform,
+  arch = process.arch,
+  fileExists = existsSync,
+}) {
   const permissionMode = normalizePermissionMode(clientOptions.mode);
   const modelId = typeof clientOptions.model === 'string' ? clientOptions.model.trim() : '';
   const model = normalizeModel(modelId, env);
@@ -107,8 +153,15 @@ export function buildClaudeQueryOptions({ cwd, env, canUseTool, clientOptions = 
   const systemPromptAppend = typeof clientOptions.systemPromptAppend === 'string'
     ? clientOptions.systemPromptAppend
     : buildClaudeSystemPromptAppend({ agentPrompt: clientOptions.agentPrompt });
+  const pathToClaudeCodeExecutable = resolveClaudeCodeExecutablePath({
+    resourcesPath,
+    platform,
+    arch,
+    fileExists,
+  });
   const options = {
     cwd,
+    ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
     canUseTool,
     permissionMode,
     maxTurns: 100,

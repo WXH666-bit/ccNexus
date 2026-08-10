@@ -63,6 +63,14 @@ export function installUpdate() {
   return requireDesktopApi().installUpdate();
 }
 
+export function getWindowPreferences() {
+  return requireDesktopApi().getWindowPreferences();
+}
+
+export function setWindowPreferences(closeBehavior: 'minimize-to-tray' | 'exit') {
+  return requireDesktopApi().setWindowPreferences({ closeBehavior });
+}
+
 export function onUpdateStatus(callback: (state: AppUpdateState) => void) {
   return requireDesktopApi().onUpdateStatus(callback);
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { createDesktopRuntime } from '../desktop/runtime/index.js';
 import { DaemonBridge } from '../desktop/runtime/daemonBridge.js';
@@ -23,9 +23,7 @@ test('desktop runtime starts one inspectable daemon process for a session', asyn
 
   const bridge = daemon.bridge;
   await runtime.shutdown();
-  if (bridge.getProcessForInspection()) {
-    await once(bridge, 'exit');
-  }
+  assert.equal(bridge.getProcessForInspection(), null);
 });
 
 test('daemon bridge handles a closed stdin pipe during shutdown without surfacing EPIPE', async () => {
@@ -46,4 +44,32 @@ test('daemon bridge handles a closed stdin pipe during shutdown without surfacin
 
   await assert.doesNotReject(() => bridge.shutdown());
   assert.equal(bridge.daemonProcess.killed, true);
+});
+
+test('daemon bridge waits for the child process to exit after requesting shutdown', async () => {
+  const bridge = new DaemonBridge({ daemonScript: 'unused' });
+  const child = new EventEmitter();
+  child.killed = false;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.stdin = {
+    destroyed: false,
+    writableEnded: false,
+    write() {},
+  };
+  child.kill = function kill() {
+    this.killed = true;
+    setTimeout(() => {
+      this.exitCode = 0;
+      this.exited = true;
+      this.emit('exit', 0, null);
+    }, 20);
+    return true;
+  };
+  bridge.daemonProcess = child;
+  bridge.sendCommand = async () => [];
+
+  await bridge.shutdown();
+
+  assert.equal(child.exited, true);
 });

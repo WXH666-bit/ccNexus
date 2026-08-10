@@ -2,10 +2,63 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { EventEmitter } from 'node:events';
 
+const DEFAULT_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;
+const DEFAULT_SHUTDOWN_GRACE_TIMEOUT_MS = 2000;
+
 function isBrokenPipeError(error) {
   return error?.code === 'EPIPE'
     || error?.code === 'ERR_STREAM_DESTROYED'
     || /EPIPE|closed|destroyed/i.test(error?.message || '');
+}
+
+function hasExited(child) {
+  return !child
+    || (child.exitCode !== null && child.exitCode !== undefined)
+    || (child.signalCode !== null && child.signalCode !== undefined);
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (hasExited(child) || typeof child.once !== 'function') return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    child.once('exit', finish);
+    child.once('error', finish);
+  });
+}
+
+function waitForCompletionOrTimeout(promise, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    Promise.resolve(promise).then(finish, finish);
+  });
+}
+
+function forceKillProcessTree(child) {
+  if (process.platform !== 'win32' || !child?.pid || hasExited(child)) return;
+  try {
+    const taskkill = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    taskkill.unref?.();
+  } catch {
+    // The direct kill below remains the primary shutdown path.
+  }
 }
 
 export class DaemonBridge extends EventEmitter {
@@ -25,6 +78,9 @@ export class DaemonBridge extends EventEmitter {
     this.readyPromise = null;
     this.readyResolve = null;
     this.readyReject = null;
+    this.shutdownPromise = null;
+    this.shutdownRequestTimeoutMs = options.shutdownRequestTimeoutMs ?? DEFAULT_SHUTDOWN_REQUEST_TIMEOUT_MS;
+    this.shutdownGraceTimeoutMs = options.shutdownGraceTimeoutMs ?? DEFAULT_SHUTDOWN_GRACE_TIMEOUT_MS;
   }
 
   start() {
@@ -276,17 +332,37 @@ export class DaemonBridge extends EventEmitter {
     return this.sendCommand('abort', { requestId }, { countsAsActive: false });
   }
 
-  async shutdown() {
-    if (!this.daemonProcess) return;
-    try {
-      const command = { method: 'shutdown' };
-      await this.sendCommand(command.method, {}, { countsAsActive: false });
-    } catch {
-      // The process may already be gone.
-    }
-    if (this.daemonProcess && !this.daemonProcess.killed) {
-      this.daemonProcess.kill('SIGTERM');
-    }
+  shutdown() {
+    if (!this.daemonProcess) return Promise.resolve();
+    if (this.shutdownPromise) return this.shutdownPromise;
+
+    const child = this.daemonProcess;
+    this.shutdownPromise = (async () => {
+      try {
+        const command = { method: 'shutdown' };
+        await waitForCompletionOrTimeout(
+          this.sendCommand(command.method, {}, { countsAsActive: false }),
+          this.shutdownRequestTimeoutMs,
+        );
+      } catch {
+        // The process may already be gone or unable to accept commands.
+      }
+
+      if (!hasExited(child)) {
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        await waitForChildExit(child, this.shutdownGraceTimeoutMs);
+      }
+
+      if (!hasExited(child)) {
+        try { child.kill('SIGKILL'); } catch { /* ignore */ }
+        forceKillProcessTree(child);
+        await waitForChildExit(child, this.shutdownGraceTimeoutMs);
+      }
+    })().finally(() => {
+      this.shutdownPromise = null;
+    });
+
+    return this.shutdownPromise;
   }
 
   getProcessForInspection() {

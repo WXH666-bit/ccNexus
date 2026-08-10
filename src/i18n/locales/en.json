@@ -96,12 +96,17 @@
       "workDir": "Working Directory",
       "defaultModel": "Default Model",
       "language": "Language",
-      "autoSave": "Auto Save"
+      "closeBehavior": "When closing the window",
+      "closeBehaviorDescription": "Choose whether the close button hides ccNexus in the system tray or exits it completely.",
+      "closeBehaviors": {
+        "tray": "Minimize to system tray",
+        "exit": "Exit the application"
+      }
     },
     "update": {
       "title": "Application updates",
       "stable": "Stable releases from GitHub",
-      "development": "Updates are available in packaged builds.",
+      "developmentStatus": "Development mode",
       "currentVersion": "Current version",
       "latestVersion": "Latest version",
       "check": "Check for updates",
@@ -116,6 +121,7 @@
       "progress": "Progress",
       "speed": "Speed",
       "error": "Update check failed",
+      "networkError": "Could not connect to GitHub's update service. Check your network or proxy and try again.",
       "retry": "Try again"
     },
     "permissions": {

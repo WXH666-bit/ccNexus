@@ -114,17 +114,18 @@ export function createDesktopRuntime(options = {}) {
     return { ok: true, success: true, restart: true, pid: daemon?.pid, id: daemon?.id };
   }
 
-  function shutdown() {
-    for (const bridge of bridges.values()) {
-      bridge.shutdown();
-    }
+  async function shutdown() {
+    const shuttingDownBridges = new Map(bridges);
     bridges.clear();
-    registry.shutdown();
+    await registry.shutdown();
+    for (const [sessionId, bridge] of shuttingDownBridges) {
+      if (bridges.get(sessionId) === bridge) bridges.delete(sessionId);
+    }
   }
 
   function setCwd(nextCwd) {
     if (!nextCwd || nextCwd === runtimeCwd) return runtimeCwd;
-    shutdown();
+    void shutdown();
     runtimeCwd = nextCwd;
     registry.setCwd(nextCwd);
     return runtimeCwd;

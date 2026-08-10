@@ -23,6 +23,7 @@ test('package has desktop packaging scripts and electron-builder config', () => 
   assert.equal(pkg.dependencies?.ws, undefined);
   assert.ok(pkg.build.files.includes('src/utils/contextUsage.js'));
   assert.ok(pkg.build.files.includes('package.json'));
+  assert.ok(pkg.build.asarUnpack.includes('node_modules/@anthropic-ai/claude-agent-sdk-*/**'));
 });
 
 test('package pins the Claude SDK and publishes stable updates through public GitHub Releases', () => {
