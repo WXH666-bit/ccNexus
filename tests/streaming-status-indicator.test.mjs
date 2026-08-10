@@ -10,6 +10,7 @@ function read(path) {
 const chatView = read('../src/views/ChatView.tsx');
 const indicator = read('../src/components/GeneratingResponseIndicator.tsx');
 const statusPanel = read('../src/components/StatusPanel.tsx');
+const contextBar = read('../src/components/ChatInputBox/ContextBar.tsx');
 const styles = read('../src/index.css');
 
 test('ChatView shows a ccgui-style generating response indicator above the status panel while streaming', () => {
@@ -35,4 +36,12 @@ test('status panel separates labels from counts and aligns three equal columns',
   assert.match(styles, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s);
   assert.match(styles, /\.status-panel-tab\s*\{[^}]*min-height:\s*32px;/s);
   assert.match(styles, /\.status-panel-tab \.tab-progress[\s\S]*font-variant-numeric:\s*tabular-nums;/s);
+});
+
+test('status panel toggle renders a direction icon in both states', () => {
+  assert.match(contextBar, /ChevronDown[\s\S]*ChevronUp/);
+  assert.match(contextBar, /status-panel-toggle-button/);
+  assert.match(contextBar, /showStatusPanel \? <ChevronDown size=\{16\} \/> : <ChevronUp size=\{16\} \/>/);
+  assert.match(contextBar, /aria-expanded=\{showStatusPanel\}/);
+  assert.match(styles, /\.status-panel-toggle-button\s*\{/);
 });

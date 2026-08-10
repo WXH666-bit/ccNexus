@@ -117,3 +117,13 @@ test('appearance settings provide custom image background controls', () => {
   assert.match(zh, /"background"\s*:/);
   assert.match(en, /"background"\s*:/);
 });
+
+test('appearance background is rendered by the whole app shell', () => {
+  const css = read('src/index.css');
+  assert.match(css, /\.app-root\s*\{[^}]*position:\s*relative;/s);
+  assert.match(css, /\.app-root::before[\s\S]*--bg-chat-image/);
+  assert.match(css, /\.app-root::after[\s\S]*--chat-bg-overlay-opacity/);
+  assert.match(css, /\.app-root\s*>\s*\*[^}]*z-index:\s*1;/s);
+  assert.match(css, /\.chat-main\s*\{[^}]*background:\s*transparent;/s);
+  assert.doesNotMatch(css, /\.chat-main::before/);
+});

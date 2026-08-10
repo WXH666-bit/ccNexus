@@ -1,4 +1,4 @@
-import { ChevronDown, Layers, Paperclip, RotateCcw, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Paperclip, RotateCcw, X } from 'lucide-react';
 import TokenIndicator from './TokenIndicator';
 
 interface Attachment {
@@ -81,14 +81,16 @@ export default function ContextBar({
       <div className="context-tools-right">
         <button
           type="button"
-          className={`context-tool-btn status-panel-toggle ${showStatusPanel ? 'expanded' : 'collapsed'}`}
+          className={`context-tool-btn status-panel-toggle-button ${showStatusPanel ? 'expanded' : 'collapsed'}`}
           onClick={event => {
             event.stopPropagation();
             onToggleStatusPanel();
           }}
+          aria-label={showStatusPanel ? '收起状态面板' : '展开状态面板'}
+          aria-expanded={showStatusPanel}
           title={showStatusPanel ? '收起状态面板' : '展开状态面板'}
         >
-          {showStatusPanel ? <ChevronDown size={16} /> : <Layers size={16} />}
+          {showStatusPanel ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
         </button>
         <button type="button" className="context-tool-btn" title="回溯">
           <RotateCcw size={15} />

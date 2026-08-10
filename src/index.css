@@ -4858,34 +4858,6 @@ body {
   white-space: nowrap;
 }
 
-/* Status Panel Toggle */
-.status-panel-toggle {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 12px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-color);
-}
-
-.status-panel-toggle .toggle-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.status-panel-toggle .toggle-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
 /* Config Select */
 .config-select {
   position: relative;
@@ -6875,21 +6847,21 @@ textarea:focus-visible,
   --chat-bg-overlay-opacity: 0;
 }
 
-.chat-main {
+.app-root {
   position: relative;
   isolation: isolate;
-  background: var(--bg-chat);
+  background: var(--bg-primary);
 }
 
-.chat-main::before,
-.chat-main::after {
+.app-root::before,
+.app-root::after {
   position: absolute;
   inset: 0;
   pointer-events: none;
   content: '';
 }
 
-.chat-main::before {
+.app-root::before {
   z-index: 0;
   background-image: var(--bg-chat-image);
   background-position: center;
@@ -6901,16 +6873,73 @@ textarea:focus-visible,
   transition: opacity 180ms ease, filter 180ms ease;
 }
 
-.chat-main::after {
+.app-root::after {
   z-index: 0;
   background: var(--bg-primary);
   opacity: var(--chat-bg-overlay-opacity);
   transition: opacity 180ms ease;
 }
 
-.chat-main > * {
+.app-root > * {
   position: relative;
   z-index: 1;
+}
+
+.chat-view,
+.history-view,
+.settings-view,
+.chat-main {
+  background: transparent;
+}
+
+.window-drag-region {
+  background: color-mix(in srgb, var(--bg-primary) 68%, transparent);
+}
+
+.chat-header,
+.history-header,
+.settings-sidebar,
+.file-explorer,
+.file-explorer.collapsed {
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.file-explorer-header {
+  background: color-mix(in srgb, var(--bg-secondary) 64%, transparent);
+}
+
+.file-editor,
+.file-editor-textarea,
+.settings-content,
+.message-list {
+  background: transparent;
+}
+
+.chat-input-box {
+  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+}
+
+.status-panel-tabs,
+.status-panel-popover {
+  background: color-mix(in srgb, var(--surface-panel) 80%, transparent);
+}
+
+.status-panel-toggle-button {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.status-panel-toggle-button:hover {
+  border-color: var(--border-subtle);
+}
+
+.status-panel-toggle-button.expanded {
+  color: var(--accent-blue);
 }
 
 .appearance-background-card {
