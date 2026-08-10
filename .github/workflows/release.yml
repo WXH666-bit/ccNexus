@@ -32,7 +32,33 @@ jobs:
       - name: Build renderer
         run: pnpm run build
 
-      - name: Build and publish Windows installer
-        run: pnpm exec electron-builder --win nsis --publish always
+      - name: Build Windows installer
+        run: pnpm exec electron-builder --win nsis --publish never
+
+      - name: Publish Windows Release assets
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $tag = "v$($package.version)"
+          $assets = @(
+            Get-ChildItem -Path release -Filter '*.exe' -File -ErrorAction Stop
+            Get-ChildItem -Path release -Filter '*.blockmap' -File -ErrorAction Stop
+            Get-Item -Path 'release\latest.yml' -ErrorAction Stop
+          ) | ForEach-Object { $_.FullName }
+
+          Write-Host 'Release assets:'
+          $assets | ForEach-Object { Write-Host " - $_" }
+
+          gh release view $tag --repo $env:GH_REPO *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag --repo $env:GH_REPO --clobber @assets
+          } else {
+            gh release create $tag --repo $env:GH_REPO --title "ccNexus $tag" --generate-notes @assets
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw 'GitHub Release asset upload failed.'
+          }

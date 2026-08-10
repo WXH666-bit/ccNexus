@@ -14,7 +14,11 @@ test('release workflow builds and publishes a stable Windows GitHub Release from
   assert.match(workflow, /contents:\s*write/);
   assert.match(workflow, /pnpm install\s+--frozen-lockfile/);
   assert.match(workflow, /pnpm run build/);
-  assert.match(workflow, /pnpm exec electron-builder\s+--win\s+nsis\s+--publish\s+always/);
+  assert.match(workflow, /pnpm exec electron-builder\s+--win\s+nsis\s+--publish\s+never/);
+  assert.match(workflow, /gh release create/);
+  assert.match(workflow, /-Filter ['"]\*\.exe['"]/);
+  assert.match(workflow, /-Filter ['"]\*\.blockmap['"]/);
+  assert.match(workflow, /release\\latest\.yml/);
   assert.match(workflow, /GH_TOKEN:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}/);
   assert.doesNotMatch(workflow, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+/);
 });
