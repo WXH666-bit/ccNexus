@@ -256,10 +256,21 @@
     },
     "prompt": {
       "title": "Prompt Enhancer",
-      "desc": "Configure prompt enhancement rules",
-      "enable": "Enable Prompt Enhancement",
-      "rules": "Enhancement Rules",
-      "addRule": "Add Rule"
+      "desc": "Manage custom deterministic local rules for prompt cleanup. They do not rewrite prompts automatically with AI.",
+      "enable": "Enable custom local rules",
+      "enableHelp": "Run the saved local rules below before deciding whether to use the preview.",
+      "localRulesTitle": "Local deterministic rules",
+      "localRulesDescription": "These replacements run locally from your saved rule list and do not call any model.",
+      "manualAiTitle": "Manual AI polish only",
+      "manualAiDescription": "AI polishing is optional, only available from the preview dialog, and every request consumes extra Tokens.",
+      "rules": "Local rule list",
+      "rulesEmpty": "No local rules yet. Add a pattern and replacement to shape the local preview.",
+      "patternLabel": "Pattern (regex)",
+      "replacementLabel": "Replacement",
+      "addRule": "Add rule",
+      "deleteRule": "Delete rule",
+      "enableRule": "Enable rule",
+      "disableRule": "Disable rule"
     }
   },
   "history": {

@@ -256,10 +256,21 @@
     },
     "prompt": {
       "title": "提示词增强",
-      "desc": "配置提示词增强规则",
-      "enable": "启用提示词增强",
-      "rules": "增强规则",
-      "addRule": "添加规则"
+      "desc": "管理自定义、可预测的本地规则。它们不会用 AI 自动改写提示词。",
+      "enable": "启用自定义本地规则",
+      "enableHelp": "在你决定是否使用预览之前，先运行下方已保存的本地规则。",
+      "localRulesTitle": "本地确定性规则",
+      "localRulesDescription": "这些替换只会根据你保存的规则在本地运行，不会调用任何模型。",
+      "manualAiTitle": "AI 润色需要手动请求",
+      "manualAiDescription": "AI 润色是可选操作，只能在预览对话框中手动触发，每次请求都会额外消耗 Tokens。",
+      "rules": "本地规则列表",
+      "rulesEmpty": "还没有本地规则。添加匹配和替换内容，就可以调整本地预览。",
+      "patternLabel": "匹配（Regex）",
+      "replacementLabel": "替换内容",
+      "addRule": "添加规则",
+      "deleteRule": "删除规则",
+      "enableRule": "启用规则",
+      "disableRule": "禁用规则"
     }
   },
   "history": {

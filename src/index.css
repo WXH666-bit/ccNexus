@@ -5110,30 +5110,74 @@ html, body, #root {
 }
 
 /* Prompt enhancer */
+.prompt-enhancer-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+.prompt-enhancer-toggle-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.prompt-enhancer-toggle-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.prompt-enhancer-notice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.prompt-enhancer-notice-card {
+  padding: 14px 15px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-panel);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.08);
+}
+.prompt-enhancer-notice-title {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.prompt-enhancer-notice-copy {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .prompt-rules-list {
+  display: grid;
+  gap: 10px;
   margin-bottom: 12px;
 }
 .prompt-rule-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  margin-bottom: 8px;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
 }
 .rule-fields {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
   flex: 1;
 }
 .rule-pattern, .rule-replacement {
   flex: 1;
   padding: 6px 10px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
   color: var(--text-primary);
   font-size: 12px;
   font-family: var(--font-mono);
@@ -5141,26 +5185,13 @@ html, body, #root {
 }
 .rule-pattern:focus, .rule-replacement:focus {
   border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 13%, transparent);
 }
 .rule-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.prompt-test-input {
-  width: 100%;
-  min-height: 80px;
-  padding: 8px 12px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 13px;
-  outline: none;
-  resize: vertical;
-}
-.prompt-test-input:focus {
-  border-color: var(--accent-blue);
+  padding-top: 2px;
 }
 
 /* ============================================
@@ -6989,8 +7020,7 @@ textarea:focus-visible,
 .setting-group textarea,
 .settings-filter-row input,
 .env-key,
-.env-value,
-.prompt-test-input {
+.env-value {
   min-height: 38px;
   border-color: var(--border-subtle);
   border-radius: 9px;
@@ -7003,8 +7033,7 @@ textarea:focus-visible,
 .setting-group textarea:focus,
 .settings-filter-row input:focus,
 .env-key:focus,
-.env-value:focus,
-.prompt-test-input:focus {
+.env-value:focus {
   border-color: var(--accent-blue);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 13%, transparent);
 }
