@@ -58,6 +58,30 @@ test('builds ccgui-style SDK options from client dialogue controls', () => {
   assert.equal(options.canUseTool, canUseTool);
 });
 
+test('auto is a valid SDK permission mode without dangerous bypass', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: { mode: 'auto' },
+  });
+
+  assert.equal(options.permissionMode, 'auto');
+  assert.equal(options.allowDangerouslySkipPermissions, undefined);
+});
+
+test('bypassPermissions remains the only dangerous launch mode', () => {
+  const options = buildClaudeQueryOptions({
+    cwd: 'D:/repo',
+    env: {},
+    canUseTool: async () => ({ behavior: 'allow' }),
+    clientOptions: { mode: 'bypassPermissions' },
+  });
+
+  assert.equal(options.permissionMode, 'bypassPermissions');
+  assert.equal(options.allowDangerouslySkipPermissions, true);
+});
+
 test('omits default model and disables partial messages when streaming is false', () => {
   const options = buildClaudeQueryOptions({
     cwd: 'D:/repo',

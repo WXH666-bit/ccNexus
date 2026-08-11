@@ -4,6 +4,25 @@ export interface TextBlock {
   text: string;
 }
 
+export type PermissionMode =
+  | 'default'
+  | 'plan'
+  | 'acceptEdits'
+  | 'auto'
+  | 'bypassPermissions';
+
+export const PERMISSION_MODES: readonly PermissionMode[] = [
+  'default',
+  'plan',
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+];
+
+export function isPermissionMode(value: string): value is PermissionMode {
+  return (PERMISSION_MODES as readonly string[]).includes(value);
+}
+
 export interface ThinkingBlock {
   type: 'thinking';
   thinking: string;

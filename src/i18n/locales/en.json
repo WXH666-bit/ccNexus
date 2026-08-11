@@ -129,9 +129,11 @@
       "desc": "Configure default permission behavior for tool calls",
       "mode": "Default Permission Mode",
       "modes": {
-        "auto": "Auto Mode",
+        "auto": "Auto (model decides)",
         "plan": "Plan Mode",
-        "acceptEdits": "Accept Edits"
+        "acceptEdits": "Accept Edits",
+        "default": "Default",
+        "fullAccess": "Full access"
       },
       "whitelist": "Tool Permission Whitelist",
       "addTool": "Add Tool"

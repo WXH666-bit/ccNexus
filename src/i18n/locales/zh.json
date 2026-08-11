@@ -129,9 +129,11 @@
       "desc": "配置工具调用的默认权限行为",
       "mode": "默认权限模式",
       "modes": {
-        "auto": "自动模式",
+        "auto": "自动模式（由模型判断）",
         "plan": "计划模式",
-        "acceptEdits": "接受编辑"
+        "acceptEdits": "接受编辑",
+        "default": "默认模式",
+        "fullAccess": "完全访问模式"
       },
       "whitelist": "工具权限白名单",
       "addTool": "添加工具"

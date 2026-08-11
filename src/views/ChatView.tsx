@@ -32,10 +32,11 @@ import { getContextUsage as loadContextUsage } from '../utils/desktopBridgeApi';
 import { getActiveSession, getSessions, loadSession, renameSession, setActiveSession } from '../utils/sessionBridgeApi';
 import { deriveStatusData } from '../utils/statusPanelData';
 import { useFileChangesManagement } from '../hooks/useFileChangesManagement';
-import type { 
-  ChatMessage, Session, StatusData, PermissionRequest,
+import type {
+  ChatMessage, Session, StatusData, PermissionRequest, PermissionMode,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse
 } from '../types';
+import { isPermissionMode } from '../types';
 
 let msgIdCounter = 0;
 function genId() { return `msg-${Date.now()}-${++msgIdCounter}`; }
@@ -73,7 +74,10 @@ export default function ChatView() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [status, setStatus] = useState<StatusData>({});
-  const [mode, setModeState] = useState(() => readStoredPreference('chatMode', 'default'));
+  const [mode, setModeState] = useState<PermissionMode>(() => {
+    const saved = readStoredPreference('chatMode', 'default');
+    return isPermissionMode(saved) ? saved : 'default';
+  });
   const [model, setModelState] = useState(() => readStoredPreference('chatModel', 'default'));
   const [reasoning, setReasoningState] = useState(() => readStoredPreference('chatReasoning', 'high'));
   const [usageUsedTokens, setUsageUsedTokens] = useState<number | undefined>(undefined);
@@ -85,7 +89,8 @@ export default function ChatView() {
 
   useEffect(() => {
     const handlePreferenceChange = () => {
-      setModeState(readStoredPreference('chatMode', 'default'));
+      const savedMode = readStoredPreference('chatMode', 'default');
+      setModeState(isPermissionMode(savedMode) ? savedMode : 'default');
       setModelState(readStoredPreference('chatModel', 'default'));
       setReasoningState(readStoredPreference('chatReasoning', 'high'));
     };
@@ -142,7 +147,7 @@ export default function ChatView() {
     messages,
   });
 
-  const setMode = useCallback((nextMode: string) => {
+  const setMode = useCallback((nextMode: PermissionMode) => {
     setModeState(nextMode);
     localStorage.setItem('chatMode', nextMode);
   }, []);

@@ -1,20 +1,29 @@
 import { useEffect, useState } from 'react';
 import { Shield } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { PermissionMode } from '../../types';
+import { isPermissionMode } from '../../types';
 
 const MODE_KEY = 'chatMode';
 
 export default function PermissionsSection() {
   const { t } = useTranslation();
-  const [mode, setMode] = useState(() => localStorage.getItem(MODE_KEY) || 'default');
+  const [mode, setMode] = useState<PermissionMode>(() => {
+    const saved = localStorage.getItem(MODE_KEY) || 'default';
+    return isPermissionMode(saved) ? saved : 'default';
+  });
 
   useEffect(() => {
-    const syncMode = () => setMode(localStorage.getItem(MODE_KEY) || 'default');
+    const syncMode = () => {
+      const saved = localStorage.getItem(MODE_KEY) || 'default';
+      setMode(isPermissionMode(saved) ? saved : 'default');
+    };
     window.addEventListener('ccnexus:chat-preferences-changed', syncMode);
     return () => window.removeEventListener('ccnexus:chat-preferences-changed', syncMode);
   }, []);
 
   const handleModeChange = (nextMode: string) => {
+    if (!isPermissionMode(nextMode)) return;
     setMode(nextMode);
     localStorage.setItem(MODE_KEY, nextMode);
     window.dispatchEvent(new Event('ccnexus:chat-preferences-changed'));
@@ -31,7 +40,8 @@ export default function PermissionsSection() {
           <option value="default">{t('settings.permissions.modes.default', { defaultValue: '默认模式' })}</option>
           <option value="plan">{t('settings.permissions.modes.plan')}</option>
           <option value="acceptEdits">{t('settings.permissions.modes.acceptEdits')}</option>
-          <option value="bypassPermissions">{t('settings.permissions.modes.auto', { defaultValue: '自动模式' })}</option>
+          <option value="auto">{t('settings.permissions.modes.auto', { defaultValue: '自动模式' })}</option>
+          <option value="bypassPermissions">{t('settings.permissions.modes.fullAccess', { defaultValue: '完全访问模式' })}</option>
         </select>
       </div>
 

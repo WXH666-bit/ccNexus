@@ -4,7 +4,13 @@ import { buildThinkingOptions } from './thinkingOptions.js';
 import { resolveBackendModel } from '../src/utils/modelResolution.js';
 import { buildClaudeSystemPromptAppend } from './systemPrompt.js';
 
-const VALID_PERMISSION_MODES = new Set(['default', 'plan', 'acceptEdits', 'bypassPermissions']);
+const VALID_PERMISSION_MODES = new Set([
+  'default',
+  'plan',
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+]);
 const CLI_ENV_OVERRIDE_KEYS = new Set([
   'CLAUDE_CODE_EFFORT_LEVEL',
   'MAX_THINKING_TOKENS',

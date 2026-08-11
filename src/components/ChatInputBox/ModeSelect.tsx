@@ -1,18 +1,20 @@
-import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ScrollText, Zap } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ScrollText, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PermissionMode } from '../../types';
 
 interface ModeInfo {
-  id: string;
+  id: PermissionMode;
   label: string;
   description: string;
   title: string;
   icon: typeof MessageSquare;
   auto?: boolean;
+  dangerous?: boolean;
 }
 
 interface Props {
-  value: string;
-  onChange: (value: string) => void;
+  value: PermissionMode;
+  onChange: (value: PermissionMode) => void;
 }
 
 const MODES: ModeInfo[] = [
@@ -38,12 +40,20 @@ const MODES: ModeInfo[] = [
     icon: Pencil,
   },
   {
-    id: 'bypassPermissions',
+    id: 'auto',
     label: '自动模式',
-    description: '跳过权限确认，谨慎使用',
+    description: '由模型判断每次操作是否可以执行',
     title: '自动模式',
-    icon: Zap,
+    icon: Bot,
     auto: true,
+  },
+  {
+    id: 'bypassPermissions',
+    label: '完全访问模式',
+    description: '跳过所有权限检查，仅在完全信任任务时使用',
+    title: '完全访问模式',
+    icon: ShieldAlert,
+    dangerous: true,
   },
 ];
 
@@ -81,7 +91,11 @@ export default function ModeSelect({ value, onChange }: Props) {
     <div className="mode-select-wrap" ref={rootRef}>
       <button
         type="button"
-        className={`selector-button mode-select-trigger ${currentMode.auto ? 'mode-auto-active' : ''}`}
+        className={[
+          'selector-button mode-select-trigger',
+          currentMode.auto ? 'mode-auto-active' : '',
+          currentMode.dangerous ? 'mode-dangerous-active' : '',
+        ].filter(Boolean).join(' ')}
         onClick={handleToggle}
         title={currentMode.title}
       >

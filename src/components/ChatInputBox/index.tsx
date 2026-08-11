@@ -8,6 +8,7 @@ import { calculateContextPercentage, getModelContextLimit } from '../../utils/co
 import { getAgents, getCommands, getFileTree, getPrompts } from '../../utils/desktopBridgeApi';
 import { enhancePromptText } from '../../utils/promptEnhancer';
 import { useInputHistory } from './useInputHistory';
+import type { PermissionMode } from '../../types';
 
 interface ChatInputBoxProps {
   onSend: (
@@ -24,8 +25,8 @@ interface ChatInputBoxProps {
   onStop: () => void;
   isStreaming: boolean;
   connected: boolean;
-  mode: string;
-  setMode: (mode: string) => void;
+  mode: PermissionMode;
+  setMode: (mode: PermissionMode) => void;
   model: string;
   setModel: (model: string) => void;
   reasoning: string;

@@ -149,6 +149,20 @@ test('ModeSelect dropdown is left aligned so it stays inside the chat input boun
   assert.match(styles, /\.mode-select-dropdown\s*\{[^}]*right:\s*auto;/s);
 });
 
+test('permission mode labels distinguish SDK auto from full access', () => {
+  const modeSelect = read('src/components/ChatInputBox/ModeSelect.tsx');
+  const buttonArea = read('src/components/ChatInputBox/ButtonArea.tsx');
+
+  assert.match(modeSelect, /id:\s*['"]auto['"]/);
+  assert.match(modeSelect, /id:\s*['"]bypassPermissions['"]/);
+  assert.match(modeSelect, /模型判断|Model decides/);
+  assert.match(modeSelect, /完全访问|Full access/);
+  assert.doesNotMatch(
+    buttonArea,
+    /mode\s*===\s*['"]bypassPermissions['"][\s\S]{0,180}auto-mode-badge/,
+  );
+});
+
 test('ModelSelect merges provider mapping with model choice like ccgui', () => {
   const source = read('src/components/ChatInputBox/ModelSelect.tsx');
 

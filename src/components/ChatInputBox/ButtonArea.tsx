@@ -1,14 +1,15 @@
-import { ListOrdered, Send, Sparkles, Square, Zap } from 'lucide-react';
+import { AlertTriangle, ListOrdered, Send, Sparkles, Square } from 'lucide-react';
 import ConfigSelect from '../ConfigSelect';
 import ReasoningSelect from '../ReasoningSelect';
 import ModeSelect from './ModeSelect';
 import ModelSelect from './ModelSelect';
+import type { PermissionMode } from '../../types';
 
 interface Props {
   hasInputContent: boolean;
   isStreaming: boolean;
-  mode: string;
-  setMode: (mode: string) => void;
+  mode: PermissionMode;
+  setMode: (mode: PermissionMode) => void;
   model: string;
   setModel: (model: string) => void;
   reasoning: string;
@@ -141,9 +142,14 @@ export default function ButtonArea({
             <Send size={16} />
           </button>
         )}
+        {mode === 'auto' && (
+          <span className="auto-mode-badge" title="自动模式：由模型判断">
+            自动模式
+          </span>
+        )}
         {mode === 'bypassPermissions' && (
-          <span className="auto-mode-badge" title="自动模式">
-            <Zap size={13} /> 自动模式
+          <span className="full-access-mode-badge" title="完全访问模式：跳过所有权限检查">
+            <AlertTriangle size={13} /> 完全访问
           </span>
         )}
       </div>

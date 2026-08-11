@@ -2227,6 +2227,10 @@ html, body, #root {
   color: #ffb000;
 }
 
+.mode-dangerous-active {
+  color: var(--accent-red);
+}
+
 .model-select-trigger {
   max-width: min(360px, 42vw);
 }
@@ -2472,6 +2476,14 @@ html, body, #root {
   align-items: center;
   gap: 4px;
   color: var(--accent-orange);
+  font-size: 12px;
+}
+
+.full-access-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-red);
   font-size: 12px;
 }
 
