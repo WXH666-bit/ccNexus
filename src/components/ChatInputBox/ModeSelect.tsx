@@ -114,7 +114,12 @@ export default function ModeSelect({ value, onChange }: Props) {
               <button
                 key={mode.id}
                 type="button"
-                className={`selector-option mode-select-option ${selected ? 'selected' : ''}`}
+                className={[
+                  'selector-option mode-select-option',
+                  mode.auto ? 'mode-auto-option' : '',
+                  mode.dangerous ? 'mode-dangerous-option' : '',
+                  selected ? 'selected' : '',
+                ].filter(Boolean).join(' ')}
                 onClick={event => {
                   event.stopPropagation();
                   onChange(mode.id);
@@ -122,7 +127,13 @@ export default function ModeSelect({ value, onChange }: Props) {
                 }}
                 title={mode.title}
               >
-                <Icon size={16} className={mode.auto ? 'mode-auto-icon' : undefined} />
+                <Icon
+                  size={16}
+                  className={[
+                    mode.auto ? 'mode-auto-icon' : '',
+                    mode.dangerous ? 'mode-dangerous-icon' : '',
+                  ].filter(Boolean).join(' ') || undefined}
+                />
                 <span className="mode-option-info">
                   <span className="mode-option-label">{mode.label}</span>
                   <span className="mode-option-description">{mode.description}</span>

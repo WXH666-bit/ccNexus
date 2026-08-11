@@ -26,6 +26,8 @@
   --accent-red: #f44336;
   --accent-orange: #ff9800;
   --accent-yellow: #ffc107;
+  --mode-dangerous-selected: rgba(244, 67, 54, 0.22);
+  --mode-dangerous-foreground: #ff9a92;
 
   --user-bubble: #1f5f9f;
   --user-bubble-text: #ffffff;
@@ -61,6 +63,23 @@ html, body, #root {
   height: 100vh;
   overflow: hidden;
   padding-top: env(titlebar-area-height, 42px);
+}
+
+.persistent-chat-shell,
+.secondary-route-shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.secondary-route-shell {
+  flex-direction: column;
+}
+
+.route-hidden {
+  display: none !important;
 }
 
 .window-drag-region {
@@ -2224,10 +2243,19 @@ html, body, #root {
 
 .mode-auto-active,
 .mode-auto-icon {
-  color: #ffb000;
+  color: var(--accent-blue);
 }
 
-.mode-dangerous-active {
+.mode-dangerous-active,
+.mode-dangerous-icon {
+  color: var(--accent-red);
+}
+
+.button-area .mode-auto-active {
+  color: var(--accent-blue);
+}
+
+.button-area .mode-dangerous-active {
   color: var(--accent-red);
 }
 
@@ -2287,6 +2315,14 @@ html, body, #root {
 
 .selector-option.selected {
   background: #0d5684;
+}
+
+.selector-option.selected.mode-auto-option {
+  background: rgba(74, 158, 255, 0.18);
+}
+
+.selector-option.selected.mode-dangerous-option {
+  background: var(--mode-dangerous-selected);
 }
 
 .selector-option.disabled {
@@ -2349,6 +2385,18 @@ html, body, #root {
 
 .selector-option.selected .mode-option-description {
   color: rgba(255, 255, 255, 0.76);
+}
+
+.mode-dangerous-option .mode-option-label {
+  color: var(--mode-dangerous-foreground);
+}
+
+.mode-dangerous-option .mode-option-description {
+  color: var(--mode-dangerous-foreground);
+}
+
+.mode-dangerous-option .mode-option-check {
+  color: var(--mode-dangerous-foreground);
 }
 
 .model-option-label,
@@ -2485,6 +2533,40 @@ html, body, #root {
   gap: 4px;
   color: var(--accent-red);
   font-size: 12px;
+}
+
+.full-access-confirm-dialog {
+  border-color: var(--accent-red);
+}
+
+.full-access-confirm-icon {
+  color: var(--accent-red);
+}
+
+.full-access-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  line-height: 1.6;
+}
+
+.full-access-confirm-body p {
+  margin: 0;
+}
+
+.full-access-confirm-note {
+  color: var(--mode-dangerous-foreground);
+  font-size: 13px;
+}
+
+.full-access-confirm-btn {
+  border-color: var(--accent-red);
+  background: var(--accent-red);
+  color: #fff;
+}
+
+.full-access-confirm-btn:hover {
+  background: color-mix(in srgb, var(--accent-red) 82%, #000);
 }
 
 .chat-completion-dropdown {
@@ -4691,6 +4773,8 @@ html, body, #root {
   --accent-red: #dc2626;
   --accent-yellow: #ca8a04;
   --accent-purple: #9333ea;
+  --mode-dangerous-selected: rgba(220, 38, 38, 0.14);
+  --mode-dangerous-foreground: #f87171;
 }
 
 [data-theme="light"] body {

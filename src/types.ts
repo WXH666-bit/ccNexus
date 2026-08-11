@@ -291,6 +291,7 @@ export interface PlanApprovalRequest {
   toolName?: string;
   plan: string;
   allowedPrompts: { tool: string; prompt: string }[];
+  responseType?: 'plan' | 'permission';
   // Kept optional for session history produced by the older renderer contract.
   plan_id?: string;
   title?: string;

@@ -107,3 +107,34 @@ test('ChatView navigates back to the sessionless route before creating a new ses
   assert.match(source, /const handleNewSession = useCallback\(\(\) => \{/);
   assert.match(source, /beginSessionTransition\(null\);\s*navigate\('\/chat', \{ replace: true \}\);\s*send\(\{ type: 'new_session' \}\);/s);
 });
+
+test('App keeps ChatView mounted while settings and history routes are active', () => {
+  const source = read('src/App.tsx');
+
+  assert.match(source, /persistent-chat-shell/);
+  assert.match(source, /secondary-route-shell/);
+  assert.match(read('src/index.css'), /\.persistent-chat-shell,[\s\S]*display:\s*flex/);
+  assert.match(source, /<ChatView routeSessionId=\{routeSessionId\} \/>/);
+  assert.match(source, /useLocation/);
+  assert.match(source, /route-hidden/);
+});
+
+test('ChatView keeps a route session id when it is mounted outside the route element', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /interface ChatViewProps/);
+  assert.match(source, /routeSessionId\?: string/);
+  assert.match(source, /const urlSessionId = routeSessionId \?\? routeParamSessionId/);
+});
+
+test('ExitPlanMode permission requests are shown as a readable plan approval', () => {
+  const source = read('src/views/ChatView.tsx');
+  const types = read('src/types.ts');
+
+  assert.match(source, /msg\.toolName === ['"]ExitPlanMode['"]/);
+  assert.doesNotMatch(source, /msg\.toolName === ['"]ExitPlanMode['"]\s*&&\s*mode === ['"]plan['"]/);
+  assert.match(source, /responseType:\s*['"]permission['"]/);
+  assert.match(source, /planApproval\.responseType === ['"]permission['"]/);
+  assert.match(source, /type:\s*['"]permission_response['"]/);
+  assert.match(types, /responseType\?: ['"]plan['"] \| ['"]permission['"]/);
+});

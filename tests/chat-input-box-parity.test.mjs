@@ -163,6 +163,50 @@ test('permission mode labels distinguish SDK auto from full access', () => {
   );
 });
 
+test('permission mode colors communicate neutral auto and dangerous full access states', () => {
+  const modeSelect = read('src/components/ChatInputBox/ModeSelect.tsx');
+  const styles = read('src/index.css');
+
+  assert.match(modeSelect, /mode-auto-option/);
+  assert.match(modeSelect, /mode-dangerous-option/);
+  assert.match(modeSelect, /mode-dangerous-icon/);
+  assert.match(
+    styles,
+    /\.mode-auto-active,\s*\.mode-auto-icon\s*\{[^}]*color:\s*var\(--accent-blue\);/s,
+  );
+  assert.match(
+    styles,
+    /\.mode-dangerous-active,\s*\.mode-dangerous-icon\s*\{[^}]*color:\s*var\(--accent-red\);/s,
+  );
+  assert.match(
+    styles,
+    /\.selector-option\.selected\.mode-dangerous-option\s*\{[^}]*background:\s*var\(--mode-dangerous-selected\);/s,
+  );
+});
+
+test('full access mode requires explicit confirmation before changing active mode', () => {
+  const chatView = read('src/views/ChatView.tsx');
+
+  assert.match(chatView, /FullAccessConfirmDialog/);
+  assert.match(chatView, /pendingModeConfirmation/);
+  assert.match(chatView, /nextMode === ['"]bypassPermissions['"]/);
+  assert.match(chatView, /onConfirm=\{confirmFullAccessMode\}/);
+  assert.match(chatView, /onCancel=\{\(\) => setPendingModeConfirmation\(null\)\}/);
+});
+
+test('dangerous mode keeps warning text visible in the chat toolbar', () => {
+  const styles = read('src/index.css');
+
+  assert.match(
+    styles,
+    /\.button-area \.mode-dangerous-active\s*\{[^}]*color:\s*var\(--accent-red\);/s,
+  );
+  assert.match(
+    styles,
+    /\.mode-dangerous-option \.mode-option-label\s*\{[^}]*color:\s*var\(--mode-dangerous-foreground\);/s,
+  );
+});
+
 test('ModelSelect merges provider mapping with model choice like ccgui', () => {
   const source = read('src/components/ChatInputBox/ModelSelect.tsx');
 

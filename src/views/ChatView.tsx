@@ -6,6 +6,7 @@ import MessageList from '../components/MessageList';
 import ChatInputBox from '../components/ChatInputBox';
 import StatusPanel from '../components/StatusPanel';
 import PermissionDialog from '../components/PermissionDialog';
+import FullAccessConfirmDialog from '../components/FullAccessConfirmDialog';
 import WelcomeScreen from '../components/WelcomeScreen';
 import RewindDialog from '../components/RewindDialog';
 import PlanApprovalDialog from '../components/PlanApprovalDialog';
@@ -38,6 +39,10 @@ import type {
 } from '../types';
 import { isPermissionMode } from '../types';
 
+interface ChatViewProps {
+  routeSessionId?: string;
+}
+
 let msgIdCounter = 0;
 function genId() { return `msg-${Date.now()}-${++msgIdCounter}`; }
 
@@ -62,8 +67,9 @@ function writeStoredContextUsage(sessionId: string | undefined, usedTokens: numb
   localStorage.setItem(`${CONTEXT_USAGE_STORAGE_PREFIX}${sessionId}`, String(Math.round(usedTokens)));
 }
 
-export default function ChatView() {
-  const { sessionId: urlSessionId } = useParams();
+export default function ChatView({ routeSessionId }: ChatViewProps) {
+  const { sessionId: routeParamSessionId } = useParams();
+  const urlSessionId = routeSessionId ?? routeParamSessionId;
   const navigate = useNavigate();
   const { send, incomingMessages, connected } = useDesktopChat();
 
@@ -74,6 +80,7 @@ export default function ChatView() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [status, setStatus] = useState<StatusData>({});
+  const [pendingModeConfirmation, setPendingModeConfirmation] = useState<PermissionMode | null>(null);
   const [mode, setModeState] = useState<PermissionMode>(() => {
     const saved = readStoredPreference('chatMode', 'default');
     return isPermissionMode(saved) ? saved : 'default';
@@ -147,7 +154,7 @@ export default function ChatView() {
     messages,
   });
 
-  const setMode = useCallback((nextMode: PermissionMode) => {
+  const applyMode = useCallback((nextMode: PermissionMode) => {
     setModeState(nextMode);
     localStorage.setItem('chatMode', nextMode);
     send({
@@ -156,6 +163,20 @@ export default function ChatView() {
       mode: nextMode,
     });
   }, [currentSessionId, send]);
+
+  const setMode = useCallback((nextMode: PermissionMode) => {
+    if (nextMode === 'bypassPermissions' && mode !== nextMode) {
+      setPendingModeConfirmation(nextMode);
+      return;
+    }
+    applyMode(nextMode);
+  }, [applyMode, mode]);
+
+  const confirmFullAccessMode = useCallback(() => {
+    if (pendingModeConfirmation !== 'bypassPermissions') return;
+    setPendingModeConfirmation(null);
+    applyMode('bypassPermissions');
+  }, [applyMode, pendingModeConfirmation]);
 
   const setModel = useCallback((nextModel: string) => {
     setModelState(nextModel);
@@ -325,6 +346,17 @@ export default function ChatView() {
   // Plan approval handlers
   const handlePlanApprove = useCallback(() => {
     if (!planApproval) return;
+    if (planApproval.responseType === 'permission') {
+      send({
+        type: 'permission_response',
+        requestId: planApproval.requestId,
+        behavior: 'allow',
+        allow: true,
+      });
+      setPlanApproval(null);
+      setMode('auto');
+      return;
+    }
     send({
       type: 'plan_approval_response',
       requestId: planApproval.requestId,
@@ -332,10 +364,20 @@ export default function ChatView() {
       targetMode: 'auto',
     });
     setPlanApproval(null);
-  }, [planApproval, send]);
+  }, [planApproval, send, setMode]);
 
   const handlePlanReject = useCallback((feedback: string) => {
     if (!planApproval) return;
+    if (planApproval.responseType === 'permission') {
+      send({
+        type: 'permission_response',
+        requestId: planApproval.requestId,
+        behavior: 'deny',
+        allow: false,
+      });
+      setPlanApproval(null);
+      return;
+    }
     send({
       type: 'plan_approval_response',
       requestId: planApproval.requestId,
@@ -385,6 +427,7 @@ export default function ChatView() {
     setUsageUsedTokens(undefined);
     setCurrentSession(nextSessionId ? nextSession : null);
     setPermission(null);
+    setPendingModeConfirmation(null);
     setPlanApproval(null);
     setAskQuestion(null);
     setRewindTarget(null);
@@ -724,6 +767,28 @@ export default function ChatView() {
       }
 
       case 'permission_request': {
+        if (msg.toolName === 'ExitPlanMode') {
+          const input = msg.input || {};
+          const plan = typeof input.plan === 'string'
+            ? input.plan
+            : JSON.stringify(input, null, 2);
+          const allowedPrompts = Array.isArray(input.allowedPrompts)
+            ? input.allowedPrompts.filter(item => (
+              item
+              && typeof item.tool === 'string'
+              && typeof item.prompt === 'string'
+            )) as { tool: string; prompt: string }[]
+            : [];
+          setPermission(null);
+          setPlanApproval({
+            requestId: msg.requestId,
+            toolName: msg.toolName,
+            plan,
+            allowedPrompts,
+            responseType: 'permission',
+          });
+          break;
+        }
         setPermission({ permission_id: msg.requestId, tool_name: msg.toolName, input: msg.input });
         break;
       }
@@ -774,11 +839,13 @@ export default function ChatView() {
 
       // P1 features
       case 'plan_approval': {
+        setPermission(null);
         setPlanApproval({
           requestId: msg.requestId,
           toolName: msg.toolName,
           plan: msg.plan,
           allowedPrompts: msg.allowedPrompts,
+          responseType: 'plan',
         });
         break;
       }
@@ -1093,6 +1160,12 @@ export default function ChatView() {
           onAllow={() => handlePermission(permission.permission_id, 'allow')}
           onDeny={() => handlePermission(permission.permission_id, 'deny')}
           onAlwaysAllow={() => handlePermission(permission.permission_id, 'always_allow')}
+        />
+      )}
+      {pendingModeConfirmation === 'bypassPermissions' && (
+        <FullAccessConfirmDialog
+          onConfirm={confirmFullAccessMode}
+          onCancel={() => setPendingModeConfirmation(null)}
         />
       )}
       {rewindTarget && (
