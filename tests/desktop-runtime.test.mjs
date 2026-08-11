@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createDesktopRuntime } from '../desktop/runtime/index.js';
 import { DaemonBridge } from '../desktop/runtime/daemonBridge.js';
+import { createDisposableQuery } from '../desktop/runtime/disposableQuery.js';
 
 test('desktop runtime starts one inspectable daemon process for a session', async () => {
   const runtime = createDesktopRuntime({ cwd: process.cwd(), provider: 'claude' });
@@ -73,3 +75,57 @@ test('daemon bridge waits for the child process to exit after requesting shutdow
 
   assert.equal(child.exited, true);
 });
+
+test('desktop runtime exposes a disposable query path separate from normal chat queries', () => {
+  const source = readFileSync(new URL('../desktop/runtime/index.js', import.meta.url), 'utf8');
+  assert.match(source, /const disposableRuntime = createDesktopRuntime\(/);
+  assert.match(source, /queryClaudeDisposable/);
+  assert.match(source, /createDisposableQuery/);
+  assert.match(source, /dispose: \(\) => disposableRuntime\.shutdown\(\)/);
+  assert.match(source, /async function queryClaude\(/);
+});
+
+test('disposable query awaits query close and runtime shutdown exactly once', async () => {
+  let releaseQueryClose;
+  let releaseShutdown;
+  let queryCloseCalls = 0;
+  let shutdownCalls = 0;
+  const queryCloseReady = new Promise((resolve) => { releaseQueryClose = resolve; });
+  const shutdownReady = new Promise((resolve) => { releaseShutdown = resolve; });
+  const query = {
+    async close() {
+      queryCloseCalls += 1;
+      await queryCloseReady;
+    },
+    async *[Symbol.asyncIterator]() {},
+  };
+  const disposable = createDisposableQuery({
+    query,
+    dispose: async () => {
+      shutdownCalls += 1;
+      await shutdownReady;
+    },
+  });
+
+  let settled = false;
+  const pendingClose = disposable.close().finally(() => { settled = true; });
+  await waitFor(() => queryCloseCalls === 1);
+  assert.equal(shutdownCalls, 0);
+  assert.equal(settled, false);
+  releaseQueryClose();
+  await waitFor(() => shutdownCalls === 1);
+  assert.equal(settled, false);
+  releaseShutdown();
+  await pendingClose;
+  await disposable.close();
+  assert.equal(queryCloseCalls, 1);
+  assert.equal(shutdownCalls, 1);
+});
+
+async function waitFor(predicate, { attempts = 20 } = {}) {
+  for (let index = 0; index < attempts; index += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error('Condition was not met in time');
+}

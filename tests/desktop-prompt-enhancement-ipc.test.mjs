@@ -131,7 +131,8 @@ test('desktop main registers prompt enhancement IPC on the dedicated service', (
   assert.match(main, /ipcMain\.handle\('desktop:cancel-prompt-enhancement'/);
   assert.match(main, /promptEnhancementService\.enhance\(args\)/);
   assert.match(main, /promptEnhancementService\.cancel\(args\.requestId\)/);
-  assert.match(main, /promptEnhancementService\.dispose\(\)/);
+  assert.match(main, /await promptEnhancementService\.dispose\(\)/);
+  assert.match(main, /runtime\.queryClaudeDisposable/);
 
   const enhanceStart = main.indexOf("ipcMain.handle('desktop:enhance-prompt'");
   const cancelStart = main.indexOf("ipcMain.handle('desktop:cancel-prompt-enhancement'");

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DaemonBridge } from './daemonBridge.js';
+import { createDisposableQuery } from './disposableQuery.js';
 import { DesktopProcessRegistry } from './processRegistry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,6 +84,34 @@ export function createDesktopRuntime(options = {}) {
     return stream;
   }
 
+  async function queryClaudeDisposable(args = {}) {
+    const disposableRuntime = createDesktopRuntime({
+      cwd: args.options?.cwd || runtimeCwd,
+      provider: options.provider,
+      daemonScript: options.daemonScript || defaultDaemonScript,
+      electronRunAsNode: options.electronRunAsNode ?? Boolean(process.versions?.electron),
+    });
+
+    try {
+      const query = await disposableRuntime.queryClaude({
+        ...args,
+        options: {
+          ...(args.options || {}),
+          persistSession: false,
+          strictMcpConfig: true,
+          mcpServers: {},
+        },
+      });
+      return createDisposableQuery({
+        query,
+        dispose: () => disposableRuntime.shutdown(),
+      });
+    } catch (error) {
+      await disposableRuntime.shutdown();
+      throw error;
+    }
+  }
+
   async function getContextUsage({ sessionId, title = 'Context usage', options: queryOptions = {} } = {}) {
     const daemonSessionId = sessionId || `context-${Date.now()}`;
     const daemon = ensureSessionDaemon({ sessionId: daemonSessionId, title });
@@ -156,6 +185,7 @@ export function createDesktopRuntime(options = {}) {
     ensureSessionDaemon,
     adoptSessionDaemon,
     queryClaude,
+    queryClaudeDisposable,
     getContextUsage,
     setPermissionMode,
     removeSessionDaemon,

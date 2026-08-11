@@ -202,7 +202,9 @@ function runtimeSignature(options = {}) {
       || settingsEnv.CLAUDE_CODE_DISABLE_1M_CONTEXT === '',
     bypassPermissions: options.permissionMode === 'bypassPermissions',
     modelRouting: modelEnv.ANTHROPIC_MODEL || '',
-    mcpServers: options.mcpServers || null,
+    persistSession: options.persistSession !== false,
+    strictMcpConfig: options.strictMcpConfig === true,
+    mcpServers: options.mcpServers ?? null,
   });
 }
 
@@ -233,21 +235,21 @@ function touchRuntime(currentRuntime) {
   currentRuntime.lastUsedAt = Date.now();
 }
 
-function disposeRuntime(targetRuntime = runtime) {
+async function disposeRuntime(targetRuntime = runtime) {
   if (!targetRuntime || targetRuntime.closed) return;
   settleAllPlanApprovals('Runtime closed');
   targetRuntime.closed = true;
   targetRuntime.activeTurnCount = 0;
   try { targetRuntime.turnSink?.fail?.(new Error('Runtime closed')); } catch { /* ignore */ }
   targetRuntime.turnSink = null;
-  try { targetRuntime.inputStream?.done?.(); } catch { /* ignore */ }
-  try { targetRuntime.query?.close?.(); } catch { /* ignore */ }
+  try { await targetRuntime.inputStream?.done?.(); } catch { /* ignore */ }
+  try { await targetRuntime.query?.close?.(); } catch { /* ignore */ }
   if (runtime === targetRuntime) runtime = null;
   if (activeQuery === targetRuntime.query) activeQuery = null;
 }
 
-function closeRuntime() {
-  disposeRuntime(runtime);
+async function closeRuntime() {
+  await disposeRuntime(runtime);
 }
 
 async function applyDynamicControls(currentRuntime, options = {}) {
@@ -320,7 +322,7 @@ function startPerpetualReader(currentRuntime) {
       }
     } finally {
       if (!currentRuntime.closed) {
-        disposeRuntime(currentRuntime);
+        await disposeRuntime(currentRuntime);
       }
     }
   })();
@@ -334,7 +336,7 @@ async function ensureRuntime(options = {}) {
     && runtime.sessionId
     && runtime.sessionId !== requestedSessionId;
   if (runtime && (runtime.signature !== signature || sessionConflict)) {
-    closeRuntime();
+    await closeRuntime();
   }
   if (runtime) {
     await applyDynamicControls(runtime, options);
@@ -452,6 +454,27 @@ async function runQuery(id, params = {}) {
     }
     activeRequestId = null;
   }
+}
+
+async function runAbort(id) {
+  const abortedRequestId = activeRequestId;
+  for (const [requestId, resolve] of pendingPermissions.entries()) {
+    pendingPermissions.delete(requestId);
+    resolve({ behavior: 'deny', message: 'Request aborted' });
+  }
+  settleAllPlanApprovals('Request aborted');
+  try { await activeQuery?.interrupt?.(); } catch { /* ignore */ }
+  await closeRuntime();
+  activeRequestId = null;
+  reply(id, { result: { abortedRequestId } });
+}
+
+async function runShutdown(id) {
+  settleAllPlanApprovals('Daemon shutting down');
+  try { await activeQuery?.interrupt?.(); } catch { /* ignore */ }
+  await closeRuntime();
+  reply(id, { result: 'bye' });
+  process.exit(0);
 }
 
 async function runContextUsage(id, params = {}) {
@@ -575,25 +598,12 @@ rl.on('line', (line) => {
   }
 
   if (method === 'abort') {
-    const abortedRequestId = activeRequestId;
-    for (const [requestId, resolve] of pendingPermissions.entries()) {
-      pendingPermissions.delete(requestId);
-      resolve({ behavior: 'deny', message: 'Request aborted' });
-    }
-    settleAllPlanApprovals('Request aborted');
-    try { activeQuery?.interrupt?.(); } catch { /* ignore */ }
-    closeRuntime();
-    activeRequestId = null;
-    reply(id, { result: { abortedRequestId } });
+    void runAbort(id);
     return;
   }
 
   if (method === 'shutdown') {
-    settleAllPlanApprovals('Daemon shutting down');
-    try { activeQuery?.interrupt?.(); } catch { /* ignore */ }
-    closeRuntime();
-    reply(id, { result: 'bye' });
-    process.exit(0);
+    void runShutdown(id);
     return;
   }
 
@@ -623,18 +633,14 @@ rl.on('line', (line) => {
 });
 
 rl.on('close', () => {
-  closeRuntime();
-  process.exit(0);
+  void closeRuntime().finally(() => process.exit(0));
 });
 process.stdin.on('end', () => {
-  closeRuntime();
-  process.exit(0);
+  void closeRuntime().finally(() => process.exit(0));
 });
 process.on('SIGTERM', () => {
-  closeRuntime();
-  process.exit(0);
+  void closeRuntime().finally(() => process.exit(0));
 });
 process.on('SIGINT', () => {
-  closeRuntime();
-  process.exit(0);
+  void closeRuntime().finally(() => process.exit(0));
 });

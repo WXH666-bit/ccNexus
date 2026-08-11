@@ -89,7 +89,9 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
   assert.equal(calls[0].options.enableFileCheckpointing, false);
   assert.equal(calls[0].options.includePartialMessages, false);
   assert.equal(calls[0].options.permissionMode, 'default');
-  assert.equal(calls[0].options.mcpServers, undefined);
+  assert.equal(calls[0].options.persistSession, false);
+  assert.equal(calls[0].options.strictMcpConfig, true);
+  assert.deepEqual(calls[0].options.mcpServers, {});
   assert.equal(result.requestId, 'req-1');
   assert.equal(result.model, 'claude-sonnet-4-6');
   assert.equal(result.text, 'Rewrite the request with the same intent.\n\nKeep error handling and examples.');
@@ -334,7 +336,7 @@ test('dispose closes every in-flight prompt enhancement query', async () => {
   });
 
   await waitFor(() => typeof releaseA === 'function' && typeof releaseB === 'function');
-  service.dispose();
+  await service.dispose();
   releaseA();
   releaseB();
 
@@ -342,6 +344,68 @@ test('dispose closes every in-flight prompt enhancement query', async () => {
   await assert.rejects(pendingB, /cancelled|aborted/i);
   assert.equal(queryA.closeCalls, 1);
   assert.equal(queryB.closeCalls, 1);
+});
+
+test('rejects a duplicate active requestId before provider lookup completes', async () => {
+  let releaseProviders;
+  const providersReady = new Promise((resolve) => { releaseProviders = resolve; });
+  let providerCalls = 0;
+  const query = createMockQuery([
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } },
+    { type: 'result', subtype: 'success' },
+  ]);
+  const service = createPromptEnhancementService({
+    query: async () => query,
+    localConfig: {
+      getProviders: async () => {
+        providerCalls += 1;
+        await providersReady;
+        return { currentEnv: {}, providerMode: '' };
+      },
+    },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }) },
+  });
+
+  const first = service.enhance({ requestId: 'req-duplicate', text: 'first', localResult: {} });
+  await waitFor(() => providerCalls === 1);
+  await assert.rejects(
+    service.enhance({ requestId: 'req-duplicate', text: 'second', localResult: {} }),
+    /already active/i,
+  );
+  releaseProviders();
+  await first;
+  await service.dispose();
+});
+
+test('awaits asynchronous query close before enhancement resolves', async () => {
+  let releaseClose;
+  let closeStarted = false;
+  const closeReady = new Promise((resolve) => { releaseClose = resolve; });
+  const query = {
+    async close() {
+      closeStarted = true;
+      await closeReady;
+    },
+    async *[Symbol.asyncIterator]() {
+      yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Closed after success.' }] } };
+      yield { type: 'result', subtype: 'success' };
+    },
+  };
+  const service = createPromptEnhancementService({
+    query: async () => query,
+    localConfig: { getProviders: async () => ({ currentEnv: {}, providerMode: '' }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }) },
+  });
+
+  let settled = false;
+  const pending = service.enhance({ requestId: 'req-async-close', text: 'close me', localResult: {} })
+    .finally(() => { settled = true; });
+  await waitFor(() => closeStarted);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  releaseClose();
+  await pending;
+  assert.equal(settled, true);
 });
 
 function createMockQuery(source) {

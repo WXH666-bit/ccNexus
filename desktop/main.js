@@ -61,7 +61,7 @@ const localConfig = new LocalConfigService();
 const mcpStatus = new McpStatusService();
 const promptEnhancementUsageStore = createPromptEnhancementUsageStore({ homeDir: desktopHomeDir });
 const promptEnhancementService = createPromptEnhancementService({
-  query: async (args) => await runtime.queryClaude(args),
+  query: async (args) => await runtime.queryClaudeDisposable(args),
   localConfig,
   workspaceFiles,
   usageStore: promptEnhancementUsageStore,
@@ -209,7 +209,7 @@ function requestApplicationQuit() {
 
 async function cleanupApplication() {
   try { appUpdater.dispose(); } catch { /* ignore */ }
-  try { promptEnhancementService.dispose(); } catch { /* ignore */ }
+  try { await promptEnhancementService.dispose(); } catch { /* ignore */ }
   try { chatController.dispose(); } catch { /* ignore */ }
   try { await runtime.shutdown(); } catch (error) {
     console.error('[desktop] runtime shutdown failed:', error);

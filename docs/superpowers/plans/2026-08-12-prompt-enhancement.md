@@ -23,6 +23,12 @@
 
 ---
 
+## SDD Progress Ledger
+
+| Review-fix task | Status | Scope |
+| --- | --- | --- |
+| Final review: isolate AI prompt enhancement runtime, enforce non-persistent strict-empty-MCP options, await query/daemon cleanup, reject duplicate request IDs, and add regressions | Completed | 52 focused tests and full protocol suite pass; `tsc`, build, and `git diff --check` pass |
+
 ### Task 1: Build the deterministic local enhancement core
 
 **Files:**

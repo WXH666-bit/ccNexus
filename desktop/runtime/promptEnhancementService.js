@@ -72,16 +72,33 @@ export function createPromptEnhancementService({
   const activeRequests = new Map();
 
   async function closeActiveRequest(active) {
-    if (!active || active.closed) return;
+    if (!active || !active.query) return;
+    if (active.closePromise) return active.closePromise;
     active.closed = true;
-    try { active.query?.close?.(); } catch { /* ignore */ }
+    active.closePromise = Promise.resolve()
+      .then(() => active.query?.close?.())
+      .catch(() => {});
+    return active.closePromise;
+  }
+
+  async function interruptActiveRequest(active) {
+    if (!active?.query) return;
+    if (!active.interruptPromise) {
+      active.interruptPromise = Promise.resolve()
+        .then(() => active.query?.interrupt?.())
+        .catch(() => {});
+    }
+    return active.interruptPromise;
   }
 
   async function cancel(requestId) {
     const active = activeRequests.get(requestId);
     if (!active) return false;
     active.cancelled = true;
-    try { await active.query?.interrupt?.(); } catch { /* ignore */ }
+    if (!active.query && active.queryPromise) {
+      try { active.query = await active.queryPromise; } catch { /* ignore */ }
+    }
+    await interruptActiveRequest(active);
     await closeActiveRequest(active);
     return true;
   }
@@ -99,20 +116,18 @@ export function createPromptEnhancementService({
     const cwd = typeof workspace?.cwd === 'string' ? workspace.cwd : '';
     if (!cwd) throw new Error('Prompt enhancement requires an active workspace');
 
-    const { currentEnv, providerMode } = await localConfig.getProviders();
-    const queryEnv = { ...process.env, ...(currentEnv || {}) };
-    const options = buildPromptEnhancementQueryOptions({
-      cwd,
-      env: queryEnv,
-      providerMode: providerMode || '',
-      model,
-    });
+    if (activeRequests.has(normalizedRequestId)) {
+      throw new Error(`Prompt enhancement requestId is already active: ${normalizedRequestId}`);
+    }
 
     const active = {
       requestId: normalizedRequestId,
       query: null,
       cancelled: false,
       closed: false,
+      closePromise: null,
+      queryPromise: null,
+      interruptPromise: null,
     };
     activeRequests.set(normalizedRequestId, active);
 
@@ -120,16 +135,30 @@ export function createPromptEnhancementService({
     const events = [];
 
     try {
-      const runningQuery = await query({
+      const { currentEnv, providerMode } = await localConfig.getProviders();
+      const queryEnv = { ...process.env, ...(currentEnv || {}) };
+      const options = buildPromptEnhancementQueryOptions({
+        cwd,
+        env: queryEnv,
+        providerMode: providerMode || '',
+        model,
+      });
+
+      if (active.cancelled) throw createCancelledError();
+
+      const queryPromise = Promise.resolve().then(() => query({
         sessionId: `prompt-enhancement:${normalizedRequestId}`,
         title: QUERY_TITLE,
         prompt: buildPromptEnhancementInput({ text: normalizedText, localResult }),
         options,
-      });
+      }));
+      active.queryPromise = queryPromise;
+      const runningQuery = await queryPromise;
 
       active.query = runningQuery;
       if (active.cancelled) {
-        try { await active.query?.interrupt?.(); } catch { /* ignore */ }
+        await interruptActiveRequest(active);
+        await closeActiveRequest(active);
         throw createCancelledError();
       }
 
@@ -169,18 +198,26 @@ export function createPromptEnhancementService({
       if (active?.cancelled) throw createCancelledError();
       throw error;
     } finally {
-      activeRequests.delete(normalizedRequestId);
       await closeActiveRequest(active);
+      if (activeRequests.get(normalizedRequestId) === active) {
+        activeRequests.delete(normalizedRequestId);
+      }
     }
   }
 
-  function dispose() {
-    for (const active of activeRequests.values()) {
-      active.cancelled = true;
-      try { active.query?.close?.(); } catch { /* ignore */ }
-      active.closed = true;
-    }
-    activeRequests.clear();
+  async function dispose() {
+    const active = [...activeRequests.values()];
+    await Promise.all(active.map(async (request) => {
+      request.cancelled = true;
+      if (!request.query && request.queryPromise) {
+        try { request.query = await request.queryPromise; } catch { /* ignore */ }
+      }
+      await interruptActiveRequest(request);
+      await closeActiveRequest(request);
+      if (activeRequests.get(request.requestId) === request) {
+        activeRequests.delete(request.requestId);
+      }
+    }));
   }
 
   return {

@@ -24,6 +24,14 @@ test('desktop runtime exposes a Claude query stream backed by a session daemon',
   assert.match(bridge, /method:\s*'permission_response'/);
 });
 
+test('normal chat keeps using the persistent query path while prompt enhancement uses a separate method', () => {
+  const controller = read('desktop/runtime/chatController.js');
+  const runtime = read('desktop/runtime/index.js');
+  assert.match(controller, /runtime\.queryClaude\(/);
+  assert.doesNotMatch(controller, /queryClaudeDisposable/);
+  assert.match(runtime, /async function queryClaudeDisposable/);
+});
+
 test('desktop daemon bridge keeps the Node daemon alive when launched from Electron', () => {
   const runtime = read('desktop/runtime/index.js');
   const bridge = read('desktop/runtime/daemonBridge.js');

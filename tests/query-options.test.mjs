@@ -349,7 +349,9 @@ test('prompt enhancement options disable project execution surfaces', async () =
   assert.deepEqual(options.additionalDirectories, []);
   assert.deepEqual(options.tools, []);
   assert.equal(options.allowDangerouslySkipPermissions, undefined);
-  assert.equal(options.mcpServers, undefined);
+  assert.equal(options.persistSession, false);
+  assert.equal(options.strictMcpConfig, true);
+  assert.deepEqual(options.mcpServers, {});
   assert.equal(typeof options.canUseTool, 'function');
   assert.equal(options.env.ANTHROPIC_API_KEY, 'test-key');
   assert.equal(options.env.PROJECT_PATH, 'D:/other-project');

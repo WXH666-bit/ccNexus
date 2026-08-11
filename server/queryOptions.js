@@ -241,6 +241,9 @@ export function buildPromptEnhancementQueryOptions({
     maxTurns: 1,
     enableFileCheckpointing: false,
     includePartialMessages: false,
+    persistSession: false,
+    strictMcpConfig: true,
+    mcpServers: {},
     permissionMode: 'default',
     canUseTool: async () => ({ behavior: 'deny', message: 'Prompt enhancement cannot use tools' }),
   };

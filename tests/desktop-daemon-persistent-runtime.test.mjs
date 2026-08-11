@@ -39,3 +39,10 @@ test('desktop daemon includes ccgui cache prefix inputs in runtime identity', ()
   assert.match(daemon, /streamingEnabled/);
   assert.match(daemon, /runtimeSessionEpoch/);
 });
+
+test('desktop daemon keeps prompt-enhancement persistence and MCP isolation in runtime identity', () => {
+  assert.match(daemon, /persistSession/);
+  assert.match(daemon, /strictMcpConfig/);
+  assert.match(daemon, /mcpServers:\s+options\.mcpServers/);
+  assert.match(daemon, /await closeRuntime\(\)/);
+});
