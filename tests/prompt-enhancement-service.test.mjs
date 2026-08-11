@@ -26,6 +26,7 @@ test('extracts only text blocks from assistant events', () => {
 
 test('returns enhanced prompt text and latest usage from a short-lived query', async () => {
   const calls = [];
+  const appended = [];
   const workspace = { cwd: 'D:/repo' };
   const localResult = { summary: 'Keep error handling and examples.' };
   const query = createMockQuery([
@@ -61,7 +62,11 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
     workspaceFiles: {
       getWorkspace: () => workspace,
     },
-    usageStore: {},
+    usageStore: {
+      async append(record) {
+        appended.push(record);
+      },
+    },
   });
 
   const result = await service.enhance({
@@ -90,8 +95,50 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
   assert.equal(result.text, 'Rewrite the request with the same intent.\n\nKeep error handling and examples.');
   assert.deepEqual(result.usage, { input_tokens: 12, output_tokens: 7 });
   assert.equal(result.sessionId, undefined);
+  assert.equal(appended.length, 1);
+  assert.deepEqual(appended, [{
+    id: 'req-1',
+    timestamp: appended.at(0)?.timestamp,
+    cwd: workspace.cwd,
+    model: 'claude-sonnet-4-6',
+    usage: { input_tokens: 12, output_tokens: 7 },
+  }]);
+  assert.equal(typeof appended.at(0)?.timestamp, 'number');
   assert.equal(query.interruptCalls, 0);
   assert.equal(query.closeCalls, 1);
+});
+
+test('enhancement still succeeds when no usage store is injected', async () => {
+  const query = createMockQuery([
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'Use clearer wording.' }],
+        usage: { input_tokens: 9, output_tokens: 3 },
+      },
+    },
+    { type: 'result', subtype: 'success' },
+  ]);
+
+  const service = createPromptEnhancementService({
+    query: async () => query,
+    localConfig: {
+      getProviders: async () => ({ currentEnv: {}, providerMode: '' }),
+    },
+    workspaceFiles: {
+      getWorkspace: () => ({ cwd: 'D:/repo' }),
+    },
+  });
+
+  const result = await service.enhance({
+    requestId: 'req-no-store',
+    text: 'improve this',
+    localResult: {},
+    model: 'claude-sonnet-4-6',
+  });
+
+  assert.equal(result.text, 'Use clearer wording.');
+  assert.deepEqual(result.usage, { input_tokens: 9, output_tokens: 3 });
 });
 
 test('rejects empty input before spawning a query', async () => {
@@ -124,6 +171,7 @@ test('rejects empty input before spawning a query', async () => {
 
 test('rejects empty assistant output with a readable error and no local-result mutation', async () => {
   const localResult = { draft: 'Original renderer-local state' };
+  let appendCalls = 0;
   const query = createMockQuery([
     {
       type: 'assistant',
@@ -143,7 +191,11 @@ test('rejects empty assistant output with a readable error and no local-result m
     workspaceFiles: {
       getWorkspace: () => ({ cwd: 'D:/repo' }),
     },
-    usageStore: {},
+    usageStore: {
+      async append() {
+        appendCalls += 1;
+      },
+    },
   });
 
   await assert.rejects(
@@ -156,11 +208,13 @@ test('rejects empty assistant output with a readable error and no local-result m
     /Prompt enhancement returned empty text/i,
   );
   assert.deepEqual(localResult, { draft: 'Original renderer-local state' });
+  assert.equal(appendCalls, 0);
   assert.equal(query.closeCalls, 1);
 });
 
 test('propagates query failures without mutating the local result', async () => {
   const localResult = { draft: 'Keep me untouched' };
+  let appendCalls = 0;
   const service = createPromptEnhancementService({
     query: async () => {
       throw new Error('Claude query failed');
@@ -171,7 +225,11 @@ test('propagates query failures without mutating the local result', async () => 
     workspaceFiles: {
       getWorkspace: () => ({ cwd: 'D:/repo' }),
     },
-    usageStore: {},
+    usageStore: {
+      async append() {
+        appendCalls += 1;
+      },
+    },
   });
 
   await assert.rejects(
@@ -184,9 +242,11 @@ test('propagates query failures without mutating the local result', async () => 
     /Claude query failed/,
   );
   assert.deepEqual(localResult, { draft: 'Keep me untouched' });
+  assert.equal(appendCalls, 0);
 });
 
 test('cancel interrupts and closes the active short-lived query', async () => {
+  let appendCalls = 0;
   let release;
   const blocked = new Promise((resolve) => {
     release = resolve;
@@ -211,7 +271,11 @@ test('cancel interrupts and closes the active short-lived query', async () => {
     workspaceFiles: {
       getWorkspace: () => ({ cwd: 'D:/repo' }),
     },
-    usageStore: {},
+    usageStore: {
+      async append() {
+        appendCalls += 1;
+      },
+    },
   });
 
   const pending = service.enhance({
@@ -227,6 +291,7 @@ test('cancel interrupts and closes the active short-lived query', async () => {
 
   assert.equal(cancelled, true);
   await assert.rejects(pending, /cancelled|aborted/i);
+  assert.equal(appendCalls, 0);
   assert.equal(query.interruptCalls, 1);
   assert.equal(query.closeCalls, 1);
 });

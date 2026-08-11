@@ -66,22 +66,6 @@ const promptEnhancementService = createPromptEnhancementService({
   workspaceFiles,
   usageStore: promptEnhancementUsageStore,
 });
-const trackedPromptEnhancementService = {
-  ...promptEnhancementService,
-  async enhance(args = {}) {
-    const result = await promptEnhancementService.enhance(args);
-    if (result?.usage) {
-      await promptEnhancementUsageStore.append({
-        id: args.requestId,
-        timestamp: Date.now(),
-        cwd: workspaceFiles.getWorkspace().cwd,
-        model: result.model,
-        usage: result.usage,
-      });
-    }
-    return result;
-  },
-};
 const desktopSessions = new DesktopSessionService({
   homeDir: desktopHomeDir,
   cwd: process.cwd(),
@@ -225,7 +209,7 @@ function requestApplicationQuit() {
 
 async function cleanupApplication() {
   try { appUpdater.dispose(); } catch { /* ignore */ }
-  try { trackedPromptEnhancementService.dispose(); } catch { /* ignore */ }
+  try { promptEnhancementService.dispose(); } catch { /* ignore */ }
   try { chatController.dispose(); } catch { /* ignore */ }
   try { await runtime.shutdown(); } catch (error) {
     console.error('[desktop] runtime shutdown failed:', error);

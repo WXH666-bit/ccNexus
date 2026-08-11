@@ -59,7 +59,7 @@ export function createPromptEnhancementService({
   query,
   localConfig,
   workspaceFiles,
-  usageStore: _usageStore,
+  usageStore,
 } = {}) {
   if (typeof query !== 'function') throw new Error('Prompt enhancement query function is required');
   if (!localConfig || typeof localConfig.getProviders !== 'function') {
@@ -147,12 +147,24 @@ export function createPromptEnhancementService({
         throw new Error('Prompt enhancement returned empty text');
       }
 
-      return {
+      const result = {
         requestId: normalizedRequestId,
         text: enhancedText,
         model,
         usage: latestUsage,
       };
+
+      if (latestUsage && usageStore && typeof usageStore.append === 'function') {
+        await usageStore.append({
+          id: normalizedRequestId,
+          timestamp: Date.now(),
+          cwd,
+          model,
+          usage: latestUsage,
+        });
+      }
+
+      return result;
     } catch (error) {
       if (active?.cancelled) throw createCancelledError();
       throw error;
