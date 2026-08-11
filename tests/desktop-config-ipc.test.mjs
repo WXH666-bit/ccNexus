@@ -151,6 +151,21 @@ test('desktop local config service mirrors existing Claude-side readers without 
   }
 });
 
+test('agent settings UI exposes managed CRUD, native read-only state, and import export actions', async () => {
+  const section = await readFile(path.join(process.cwd(), 'src/components/settings/AgentSection.tsx'), 'utf8');
+  const dialog = await readFile(path.join(process.cwd(), 'src/components/AgentDialog.tsx'), 'utf8');
+  assert.match(section, /saveAgent/);
+  assert.match(section, /deleteAgent/);
+  assert.match(section, /setSelectedAgent/);
+  assert.match(section, /importAgents/);
+  assert.match(section, /exportAgents/);
+  assert.match(section, /source === 'ccnexus'/);
+  assert.match(section, /editable/);
+  assert.match(dialog, /onSave/);
+  assert.match(dialog, /prompt/);
+  assert.match(dialog, /provider-dialog-overlay/);
+});
+
 test('ccNexus managed agents support isolated CRUD and preserve native Claude agents', async () => {
   const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-agent-store-'));

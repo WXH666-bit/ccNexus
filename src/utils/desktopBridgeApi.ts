@@ -117,7 +117,7 @@ export async function exportAgents() {
 }
 
 export async function importAgents(payload: {
-  agents: Array<{ id?: string; name: string; prompt: string; description?: string }> | Record<string, { name: string; prompt: string; description?: string }>;
+  agents: Array<{ id?: string; name?: string; prompt?: string; description?: string }> | Record<string, { name?: string; prompt?: string; description?: string }>;
   strategy: 'skip' | 'overwrite' | 'duplicate';
 }) {
   return await requireDesktopApi().importAgents(payload) as {

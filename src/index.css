@@ -2991,7 +2991,119 @@ html, body, #root {
 }
 .icon-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 .icon-button:disabled { opacity: 0.55; cursor: default; }
-.settings-agent-list { display: grid; gap: 8px; }
+.settings-agent-list { display: grid; gap: 10px; }
+.agent-settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.agent-import-strategy {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.agent-settings-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.agent-settings-card.selected {
+  border-color: color-mix(in srgb, var(--accent-blue) 60%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-tertiary));
+}
+.agent-settings-card-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
+.agent-settings-card-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-settings-card-title strong { color: var(--text-primary); font-size: 14px; }
+.agent-source-badge,
+.agent-selected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+}
+.agent-source-badge.managed {
+  color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
+.agent-source-badge.native {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.agent-selected-badge {
+  color: var(--success-color, #42c767);
+  background: color-mix(in srgb, var(--success-color, #42c767) 12%, transparent);
+}
+.agent-settings-card-description,
+.agent-settings-card-id {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-settings-card-description {
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.agent-settings-card-id {
+  margin-top: 4px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.agent-settings-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-editor-dialog { width: min(680px, 100%); }
+.agent-editor-dialog .provider-dialog-content { display: grid; gap: 16px; }
+.agent-editor-dialog .provider-form-field small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.agent-editor-dialog textarea {
+  min-height: 220px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.55;
+}
+@media (max-width: 760px) {
+  .agent-settings-toolbar { justify-content: flex-start; }
+  .agent-settings-card { grid-template-columns: 34px minmax(0, 1fr); }
+  .agent-settings-card-actions { grid-column: 2; justify-content: flex-start; }
+}
 .agent-settings-row {
   display: flex;
   align-items: center;
