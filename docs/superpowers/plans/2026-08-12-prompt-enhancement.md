@@ -28,7 +28,7 @@
 | Review-fix task | Status | Scope |
 | --- | --- | --- |
 | Final review: isolate AI prompt enhancement runtime, enforce non-persistent strict-empty-MCP options, await query/daemon cleanup, reject duplicate request IDs, and add regressions | Completed | 52 focused tests and full protocol suite pass; `tsc`, build, and `git diff --check` pass |
-| Second review: harden request-id-scoped daemon abort/shutdown cleanup, cancel unresolved disposable acquisition, close admission during service disposal, and enforce daemon-side deny-all tools | Completed | Behavioral daemon and runtime lifecycle regressions pass; full verification pending |
+| Second review: harden request-id-scoped daemon abort/shutdown cleanup, cancel unresolved disposable acquisition, close admission during service disposal, and enforce daemon-side deny-all tools | Completed | 372 protocol tests pass, 1 skipped; targeted lifecycle tests pass; `tsc`, build, and `git diff --check` pass |
 
 ### Task 1: Build the deterministic local enhancement core
 
