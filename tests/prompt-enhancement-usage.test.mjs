@@ -106,3 +106,31 @@ test('prompt enhancement usage store ignores malformed jsonl and invalid records
     await rm(homeDir, { recursive: true, force: true });
   }
 });
+
+test('prompt enhancement usage store defaults optional cache fields when SDK omits them', async () => {
+  const { createPromptEnhancementUsageStore } = await import('../desktop/runtime/promptEnhancementUsageStore.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-prompt-enhancement-optional-usage-'));
+
+  try {
+    const store = createPromptEnhancementUsageStore({ homeDir });
+    await store.append({
+      id: 'enhance-optional-cache',
+      timestamp: Date.parse('2026-08-11T13:00:00+08:00'),
+      cwd: 'D:/repo',
+      model: 'claude-sonnet-4-6',
+      usage: {
+        input_tokens: 12,
+        output_tokens: 3,
+      },
+    });
+
+    assert.deepEqual((await store.list())[0]?.usage, {
+      input_tokens: 12,
+      output_tokens: 3,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    });
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
