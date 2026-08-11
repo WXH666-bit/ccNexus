@@ -31,6 +31,31 @@ interface AppUpdateState {
   lastCheckedAt: number | null;
 }
 
+interface PromptEnhancementArgs {
+  requestId: string;
+  text: string;
+  localResult: unknown;
+}
+
+interface PromptEnhancementUsage {
+  input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  output_tokens: number;
+}
+
+interface PromptEnhancementResult {
+  requestId: string;
+  text: string;
+  model: string;
+  usage: PromptEnhancementUsage | undefined;
+}
+
+interface PromptEnhancementCancelResult {
+  cancelled: boolean;
+  requestId: string;
+}
+
 interface CcNexusDesktopApi {
   getRuntimeInfo: () => Promise<{
     appName: string;
@@ -158,6 +183,8 @@ interface CcNexusDesktopApi {
   getProcesses: () => Promise<unknown>;
   getUsageStatistics: (args?: { scope?: 'current' | 'all'; dateRange?: 'today' | '7d' | '30d' | 'all' }) => Promise<unknown>;
   getContextUsage: (args?: { sessionId?: string | null; model?: string }) => Promise<unknown>;
+  enhancePrompt: (args: PromptEnhancementArgs) => Promise<PromptEnhancementResult>;
+  cancelPromptEnhancement: (requestId: string) => Promise<PromptEnhancementCancelResult>;
   stopProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;
   restartProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;
   sendChatCommand: (message: Record<string, unknown>) => void;

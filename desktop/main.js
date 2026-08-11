@@ -494,6 +494,13 @@ ipcMain.handle('desktop:delete-session', async (_event, args = {}) => {
 ipcMain.handle('desktop:get-processes', () => runtime.buildProcessSnapshot());
 ipcMain.handle('desktop:get-usage-statistics', async (_event, args = {}) => desktopSessions.getUsageStatistics(args));
 ipcMain.handle('desktop:get-context-usage', async (_event, args = {}) => chatController.getContextUsage(args));
+ipcMain.handle('desktop:enhance-prompt', async (_event, args = {}) => (
+  promptEnhancementService.enhance(args)
+));
+ipcMain.handle('desktop:cancel-prompt-enhancement', async (_event, args = {}) => ({
+  cancelled: await promptEnhancementService.cancel(args.requestId),
+  requestId: args.requestId,
+}));
 
 ipcMain.handle('desktop:stop-process', (_event, args = {}) => {
   const pid = Number(args.pid);

@@ -241,6 +241,14 @@ export async function getContextUsage(args: { sessionId?: string | null; model?:
   return await requireDesktopApi().getContextUsage(args);
 }
 
+export async function enhancePrompt(args: PromptEnhancementArgs) {
+  return await requireDesktopApi().enhancePrompt(args);
+}
+
+export async function cancelPromptEnhancement(requestId: string) {
+  return await requireDesktopApi().cancelPromptEnhancement(requestId);
+}
+
 export async function exportSession(sessionId: string, title?: string) {
   return await requireDesktopApi().exportSession(sessionId, title);
 }

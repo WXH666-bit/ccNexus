@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   getProcesses: () => ipcRenderer.invoke('desktop:get-processes'),
   getUsageStatistics: (args) => ipcRenderer.invoke('desktop:get-usage-statistics', args),
   getContextUsage: (args) => ipcRenderer.invoke('desktop:get-context-usage', args),
+  enhancePrompt: (args) => ipcRenderer.invoke('desktop:enhance-prompt', args),
+  cancelPromptEnhancement: (requestId) => ipcRenderer.invoke('desktop:cancel-prompt-enhancement', { requestId }),
   stopProcess: (processRef) => ipcRenderer.invoke('desktop:stop-process', processRef),
   restartProcess: (processRef) => ipcRenderer.invoke('desktop:restart-process', processRef),
   sendChatCommand: (message) => ipcRenderer.send('desktop:chat-command', message),
