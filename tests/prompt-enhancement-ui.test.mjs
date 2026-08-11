@@ -3,11 +3,58 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import vm from 'node:vm';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function read(path) {
   return readFileSync(resolve(root, path), 'utf8');
+}
+
+function captureFunction(source, signature) {
+  const start = source.indexOf(signature);
+  assert.notEqual(start, -1, `missing function: ${signature}`);
+  let index = source.indexOf('{', start);
+  assert.notEqual(index, -1, `missing function body: ${signature}`);
+  let depth = 0;
+  for (; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  throw new Error(`unterminated function: ${signature}`);
+}
+
+function stripTsFunction(functionSource) {
+  return functionSource
+    .replace(/export\s+/g, '')
+    .replace(/function\s+(\w+)\(([^)]*)\)/g, (_match, name, params) => (
+      `function ${name}(${params.replace(/:\s*[^,)=]+/g, '')})`
+    ))
+    .replace(/\)\s*:\s*[^{]+\{/g, ') {')
+    .replace(/\s+as const/g, '');
+}
+
+function loadPromptEnhancementHelpers() {
+  const dialogSource = read('src/components/ChatInputBox/PromptEnhanceDialog.tsx');
+  const inputSource = read('src/components/ChatInputBox/index.tsx');
+  const getUseValueSource = stripTsFunction(captureFunction(dialogSource, 'export function getPromptEnhancementUseValue'));
+  const startRequestSource = stripTsFunction(captureFunction(inputSource, 'export function startPromptEnhancementAiRequest'));
+  const resetStateSource = stripTsFunction(captureFunction(inputSource, 'export function resetPromptEnhancementAiState'));
+  const script = [
+    getUseValueSource,
+    startRequestSource,
+    resetStateSource,
+    'result = { getPromptEnhancementUseValue, startPromptEnhancementAiRequest, resetPromptEnhancementAiState };',
+  ].join('\n');
+  const context = { result: null };
+  vm.runInNewContext(script, context);
+  return context.result;
 }
 
 test('PromptEnhanceDialog exists and exposes the preview, AI, restore, and cancel contract', () => {
@@ -16,6 +63,7 @@ test('PromptEnhanceDialog exists and exposes the preview, AI, restore, and cance
 
   const source = read('src/components/ChatInputBox/PromptEnhanceDialog.tsx');
 
+  assert.match(source, /export function getPromptEnhancementUseValue/);
   assert.match(source, /useTranslation\(/);
   assert.match(source, /role="dialog"/);
   assert.match(source, /aria-modal="true"/);
@@ -37,6 +85,61 @@ test('PromptEnhanceDialog exists and exposes the preview, AI, restore, and cance
   assert.match(source, /chat\.promptEnhancer\.aiEnhance/);
   assert.match(source, /chat\.promptEnhancer\.loading/);
   assert.match(source, /chat\.promptEnhancer\.error/);
+});
+
+test('prompt enhancement helper selects only successful AI output and otherwise falls back to local text', () => {
+  const { getPromptEnhancementUseValue } = loadPromptEnhancementHelpers();
+  const localResult = 'local rewrite';
+  const staleAiResult = 'old ai rewrite';
+
+  assert.equal(
+    getPromptEnhancementUseValue({ localResult, aiResult: 'fresh ai rewrite', aiStatus: 'success' }),
+    'fresh ai rewrite',
+  );
+  assert.equal(
+    getPromptEnhancementUseValue({ localResult, aiResult: staleAiResult, aiStatus: 'loading' }),
+    localResult,
+  );
+  assert.equal(
+    getPromptEnhancementUseValue({ localResult, aiResult: staleAiResult, aiStatus: 'error' }),
+    localResult,
+  );
+  assert.equal(
+    getPromptEnhancementUseValue({ localResult, aiResult: staleAiResult, aiStatus: 'idle' }),
+    localResult,
+  );
+});
+
+test('prompt enhancement AI lifecycle helpers clear stale AI text on retry and reset', () => {
+  const { getPromptEnhancementUseValue, startPromptEnhancementAiRequest, resetPromptEnhancementAiState } = loadPromptEnhancementHelpers();
+  const current = {
+    originalText: 'draft',
+    localResult: 'local rewrite',
+    aiResult: 'stale ai rewrite',
+    aiStatus: 'success',
+    aiError: '',
+    requestId: 'req-1',
+  };
+
+  const retrying = startPromptEnhancementAiRequest(current, 'req-2');
+  assert.equal(retrying.aiStatus, 'loading');
+  assert.equal(retrying.aiResult, '');
+  assert.equal(retrying.aiError, '');
+  assert.equal(retrying.requestId, 'req-2');
+  assert.equal(getPromptEnhancementUseValue(retrying), current.localResult);
+
+  const cancelled = resetPromptEnhancementAiState(retrying);
+  assert.equal(cancelled.aiStatus, 'idle');
+  assert.equal(cancelled.aiResult, '');
+  assert.equal(cancelled.aiError, '');
+  assert.equal(cancelled.requestId, null);
+  assert.equal(getPromptEnhancementUseValue(cancelled), current.localResult);
+
+  const failed = resetPromptEnhancementAiState({ ...retrying, aiResult: 'should be discarded' }, 'error', 'boom');
+  assert.equal(failed.aiStatus, 'error');
+  assert.equal(failed.aiResult, '');
+  assert.equal(failed.aiError, 'boom');
+  assert.equal(getPromptEnhancementUseValue(failed), current.localResult);
 });
 
 test('ChatInputBox opens a local preview dialog instead of mutating or submitting immediately', () => {
@@ -73,14 +176,18 @@ test('ChatInputBox starts AI enhancement only from the explicit dialog action an
   const source = read('src/components/ChatInputBox/index.tsx');
 
   assert.match(source, /import \{[^}]*enhancePrompt[^}]*cancelPromptEnhancement[^}]*\} from '\.\.\/\.\.\/utils\/desktopBridgeApi';/);
+  assert.match(source, /export function startPromptEnhancementAiRequest/);
+  assert.match(source, /export function resetPromptEnhancementAiState/);
   assert.match(source, /requestId/);
   assert.match(source, /crypto\.randomUUID\(\)|Date\.now\(\)/);
   assert.match(source, /onAiEnhance=\{async \(\) => \{/);
   assert.match(source, /await enhancePrompt\(/);
   assert.match(source, /localResult:\s*promptEnhancement\.localResult/);
+  assert.match(source, /setPromptEnhancement\(current => startPromptEnhancementAiRequest\(current, requestId\)\)/);
+  assert.match(source, /setPromptEnhancement\(current => resetPromptEnhancementAiState\(current\)\)/);
   assert.match(source, /aiStatus:\s*'loading'/);
   assert.match(source, /aiStatus:\s*'success'|'done'/);
-  assert.match(source, /aiStatus:\s*'error'/);
+  assert.match(source, /resetPromptEnhancementAiState\(current, 'error'/);
   assert.match(source, /result\.requestId/);
   assert.match(source, /cancelPromptEnhancement\(/);
   assert.match(source, /sessionKey/);
@@ -114,6 +221,8 @@ test('prompt enhancement translations and styles are defined in the existing ren
   assert.match(styles, /var\(--bg-secondary\)/);
   assert.match(styles, /var\(--text-primary\)/);
   assert.match(styles, /var\(--accent-blue\)/);
+  assert.match(styles, /var\(--mode-dangerous-foreground\)|var\(--accent-red\)/);
+  assert.doesNotMatch(styles, /#ffb4ab/);
 
   for (const locale of [en, zh]) {
     assert.match(locale, /"promptEnhancer"\s*:/);

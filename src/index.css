@@ -4595,7 +4595,7 @@ html, body, #root {
   border: 1px solid color-mix(in srgb, var(--accent-red) 50%, transparent);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent-red) 12%, var(--bg-primary));
-  color: #ffb4ab;
+  color: var(--mode-dangerous-foreground);
   font-size: 12px;
   line-height: 1.5;
 }

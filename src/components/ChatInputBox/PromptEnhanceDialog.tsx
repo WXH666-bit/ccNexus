@@ -4,6 +4,12 @@ import { useTranslation } from 'react-i18next';
 
 type PromptEnhancementAiStatus = 'idle' | 'loading' | 'success' | 'error';
 
+interface PromptEnhancementUseValueState {
+  localResult: string;
+  aiResult: string;
+  aiStatus: PromptEnhancementAiStatus;
+}
+
 interface PromptEnhanceDialogProps {
   originalText: string;
   localResult: string;
@@ -19,6 +25,14 @@ interface PromptEnhanceDialogProps {
 
 function previewValue(value: string) {
   return value.trim() || '—';
+}
+
+export function getPromptEnhancementUseValue(state: PromptEnhancementUseValueState) {
+  const { localResult, aiResult, aiStatus } = state;
+  if (aiStatus === 'success' && aiResult.trim()) {
+    return aiResult;
+  }
+  return localResult;
 }
 
 export default function PromptEnhanceDialog({
@@ -53,8 +67,8 @@ export default function PromptEnhanceDialog({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onCancel]);
 
-  const useValue = aiResult || localResult;
-  const showAiPreview = aiResult.trim().length > 0;
+  const useValue = getPromptEnhancementUseValue({ localResult, aiResult, aiStatus });
+  const showAiPreview = aiStatus === 'success' && aiResult.trim().length > 0;
 
   return (
     <div

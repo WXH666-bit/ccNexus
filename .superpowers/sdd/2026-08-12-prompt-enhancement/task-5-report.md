@@ -84,3 +84,61 @@ This error is in `src/utils/promptEnhancer.ts`, which was not part of the allowe
 - No package-lock changes.
 - No unrelated tracked files were modified.
 - The renderer diff stays focused on Task 5 UI flow, styling, locales, and tests.
+
+## Fix Round 1
+
+### Review item verified
+
+The review finding was correct: the dialog footer previously preferred `aiResult || localResult`, so stale AI text could remain selectable after a retry, cancel, or error path if the old AI result string was still present.
+
+### Fix applied
+
+- Added a pure dialog helper, `getPromptEnhancementUseValue(...)`, so the footer only uses AI text when `aiStatus === 'success'`.
+- Added pure lifecycle helpers in `ChatInputBox`:
+  - `startPromptEnhancementAiRequest(...)`
+  - `resetPromptEnhancementAiState(...)`
+- Starting a new AI request now clears stale `aiResult` and `aiError`.
+- Canceling an AI request resets state back to local-only fallback and clears stale `aiResult`.
+- Error reset now clears stale `aiResult`, records the fresh error text, and keeps local preview as the only usable result.
+- Successful completion still applies only the current request's AI result after the request ID check passes.
+- Explicit-action-only AI invocation and no-submit behavior remain unchanged.
+
+### Test strengthening
+
+- Extended `tests/prompt-enhancement-ui.test.mjs` with executable helper coverage through a narrow `vm` harness, without adding any new test dependency.
+- Added behavioral coverage for:
+  - success selecting the current AI result,
+  - loading falling back to local result,
+  - error falling back to local result,
+  - idle falling back to local result,
+  - retry clearing stale AI text before a new request,
+  - cancel/error reset rejecting stale AI text afterward.
+- Kept the existing static architecture guardrails alongside the executable checks.
+
+### Styling cleanup
+
+- Replaced the hard-coded prompt enhancement error text color with the existing semantic variable `var(--mode-dangerous-foreground)`.
+
+### Verification
+
+Run:
+
+```powershell
+node --test tests/prompt-enhancement-ui.test.mjs
+```
+
+Result: PASS
+
+Run:
+
+```powershell
+npx.cmd tsc --noEmit
+```
+
+Result: FAIL on the same known baseline error:
+
+```text
+src/utils/promptEnhancer.ts(8,46): error TS7016: Could not find a declaration file for module './promptEnhancerCore.js'. 'D:/ccNexus/.worktrees/codex-prompt-enhancement/src/utils/promptEnhancerCore.js' implicitly has an 'any' type.
+```
+
+No additional TypeScript errors were introduced by Fix Round 1.

@@ -125,6 +125,32 @@ function createPromptEnhancementRequestId() {
   return `prompt-enhancement-${Date.now()}`;
 }
 
+export function startPromptEnhancementAiRequest(current: PromptEnhancementState | null, requestId: string) {
+  if (!current) return current;
+  return {
+    ...current,
+    aiResult: '',
+    aiStatus: 'loading' as const,
+    aiError: '',
+    requestId,
+  };
+}
+
+export function resetPromptEnhancementAiState(
+  current: PromptEnhancementState | null,
+  aiStatus: PromptEnhancementState['aiStatus'] = 'idle',
+  aiError = '',
+) {
+  if (!current) return current;
+  return {
+    ...current,
+    aiResult: '',
+    aiStatus,
+    aiError,
+    requestId: null,
+  };
+}
+
 export default function ChatInputBox({
   onSend,
   onContextUsage,
@@ -455,32 +481,14 @@ export default function ChatInputBox({
               void cancelPromptEnhancement(promptEnhancement.requestId).catch(() => {});
             }
             activePromptEnhancementRequestIdRef.current = null;
-            setPromptEnhancement(current => (
-              current
-                ? {
-                    ...current,
-                    aiStatus: 'idle',
-                    aiError: '',
-                    requestId: null,
-                  }
-                : current
-            ));
+            setPromptEnhancement(current => resetPromptEnhancementAiState(current));
           }}
           onAiEnhance={async () => {
             if (promptEnhancement.aiStatus === 'loading') return;
 
             const requestId = createPromptEnhancementRequestId();
             activePromptEnhancementRequestIdRef.current = requestId;
-            setPromptEnhancement(current => (
-              current
-                ? {
-                    ...current,
-                    aiStatus: 'loading',
-                    aiError: '',
-                    requestId,
-                  }
-                : current
-            ));
+            setPromptEnhancement(current => startPromptEnhancementAiRequest(current, requestId));
 
             try {
               const result = await enhancePrompt({
@@ -493,6 +501,7 @@ export default function ChatInputBox({
 
               setPromptEnhancement(current => {
                 if (!current || current.requestId !== result.requestId) return current;
+                activePromptEnhancementRequestIdRef.current = null;
                 return {
                   ...current,
                   aiResult: result.text,
@@ -502,15 +511,13 @@ export default function ChatInputBox({
               });
             } catch (error) {
               if (activePromptEnhancementRequestIdRef.current !== requestId) return;
+              activePromptEnhancementRequestIdRef.current = null;
 
-              setPromptEnhancement(current => {
-                if (!current || current.requestId !== requestId) return current;
-                return {
-                  ...current,
-                  aiStatus: 'error',
-                  aiError: error instanceof Error ? error.message : String(error),
-                };
-              });
+              setPromptEnhancement(current => (
+                current && current.requestId === requestId
+                  ? resetPromptEnhancementAiState(current, 'error', error instanceof Error ? error.message : String(error))
+                  : current
+              ));
             }
           }}
         />
