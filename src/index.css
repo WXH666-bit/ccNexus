@@ -3086,18 +3086,61 @@ html, body, #root {
   align-items: center;
   gap: 6px;
 }
-.agent-editor-dialog { width: min(680px, 100%); }
+.agent-editor-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(780px, calc(100vh - 32px));
+  background: var(--surface-panel);
+}
+.agent-editor-dialog .provider-dialog-header h3 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
 .agent-editor-dialog .provider-dialog-content { display: grid; gap: 16px; }
 .agent-editor-dialog .provider-form-field small {
   color: var(--text-tertiary);
   font-size: 11px;
   line-height: 1.4;
 }
+.agent-editor-dialog input,
 .agent-editor-dialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.agent-editor-dialog input {
+  min-height: 40px;
+  padding: 9px 11px;
+}
+.agent-editor-dialog textarea {
+  width: 100%;
+  padding: 11px 12px;
   min-height: 220px;
   resize: vertical;
   font-family: var(--font-mono);
   line-height: 1.55;
+}
+.agent-editor-dialog input::placeholder,
+.agent-editor-dialog textarea::placeholder { color: var(--text-muted); }
+.agent-editor-dialog input:focus,
+.agent-editor-dialog textarea:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 14%, transparent);
+}
+.agent-editor-dialog input[readonly] {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+.agent-editor-dialog .provider-dialog-footer {
+  padding-top: 14px;
+  padding-bottom: 14px;
+  background: color-mix(in srgb, var(--surface-panel) 92%, var(--bg-primary));
 }
 @media (max-width: 760px) {
   .agent-settings-toolbar { justify-content: flex-start; }

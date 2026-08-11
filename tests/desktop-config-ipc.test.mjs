@@ -154,6 +154,7 @@ test('desktop local config service mirrors existing Claude-side readers without 
 test('agent settings UI exposes managed CRUD, native read-only state, and import export actions', async () => {
   const section = await readFile(path.join(process.cwd(), 'src/components/settings/AgentSection.tsx'), 'utf8');
   const dialog = await readFile(path.join(process.cwd(), 'src/components/AgentDialog.tsx'), 'utf8');
+  const styles = await readFile(path.join(process.cwd(), 'src/index.css'), 'utf8');
   assert.match(section, /saveAgent/);
   assert.match(section, /deleteAgent/);
   assert.match(section, /setSelectedAgent/);
@@ -164,6 +165,9 @@ test('agent settings UI exposes managed CRUD, native read-only state, and import
   assert.match(dialog, /onSave/);
   assert.match(dialog, /prompt/);
   assert.match(dialog, /provider-dialog-overlay/);
+  assert.match(styles, /\.agent-editor-dialog input,\s*\.agent-editor-dialog textarea/);
+  assert.match(styles, /\.agent-editor-dialog textarea \{[\s\S]*width: 100%/);
+  assert.match(styles, /\.agent-editor-dialog input,\s*\.agent-editor-dialog textarea[\s\S]*background: var\(--bg-primary\)/);
 });
 
 test('chat agent selection hydrates from and persists to the ccNexus agent store', async () => {
