@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { createPreToolUseHook, normalizePermissionMode } from '../desktop/daemon/permissionMode.js';
 
 const daemonSource = readFileSync(new URL('../desktop/daemon/ccnexus-daemon.js', import.meta.url), 'utf8')
+  .replace(/\r\n/g, '\n')
   .replace(
     "import { createInterface } from 'node:readline';\nimport { createRequire } from 'node:module';\nimport { randomUUID } from 'node:crypto';\nimport {\n  createPreToolUseHook,\n  normalizePermissionMode,\n} from './permissionMode.js';\n\nconst require = createRequire(import.meta.url);\nconst { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');",
     "const { createInterface, sdkQuery, randomUUID, createPreToolUseHook, normalizePermissionMode } = globalThis.__daemonDeps;",
