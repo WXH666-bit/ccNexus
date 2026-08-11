@@ -22,6 +22,16 @@ const CLOUD_PROVIDER_FLAGS = [
   'CLAUDE_CODE_USE_VERTEX',
   'CLAUDE_CODE_USE_FOUNDRY',
 ];
+const PROMPT_ENHANCER_SYSTEM_PROMPT = [
+  'You improve a user draft prompt into a clearer final prompt.',
+  'Return only the rewritten prompt text.',
+  'Preserve the original intent, requirements, literals, examples, and constraints.',
+  'Do not add new requirements, tools, steps, files, permissions, or project assumptions.',
+  'No tools.',
+  'No explanatory wrapper.',
+  'Do not execute anything, suggest execution, or mention tools.',
+  'Do not include any explanatory wrapper, commentary, preface, markdown fences, or labels.',
+].join('\n');
 
 function normalizePermissionMode(mode) {
   return VALID_PERMISSION_MODES.has(mode) ? mode : 'default';
@@ -198,5 +208,43 @@ export function buildClaudeQueryOptions({
     options.allowDangerouslySkipPermissions = true;
   }
 
+  return options;
+}
+
+export function buildPromptEnhancementQueryOptions({
+  cwd,
+  env,
+  providerMode = '',
+  model = '',
+  resourcesPath = process.resourcesPath,
+  platform = process.platform,
+  arch = process.arch,
+  fileExists = existsSync,
+} = {}) {
+  const modelId = typeof model === 'string' ? model.trim() : '';
+  const resolvedModel = normalizeModel(modelId, env);
+  const sdkModelName = modelId && modelId !== 'default' ? mapModelIdToSdkName(modelId) : '';
+  const pathToClaudeCodeExecutable = resolveClaudeCodeExecutablePath({
+    resourcesPath,
+    platform,
+    arch,
+    fileExists,
+  });
+  const options = {
+    cwd,
+    ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
+    env: buildCliEnv(env, { modelId, resolvedModel, providerMode }),
+    systemPrompt: PROMPT_ENHANCER_SYSTEM_PROMPT,
+    settingSources: [],
+    additionalDirectories: [],
+    tools: [],
+    maxTurns: 1,
+    enableFileCheckpointing: false,
+    includePartialMessages: false,
+    permissionMode: 'default',
+    canUseTool: async () => ({ behavior: 'deny', message: 'Prompt enhancement cannot use tools' }),
+  };
+
+  if (sdkModelName) options.model = sdkModelName;
   return options;
 }

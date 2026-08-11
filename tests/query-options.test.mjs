@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { buildClaudeQueryOptions } from '../server/queryOptions.js';
+import { buildClaudeQueryOptions, buildPromptEnhancementQueryOptions } from '../server/queryOptions.js';
 import { buildClaudeClientOptions } from '../server/claudeRequestContext.js';
 
 test('packaged Windows query points the SDK at the unpacked Claude binary', () => {
@@ -324,5 +324,42 @@ test('builds one ccgui-style request context from agent and MCP state', async ()
   assert.equal(clientOptions.agentPrompt, 'Review release risks.');
   assert.deepEqual(clientOptions.mcpServers, {
     docs: { command: 'node', args: ['D:/repo'] },
+  });
+});
+
+test('prompt enhancement options disable project execution surfaces', async () => {
+  const options = buildPromptEnhancementQueryOptions({
+    cwd: 'D:/repo',
+    env: {
+      ANTHROPIC_API_KEY: 'test-key',
+      PROJECT_PATH: 'D:/other-project',
+      IDEA_PROJECT_PATH: 'D:/idea-project',
+    },
+    providerMode: '',
+    model: 'claude-sonnet-4-6',
+  });
+
+  assert.equal(options.cwd, 'D:/repo');
+  assert.equal(options.model, 'sonnet');
+  assert.equal(options.maxTurns, 1);
+  assert.equal(options.enableFileCheckpointing, false);
+  assert.equal(options.includePartialMessages, false);
+  assert.equal(options.permissionMode, 'default');
+  assert.deepEqual(options.settingSources, []);
+  assert.deepEqual(options.additionalDirectories, []);
+  assert.deepEqual(options.tools, []);
+  assert.equal(options.allowDangerouslySkipPermissions, undefined);
+  assert.equal(options.mcpServers, undefined);
+  assert.equal(typeof options.canUseTool, 'function');
+  assert.equal(options.env.ANTHROPIC_API_KEY, 'test-key');
+  assert.equal(options.env.PROJECT_PATH, 'D:/other-project');
+  assert.equal(options.env.IDEA_PROJECT_PATH, 'D:/idea-project');
+  assert.match(options.systemPrompt, /no tools/i);
+  assert.match(options.systemPrompt, /no explanatory wrapper/i);
+
+  const decision = await options.canUseTool('Read', { file_path: 'D:/repo/file.txt' });
+  assert.deepEqual(decision, {
+    behavior: 'deny',
+    message: 'Prompt enhancement cannot use tools',
   });
 });
