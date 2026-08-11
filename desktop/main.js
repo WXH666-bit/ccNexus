@@ -21,7 +21,9 @@ import { createAppUpdater } from './update/appUpdater.js';
 import { configureUpdaterNetwork } from './update/updateNetwork.js';
 import { hideDefaultApplicationMenu } from './runtime/windowMenu.js';
 import { LocalConfigService } from './runtime/localConfigService.js';
+import { createPromptEnhancementService } from './runtime/promptEnhancementService.js';
 import { DesktopSessionService } from './runtime/sessionService.js';
+import { createPromptEnhancementUsageStore } from './runtime/promptEnhancementUsageStore.js';
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 import { AppearancePreferences } from './runtime/appearancePreferences.js';
 import { McpStatusService } from './runtime/mcpStatusService.js';
@@ -36,7 +38,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { autoUpdater } = electronUpdater;
 const preloadPath = path.join(__dirname, 'preload.cjs');
 const indexHtml = path.resolve(__dirname, '../dist/index.html');
-const appDataDirectory = path.join(process.env.HOME || os.homedir() || process.cwd(), '.ccnexus');
+const desktopHomeDir = process.env.HOME || os.homedir() || process.cwd();
+const appDataDirectory = path.join(desktopHomeDir, '.ccnexus');
 const desktopStateFile = path.join(appDataDirectory, 'desktop-state.json');
 const appearanceStateFile = path.join(appDataDirectory, 'appearance.json');
 const appearanceBackgroundFile = path.join(appDataDirectory, 'chat-background');
@@ -56,7 +59,34 @@ const appearancePreferences = new AppearancePreferences({
 const windowPreferences = new WindowPreferences({ stateFile: windowPreferencesFile });
 const localConfig = new LocalConfigService();
 const mcpStatus = new McpStatusService();
-const desktopSessions = new DesktopSessionService({ cwd: process.cwd() });
+const promptEnhancementUsageStore = createPromptEnhancementUsageStore({ homeDir: desktopHomeDir });
+const promptEnhancementService = createPromptEnhancementService({
+  query: async (args) => await runtime.queryClaude(args),
+  localConfig,
+  workspaceFiles,
+  usageStore: promptEnhancementUsageStore,
+});
+const trackedPromptEnhancementService = {
+  ...promptEnhancementService,
+  async enhance(args = {}) {
+    const result = await promptEnhancementService.enhance(args);
+    if (result?.usage) {
+      await promptEnhancementUsageStore.append({
+        id: args.requestId,
+        timestamp: Date.now(),
+        cwd: workspaceFiles.getWorkspace().cwd,
+        model: result.model,
+        usage: result.usage,
+      });
+    }
+    return result;
+  },
+};
+const desktopSessions = new DesktopSessionService({
+  homeDir: desktopHomeDir,
+  cwd: process.cwd(),
+  promptEnhancementUsage: promptEnhancementUsageStore,
+});
 const sessionController = createDesktopSessionController({
   runtime,
   sessions: desktopSessions,
@@ -195,6 +225,7 @@ function requestApplicationQuit() {
 
 async function cleanupApplication() {
   try { appUpdater.dispose(); } catch { /* ignore */ }
+  try { trackedPromptEnhancementService.dispose(); } catch { /* ignore */ }
   try { chatController.dispose(); } catch { /* ignore */ }
   try { await runtime.shutdown(); } catch (error) {
     console.error('[desktop] runtime shutdown failed:', error);

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readClaudeSessionMessages } from '../../server/claudeHistory.js';
 import { claudeProjectSessionsDir, encodeClaudeProjectPath } from '../../server/claudeProjectPaths.js';
+import { createPromptEnhancementUsageStore } from './promptEnhancementUsageStore.js';
 
 const PROJECT_INDEX_DIR = 'projects';
 const PROJECT_INDEX_VERSION = 1;
@@ -77,7 +78,10 @@ function emptyUsage() {
 }
 
 function usageFromMessage(message) {
-  const usage = message?.usage;
+  return usageFromRaw(message?.usage);
+}
+
+function usageFromRaw(usage) {
   if (!usage || typeof usage !== 'object') return null;
   const inputTokens = tokenValue(usage.input_tokens);
   const outputTokens = tokenValue(usage.output_tokens);
@@ -162,10 +166,15 @@ function usageCost(usage, model) {
 }
 
 export class DesktopSessionService {
-  constructor({ homeDir = process.env.HOME || os.homedir() || '/tmp', cwd = process.cwd() } = {}) {
+  constructor({
+    homeDir = process.env.HOME || os.homedir() || '/tmp',
+    cwd = process.cwd(),
+    promptEnhancementUsage = null,
+  } = {}) {
     this.homeDir = homeDir;
     this.cwd = normalizeWorkspacePath(cwd);
     this.sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
+    this.promptEnhancementUsage = promptEnhancementUsage || createPromptEnhancementUsageStore({ homeDir });
   }
 
   setCwd(nextCwd) {
@@ -447,6 +456,9 @@ export class DesktopSessionService {
     const twoWeeksAgo = now - 14 * 24 * 60 * 60 * 1000;
     const currentWeek = { sessions: 0, cost: 0, tokens: 0 };
     const lastWeek = { sessions: 0, cost: 0, tokens: 0 };
+    const promptEnhancementUsage = emptyUsage();
+    let promptEnhancementCount = 0;
+    let promptEnhancementCost = 0;
 
     for (const { session, claudeProjectDir } of sessionEntries) {
       const history = scope === USAGE_SCOPE_ALL
@@ -551,6 +563,57 @@ export class DesktopSessionService {
       });
     }
 
+    if (this.promptEnhancementUsage && typeof this.promptEnhancementUsage.list === 'function') {
+      const ledgerRecords = await this.promptEnhancementUsage.list();
+      for (const record of ledgerRecords) {
+        const recordCwd = normalizeWorkspacePath(record.cwd);
+        if (scope === USAGE_SCOPE_CURRENT && recordCwd !== this.cwd) continue;
+        if (cutoffTime > 0 && record.timestamp < cutoffTime) continue;
+
+        const usage = usageFromRaw(record.usage);
+        if (!usage) continue;
+
+        const cost = usageCost(usage, record.model);
+        promptEnhancementCount += 1;
+        promptEnhancementCost += cost;
+        addUsage(promptEnhancementUsage, usage);
+        addUsage(totalUsage, usage);
+
+        const key = dateKey(record.timestamp);
+        const day = daily.get(key) || {
+          date: key,
+          sessions: 0,
+          requestCount: 0,
+          usage: emptyUsage(),
+          cost: 0,
+          modelsUsed: new Set(),
+        };
+        addUsage(day.usage, usage);
+        day.cost += cost;
+        day.requestCount += 1;
+        if (record.model) day.modelsUsed.add(record.model);
+        daily.set(key, day);
+
+        const model = modelUsage.get(record.model) || {
+          model: record.model,
+          totalCost: 0,
+          totalTokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          sessionCount: 0,
+        };
+        model.totalCost += cost;
+        model.totalTokens += usage.totalTokens;
+        model.inputTokens += usage.inputTokens;
+        model.outputTokens += usage.outputTokens;
+        model.cacheCreationTokens += usage.cacheWriteTokens;
+        model.cacheReadTokens += usage.cacheReadTokens;
+        modelUsage.set(record.model, model);
+      }
+    }
+
     const dailyUsage = [...daily.values()]
       .map(day => ({ ...day, modelsUsed: [...day.modelsUsed] }))
       .sort((left, right) => left.date.localeCompare(right.date));
@@ -580,9 +643,12 @@ export class DesktopSessionService {
       projectName: scope === USAGE_SCOPE_ALL ? 'All Projects' : path.basename(this.cwd),
       totalSessions,
       totalUsage,
+      promptEnhancementCount,
+      promptEnhancementUsage,
+      promptEnhancementCost,
       estimatedCost: currentWeek.cost + lastWeek.cost + sessions
         .filter(session => session.timestamp <= twoWeeksAgo)
-        .reduce((total, session) => total + session.cost, 0),
+        .reduce((total, session) => total + session.cost, 0) + promptEnhancementCost,
       sessions,
       dailyUsage,
       todayUsage,
