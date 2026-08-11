@@ -12,8 +12,12 @@ function normalizeUsage(usage) {
   if (!usage || typeof usage !== 'object') return null;
   const input_tokens = tokenValue(usage.input_tokens);
   const output_tokens = tokenValue(usage.output_tokens);
-  const cache_creation_input_tokens = tokenValue(usage.cache_creation_input_tokens ?? 0);
-  const cache_read_input_tokens = tokenValue(usage.cache_read_input_tokens ?? 0);
+  const cache_creation_input_tokens = tokenValue(
+    usage.cache_creation_input_tokens === undefined ? 0 : usage.cache_creation_input_tokens,
+  );
+  const cache_read_input_tokens = tokenValue(
+    usage.cache_read_input_tokens === undefined ? 0 : usage.cache_read_input_tokens,
+  );
   if (
     input_tokens === null
     || output_tokens === null

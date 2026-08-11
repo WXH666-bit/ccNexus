@@ -130,6 +130,21 @@ test('prompt enhancement usage store defaults optional cache fields when SDK omi
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
     });
+
+    await assert.rejects(
+      store.append({
+        id: 'enhance-null-cache',
+        timestamp: Date.parse('2026-08-11T14:00:00+08:00'),
+        cwd: 'D:/repo',
+        model: 'claude-sonnet-4-6',
+        usage: {
+          input_tokens: 12,
+          output_tokens: 3,
+          cache_creation_input_tokens: null,
+        },
+      }),
+      /Invalid prompt enhancement usage record/i,
+    );
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
