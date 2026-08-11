@@ -42,6 +42,8 @@
 
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --scrollbar-thumb: #58616d;
+  --scrollbar-thumb-hover: #79a8e8;
 }
 
 /* ─── Reset & Base ──────────────────────────────────────────── */
@@ -321,14 +323,34 @@ html, body, #root {
 
 .file-tree::-webkit-scrollbar,
 .file-editor-textarea::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+}
+
+.file-tree::-webkit-scrollbar-track,
+.file-editor-textarea::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .file-tree::-webkit-scrollbar-thumb,
 .file-editor-textarea::-webkit-scrollbar-thumb {
-  background: #4b4f55;
-  border-radius: 4px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.file-tree::-webkit-scrollbar-thumb:hover,
+.file-editor-textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+.file-tree::-webkit-scrollbar-button,
+.file-editor-textarea::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .file-tree-row {
@@ -562,9 +584,19 @@ html, body, #root {
   padding: 16px 24px;
   scroll-behavior: smooth;
 }
-.message-list::-webkit-scrollbar { width: 6px; }
+.message-list::-webkit-scrollbar { width: 9px; }
 .message-list::-webkit-scrollbar-track { background: transparent; }
-.message-list::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }
+.message-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+.message-list::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 
 .message-row {
   margin-bottom: 16px;
@@ -926,6 +958,44 @@ html, body, #root {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
+}
+
+/* Keep the scroll chrome quiet so custom backgrounds remain visible. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .bash-block .command-output {
@@ -4775,6 +4845,8 @@ html, body, #root {
   --accent-purple: #9333ea;
   --mode-dangerous-selected: rgba(220, 38, 38, 0.14);
   --mode-dangerous-foreground: #f87171;
+  --scrollbar-thumb: #b6beca;
+  --scrollbar-thumb-hover: #7f8da1;
 }
 
 [data-theme="light"] body {
@@ -6183,10 +6255,15 @@ textarea:focus-visible,
 }
 
 .message-list::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--bg-active) 82%, transparent);
+  background: var(--scrollbar-thumb);
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: 999px;
+}
+
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 .message-row {
