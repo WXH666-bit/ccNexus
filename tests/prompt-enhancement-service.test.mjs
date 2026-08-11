@@ -40,7 +40,7 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
     {
       type: 'assistant',
       message: {
-        content: [{ type: 'text', text: 'Rewrite the request with the same intent.\nKeep error handling and examples.' }],
+        content: [{ type: 'text', text: 'Keep error handling and examples.' }],
         usage: { input_tokens: 12, output_tokens: 7 },
       },
     },
@@ -87,7 +87,7 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
   assert.equal(calls[0].options.mcpServers, undefined);
   assert.equal(result.requestId, 'req-1');
   assert.equal(result.model, 'claude-sonnet-4-6');
-  assert.equal(result.text, 'Rewrite the request with the same intent.\nKeep error handling and examples.');
+  assert.equal(result.text, 'Rewrite the request with the same intent.\n\nKeep error handling and examples.');
   assert.deepEqual(result.usage, { input_tokens: 12, output_tokens: 7 });
   assert.equal(result.sessionId, undefined);
   assert.equal(query.interruptCalls, 0);

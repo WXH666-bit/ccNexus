@@ -40,21 +40,19 @@ function createCancelledError() {
 
 export function extractPromptEnhancementText(events) {
   if (!Array.isArray(events)) return '';
-  let latestText = '';
+  const allParts = [];
 
   for (const event of events) {
     if (event?.type !== 'assistant') continue;
     const content = Array.isArray(event.message?.content) ? event.message.content : [];
-    const parts = [];
     for (const block of content) {
       if (block?.type !== 'text') continue;
       const text = typeof block.text === 'string' ? block.text.trim() : '';
-      if (text) parts.push(text);
+      if (text) allParts.push(text);
     }
-    if (parts.length > 0) latestText = parts.join('\n\n');
   }
 
-  return latestText;
+  return allParts.join('\n\n');
 }
 
 export function createPromptEnhancementService({
