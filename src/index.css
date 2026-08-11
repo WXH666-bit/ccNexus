@@ -539,6 +539,13 @@ html, body, #root {
   color: white;
   margin: 0 auto 16px;
 }
+
+.welcome-brand-logo {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
 .welcome-title {
   font-size: 24px;
   font-weight: 600;
@@ -6148,6 +6155,21 @@ textarea:focus-visible,
   letter-spacing: 0.02em;
 }
 
+.window-title-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.window-title-logo {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent-blue) 34%, transparent));
+}
+
 .chat-view,
 .settings-view {
   background: var(--bg-primary);
@@ -7086,7 +7108,7 @@ textarea:focus-visible,
   transition: opacity 180ms ease;
 }
 
-.app-root > * {
+.app-root > *:not(.window-drag-region) {
   position: relative;
   z-index: 1;
 }

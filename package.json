@@ -72,7 +72,8 @@
       "output": "release"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/ccnexus.ico"
     },
     "nsis": {
       "oneClick": false,

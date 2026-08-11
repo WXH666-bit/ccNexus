@@ -25,6 +25,11 @@ test('renderer reserves and exposes a draggable title bar overlay region', () =>
   assert.match(css, /env\(titlebar-area-height/);
 });
 
+test('background layers do not reflow the fixed title bar', () => {
+  const css = read('src/index.css');
+  assert.match(css, /\.app-root > \*:not\(\.window-drag-region\)\s*\{/);
+});
+
 test('desktop title bar follows the renderer theme', () => {
   const host = read('desktop/main.js');
   const preload = read('desktop/preload.cjs');

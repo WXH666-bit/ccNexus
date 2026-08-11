@@ -41,6 +41,7 @@ const desktopStateFile = path.join(appDataDirectory, 'desktop-state.json');
 const appearanceStateFile = path.join(appDataDirectory, 'appearance.json');
 const appearanceBackgroundFile = path.join(appDataDirectory, 'chat-background');
 const windowPreferencesFile = path.join(appDataDirectory, 'window-preferences.json');
+const appIconPath = path.resolve(__dirname, app.isPackaged ? '../dist/ccnexus-logo.png' : '../public/ccnexus-logo.png');
 const FALLBACK_TRAY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 const runtime = createDesktopRuntime({
@@ -113,6 +114,9 @@ function showMainWindow() {
 }
 
 async function resolveTrayIcon() {
+  const brandIcon = nativeImage.createFromPath(appIconPath);
+  if (!brandIcon.isEmpty()) return brandIcon;
+
   try {
     const icon = await app.getFileIcon(process.execPath, { size: 'small' });
     if (!icon.isEmpty()) return icon;
@@ -145,6 +149,7 @@ function createMainWindow(initialTheme = currentAppearance.theme) {
     minWidth: 960,
     minHeight: 640,
     title: 'ccNexus',
+    icon: appIconPath,
     backgroundColor: palette.color,
     titleBarStyle: 'hidden',
     titleBarOverlay: {

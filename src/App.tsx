@@ -13,7 +13,10 @@ export default function App() {
   return (
     <div className="app-root">
       <div className="window-drag-region" aria-hidden="true">
-        <span className="window-title">ccNexus</span>
+        <div className="window-title-brand">
+          <img className="window-title-logo" src="/ccnexus-logo.png" alt="ccNexus" draggable="false" />
+          <span className="window-title">ccNexus</span>
+        </div>
       </div>
       <div className={`persistent-chat-shell ${isChatRoute ? '' : 'route-hidden'}`}>
         <ChatView routeSessionId={routeSessionId} />
