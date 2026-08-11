@@ -91,3 +91,49 @@ Final result:
 - Did not introduce `fetch` or a second transport
 - Did not modify Claude Code, cc-switch, settings, project/provider/model/mode/reasoning/permission state, or chat cache
 - Did not touch `package-lock` or unrelated UI files
+
+## Fix Round 1 — August 11, 2026
+
+Review finding verified: the original Task 4 test file enforced useful static guardrails, but it did not execute the registered handlers or bridge methods.
+
+### What changed
+
+Strengthened `tests/desktop-prompt-enhancement-ipc.test.mjs` with executable contract coverage while preserving the existing source-text guardrails:
+
+- Added a narrow `vm`-based harness that evaluates only the prompt-enhancement handler registration snippet from `desktop/main.js`
+- Added a narrow `vm`-based CommonJS harness for `desktop/preload.cjs` with stubbed `contextBridge` and `ipcRenderer`
+- Added a narrow extracted-function harness for the renderer wrappers in `src/utils/desktopBridgeApi.ts`
+- Kept the static tests for registration, bridge typing, and “no fetch / no chatController.handle” constraints
+
+### Executable behaviors now covered
+
+- `desktop:enhance-prompt` registration invokes `promptEnhancementService.enhance` with the exact args and returns the service result
+- `desktop:cancel-prompt-enhancement` invokes `promptEnhancementService.cancel(requestId)` and returns `{ cancelled, requestId }`
+- Preload bridge methods invoke the expected IPC channels and payload shapes
+- Renderer wrappers call `requireDesktopApi()` and return the desktop bridge result
+
+### TDD notes
+
+1. Added the new executable tests first
+2. Ran `node --test tests/desktop-prompt-enhancement-ipc.test.mjs`
+3. Observed the red failure from missing in-test harness helpers
+4. Added the minimal harness helpers in the test file only
+5. Reran the test and fixed one cross-realm comparison issue by normalizing `vm` results to plain JSON values
+6. Reran the target test to green
+
+### Verification
+
+Command run:
+
+```powershell
+node --test tests/desktop-prompt-enhancement-ipc.test.mjs
+```
+
+Result:
+
+- 8 tests passed
+- 0 failed
+
+### Production impact
+
+No production files changed in Fix Round 1. The bridge wiring remained unchanged; only the isolated contract tests and this report were updated.
