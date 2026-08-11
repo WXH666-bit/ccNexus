@@ -54,6 +54,11 @@ test('desktop daemon runs Claude SDK query and asks the bridge for tool permissi
   assert.match(daemon, /type:\s*'permission_request'/);
   assert.match(daemon, /pendingPermissions\.set\(requestId, resolve\)/);
   assert.match(daemon, /method === 'permission_response'/);
+  assert.match(daemon, /createPreToolUseHook/);
+  assert.match(daemon, /type:\s*'plan_approval'/);
+  assert.match(daemon, /method === 'plan_approval_response'/);
   assert.match(bridge, /options\.onPermissionRequest/);
   assert.match(bridge, /method:\s*'permission_response'/);
+  assert.match(bridge, /options\.onPlanApproval/);
+  assert.match(bridge, /method:\s*'plan_approval_response'/);
 });

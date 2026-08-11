@@ -3510,6 +3510,39 @@ html, body, #root {
   flex-shrink: 0;
 }
 .plan-step-text { color: var(--text-primary); line-height: 1.4; }
+.plan-markdown {
+  margin: 0;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: 13px/1.55 var(--font-sans);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.plan-allowed-prompts {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+.plan-allowed-prompts-title {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.plan-allowed-prompt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-tertiary));
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.plan-allowed-prompt code { color: var(--accent-blue); }
 .plan-feedback { margin-top: 16px; }
 .plan-feedback-input {
   width: 100%;

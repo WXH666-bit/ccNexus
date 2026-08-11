@@ -1,6 +1,10 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import type { DesktopChatEvent } from '../types';
-import { createInboundMessageQueue, createOutboundMessageQueue } from './desktopMessageQueue.js';
+import {
+  createInboundMessageQueue,
+  createOutboundMessageQueue,
+  isPriorityDesktopMessage,
+} from './desktopMessageQueue.js';
 
 interface UseDesktopChatReturn {
   send: (msg: Record<string, unknown>) => void;
@@ -13,6 +17,8 @@ export function useDesktopChat(): UseDesktopChatReturn {
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<DesktopChatEvent | null>(null);
   const desktopUnsubscribeRef = useRef<(() => void) | null>(null);
+  const inboundFlushTimerRef = useRef<number | null>(null);
+  const latestInboundMessageRef = useRef<DesktopChatEvent | null>(null);
   const outboundQueueRef = useRef<ReturnType<typeof createOutboundMessageQueue> | null>(null);
   const inboundQueueRef = useRef<ReturnType<typeof createInboundMessageQueue<DesktopChatEvent>> | null>(null);
 
@@ -34,8 +40,24 @@ export function useDesktopChat(): UseDesktopChatReturn {
 
     desktopUnsubscribeRef.current?.();
     desktopUnsubscribeRef.current = desktopApi.onChatMessage((msg) => {
-      inboundQueueRef.current?.push(msg as DesktopChatEvent);
-      setLastMessage(msg as DesktopChatEvent);
+      const nextMessage = msg as DesktopChatEvent;
+      inboundQueueRef.current?.push(nextMessage);
+      latestInboundMessageRef.current = nextMessage;
+
+      if (isPriorityDesktopMessage(nextMessage)) {
+        if (inboundFlushTimerRef.current !== null) {
+          window.clearTimeout(inboundFlushTimerRef.current);
+          inboundFlushTimerRef.current = null;
+        }
+        setLastMessage(nextMessage);
+        return;
+      }
+
+      if (inboundFlushTimerRef.current !== null) return;
+      inboundFlushTimerRef.current = window.setTimeout(() => {
+        inboundFlushTimerRef.current = null;
+        if (latestInboundMessageRef.current) setLastMessage(latestInboundMessageRef.current);
+      }, 33);
     });
     setConnected(true);
     outboundQueueRef.current?.flush();
@@ -46,6 +68,10 @@ export function useDesktopChat(): UseDesktopChatReturn {
     return () => {
       desktopUnsubscribeRef.current?.();
       desktopUnsubscribeRef.current = null;
+      if (inboundFlushTimerRef.current !== null) {
+        window.clearTimeout(inboundFlushTimerRef.current);
+        inboundFlushTimerRef.current = null;
+      }
       outboundQueueRef.current?.clear();
       inboundQueueRef.current?.clear();
       setConnected(false);

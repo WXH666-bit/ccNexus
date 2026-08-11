@@ -47,6 +47,12 @@ test('desktop chat controller owns permission, session, and process registration
   assert.match(controllerSource, /runtime\.unregisterChannel/);
   assert.match(controllerSource, /createPermissionPolicy/);
   assert.match(controllerSource, /permission_response/);
+  assert.match(controllerSource, /onPlanApproval/);
+  assert.match(controllerSource, /requestPlanApprovalFromRenderer/);
+  assert.match(controllerSource, /message\.requestId/);
+  assert.match(controllerSource, /requestUserQuestionFromRenderer/);
+  assert.match(controllerSource, /questionQueue/);
+  assert.match(controllerSource, /set_permission_mode/);
   assert.match(controllerSource, /sessions\.appendMessage/);
   assert.match(controllerSource, /type:\s*'status',\s*status:\s*'thinking'/);
   assert.match(controllerSource, /runtime\.getContextUsage/);
@@ -213,4 +219,95 @@ test('desktop chat persists one user and one assistant message per turn', async 
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
+});
+
+test('desktop chat serializes AskUserQuestion requests and returns keyed answers', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  let permissionHandler = null;
+  const emitted = [];
+
+  async function* successfulQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'question-session' };
+    yield {
+      type: 'result',
+      session_id: 'question-session',
+      subtype: 'success',
+      is_error: false,
+      duration_ms: 1,
+      total_cost_usd: 0,
+      num_turns: 1,
+    };
+  }
+
+  const runtime = {
+    queryClaude: async ({ onPermissionRequest }) => {
+      permissionHandler = onPermissionRequest;
+      const stream = successfulQuery();
+      stream.daemonSessionId = 'pending-question';
+      stream.close = () => {};
+      return stream;
+    },
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const sessions = {
+    loadSession: async () => ({ messages: [] }),
+    saveSession: async () => {},
+    appendMessage: async () => {},
+    deleteSession: async () => {},
+  };
+  const controller = createDesktopChatController({
+    runtime,
+    sessions,
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  const chatPromise = controller.handle({ type: 'chat', text: 'question', options: { model: 'default' } }, event => emitted.push(event));
+  const startedAt = Date.now();
+  while (!permissionHandler && Date.now() - startedAt < 1000) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(typeof permissionHandler, 'function');
+
+  const first = permissionHandler({
+    toolName: 'AskUserQuestion',
+    input: { questions: [{ question: 'First?', options: [{ label: 'A' }, { label: 'B' }] }] },
+    options: {},
+  });
+  const second = permissionHandler({
+    toolName: 'AskUserQuestion',
+    input: { questions: [{ question: 'Second?', options: [{ label: 'C' }, { label: 'D' }] }] },
+    options: {},
+  });
+
+  const waitForQuestion = async (questionText) => {
+    const started = Date.now();
+    while (Date.now() - started < 1000) {
+      const found = emitted.find(event => event.type === 'ask_user_question' && event.question === questionText);
+      if (found) return found;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.fail(`Timed out waiting for ${questionText}`);
+  };
+
+  const firstEvent = await waitForQuestion('First?');
+  assert.equal(emitted.filter(event => event.type === 'ask_user_question').length, 1);
+  await controller.handle({ type: 'ask_user_question_response', questionId: firstEvent.questionId, answer: 'A' }, () => {});
+  const secondEvent = await waitForQuestion('Second?');
+  await controller.handle({ type: 'ask_user_question_response', questionId: secondEvent.questionId, answer: 'C' }, () => {});
+
+  assert.deepEqual(await first, { behavior: 'allow', updatedInput: {
+    questions: [{ question: 'First?', options: [{ label: 'A' }, { label: 'B' }] }],
+    answers: { 'First?': 'A' },
+  } });
+  assert.deepEqual(await second, { behavior: 'allow', updatedInput: {
+    questions: [{ question: 'Second?', options: [{ label: 'C' }, { label: 'D' }] }],
+    answers: { 'Second?': 'C' },
+  } });
+  await chatPromise;
+  controller.dispose();
 });

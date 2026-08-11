@@ -15,7 +15,6 @@ export const SAFE_ALWAYS_ALLOW_TOOLS = new Set([
   'TaskList',
   'TaskStop',
   'TaskOutput',
-  'AskUserQuestion',
   'EnterPlanMode',
   'Sleep',
 ]);
@@ -24,7 +23,20 @@ function normalizeToolName(toolName) {
   return String(toolName || '').trim();
 }
 
-export function createPermissionPolicy({ askUser }) {
+function buildQuestionAnswers(input, response) {
+  if (response?.answers && typeof response.answers === 'object') {
+    return response.answers;
+  }
+
+  const answer = typeof response?.answer === 'string' ? response.answer.trim() : '';
+  if (!answer) return null;
+  const firstQuestion = Array.isArray(input?.questions) ? input.questions[0]?.question : input?.question;
+  return typeof firstQuestion === 'string' && firstQuestion.trim()
+    ? { [firstQuestion]: answer }
+    : null;
+}
+
+export function createPermissionPolicy({ askUser, askQuestion }) {
   const alwaysAllowedTools = new Set();
 
   return {
@@ -35,6 +47,24 @@ export function createPermissionPolicy({ askUser }) {
       }
       if (alwaysAllowedTools.has(normalizedToolName)) {
         return { behavior: 'allow' };
+      }
+
+      if (normalizedToolName === 'AskUserQuestion' && typeof askQuestion === 'function') {
+        const response = await askQuestion(input, options);
+        const answers = buildQuestionAnswers(input, response);
+        if (!answers || response?.cancelled) {
+          return {
+            behavior: 'deny',
+            message: response?.message || 'Question was not answered',
+          };
+        }
+        return {
+          behavior: 'allow',
+          updatedInput: {
+            ...input,
+            answers,
+          },
+        };
       }
 
       const decision = await askUser(normalizedToolName, input, options);

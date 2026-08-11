@@ -1,5 +1,13 @@
 import { promises as fs } from 'node:fs';
-import { assistantEvent, permissionRequestEvent, sessionEvent, streamEvent } from '../../server/protocol.js';
+import {
+  assistantEvent,
+  askUserQuestionEvent,
+  modeChangedEvent,
+  permissionRequestEvent,
+  planApprovalEvent,
+  sessionEvent,
+  streamEvent,
+} from '../../server/protocol.js';
 import { createAssistantTurn } from '../../server/assistantTurn.js';
 import { buildClaudeQueryOptions } from '../../server/queryOptions.js';
 import { createPermissionPolicy } from '../../server/permissionPolicy.js';
@@ -28,6 +36,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   const pendingPermissions = new Map();
   const pendingPlanApprovals = new Map();
   const pendingUserQuestions = new Map();
+  const questionQueue = [];
+  const questionParents = new Set();
+  let activeQuestionRequest = null;
   const sessionMessages = new Map();
   const fileEditHistory = new Map();
 
@@ -56,6 +67,8 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   async function stopOwnedQuery(sessionId) {
     const query = ownedQueries.get(sessionId);
     if (!query) return false;
+    cancelPlanApprovals(sessionId);
+    cancelQuestionParents(sessionId);
     try { await query.interrupt(); } catch { /* ignore */ }
     try { query.close(); } catch { /* ignore */ }
     unregisterActiveQuery(sessionId, query);
@@ -93,8 +106,178 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   function createPermissionHandler(emit, getSessionId) {
     const policy = createPermissionPolicy({
       askUser: (toolName, input, options) => requestPermissionFromRenderer(emit, toolName, input, options, getSessionId?.()),
+      askQuestion: (input, options) => requestUserQuestionFromRenderer(
+        emit,
+        input,
+        options,
+        getSessionId?.(),
+      ),
     });
     return policy.canUseTool;
+  }
+
+  function requestPlanApprovalFromRenderer(emit, request, sessionId) {
+    const requestId = request?.requestId || createPendingId();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const pending = pendingPlanApprovals.get(requestId);
+        if (!pending) return;
+        pendingPlanApprovals.delete(requestId);
+        resolve({ approved: false, feedback: 'Plan approval timed out' });
+      }, 300000);
+      timer.unref?.();
+      pendingPlanApprovals.set(requestId, { resolve, timer, sessionId });
+      emitSafe(emit, planApprovalEvent(sessionId, {
+        requestId,
+        toolName: request?.toolName || 'ExitPlanMode',
+        plan: typeof request?.plan === 'string' ? request.plan : '',
+        allowedPrompts: Array.isArray(request?.allowedPrompts) ? request.allowedPrompts : [],
+      }));
+    });
+  }
+
+  function resolvePlanApproval(requestId, decision) {
+    const pending = pendingPlanApprovals.get(requestId);
+    if (!pending) return;
+    pendingPlanApprovals.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(decision);
+  }
+
+  function cancelPlanApprovals(sessionId, feedback = 'Request aborted') {
+    for (const [requestId, pending] of pendingPlanApprovals.entries()) {
+      if (sessionId && pending.sessionId !== sessionId) continue;
+      pendingPlanApprovals.delete(requestId);
+      clearTimeout(pending.timer);
+      pending.resolve({ approved: false, feedback });
+    }
+  }
+
+  function normalizeQuestionItems(input) {
+    if (!Array.isArray(input?.questions)) return [];
+    return input.questions
+      .map((item) => {
+        if (!item || typeof item.question !== 'string' || !item.question.trim()) return null;
+        const options = Array.isArray(item.options)
+          ? item.options.map(option => (
+            typeof option === 'string' ? option : option?.label
+          )).filter(option => typeof option === 'string' && option.trim()).slice(0, 4)
+          : [];
+        return {
+          question: item.question.trim().slice(0, 4000),
+          options,
+          context: typeof item.header === 'string' ? item.header.trim().slice(0, 80) : undefined,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 4);
+  }
+
+  function finishQuestionParent(parent, result) {
+    if (!parent || parent.settled) return;
+    parent.settled = true;
+    questionParents.delete(parent);
+
+    for (const [requestId, pending] of pendingUserQuestions.entries()) {
+      if (pending.parent !== parent) continue;
+      pendingUserQuestions.delete(requestId);
+      clearTimeout(pending.timer);
+    }
+    for (let index = questionQueue.length - 1; index >= 0; index -= 1) {
+      if (questionQueue[index].parent === parent) questionQueue.splice(index, 1);
+    }
+    if (activeQuestionRequest?.parent === parent) activeQuestionRequest = null;
+    parent.resolve(result);
+    pumpQuestionQueue();
+  }
+
+  function pumpQuestionQueue() {
+    if (activeQuestionRequest || questionQueue.length === 0) return;
+    const next = questionQueue.shift();
+    activeQuestionRequest = next;
+    const requestId = createPendingId();
+    const timer = setTimeout(() => {
+      finishQuestionParent(next.parent, {
+        answers: next.parent.answers,
+        cancelled: true,
+        message: 'Question timed out',
+      });
+    }, 300000);
+    timer.unref?.();
+    pendingUserQuestions.set(requestId, {
+      parent: next.parent,
+      question: next.question,
+      timer,
+      sessionId: next.sessionId,
+    });
+    emitSafe(next.emit, askUserQuestionEvent(next.sessionId, {
+      questionId: requestId,
+      question: next.question.question,
+      options: next.question.options,
+      context: next.question.context,
+    }));
+  }
+
+  function requestUserQuestionFromRenderer(emit, input, options, sessionId) {
+    const questions = normalizeQuestionItems(input);
+    if (questions.length === 0) {
+      return Promise.resolve({ cancelled: true, message: 'No valid question was provided' });
+    }
+
+    return new Promise((resolve) => {
+      const parent = {
+        resolve,
+        answers: {},
+        remaining: questions.length,
+        settled: false,
+        sessionId,
+      };
+      questionParents.add(parent);
+      for (const question of questions) {
+        questionQueue.push({ emit, options, parent, question, sessionId });
+      }
+      pumpQuestionQueue();
+    });
+  }
+
+  function resolveUserQuestion(questionId, response = {}) {
+    const pending = pendingUserQuestions.get(questionId);
+    if (!pending) return;
+    pendingUserQuestions.delete(questionId);
+    clearTimeout(pending.timer);
+    const answer = typeof response.answer === 'string'
+      ? response.answer.trim()
+      : typeof response.selectedOption === 'string'
+        ? response.selectedOption.trim()
+        : '';
+    if (!answer) {
+      finishQuestionParent(pending.parent, {
+        answers: pending.parent.answers,
+        cancelled: true,
+        message: 'Question was not answered',
+      });
+      return;
+    }
+
+    pending.parent.answers[pending.question.question] = answer;
+    pending.parent.remaining -= 1;
+    activeQuestionRequest = null;
+    if (pending.parent.remaining <= 0) {
+      finishQuestionParent(pending.parent, { answers: pending.parent.answers });
+      return;
+    }
+    pumpQuestionQueue();
+  }
+
+  function cancelQuestionParents(sessionId, message = 'Request aborted') {
+    for (const parent of [...questionParents]) {
+      if (sessionId && parent.sessionId !== sessionId) continue;
+      finishQuestionParent(parent, {
+        answers: parent.answers,
+        cancelled: true,
+        message,
+      });
+    }
   }
 
   async function loadMessages(sessionId) {
@@ -187,6 +370,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         prompt,
         options: queryOpts,
         onPermissionRequest: (request) => canUseTool(request.toolName, request.input, request.options),
+        onPlanApproval: (request) => requestPlanApprovalFromRenderer(emit, request, querySessionId),
       });
 
       const assistantTurn = createAssistantTurn();
@@ -304,6 +488,14 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
             });
             break;
 
+          case 'mode_changed':
+            emitSafe(emit, modeChangedEvent(
+              event.sessionId || querySessionId,
+              event.mode,
+              event.source,
+            ));
+            break;
+
           default:
             if (event.type && event.type !== 'system') {
               emitSafe(emit, { type: 'sdk_event', sdkType: event.type, sessionId: event.session_id || querySessionId });
@@ -404,20 +596,38 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       }
 
       case 'plan_approval_response': {
-        const pending = pendingPlanApprovals.get(message.planId);
-        if (pending) {
-          pendingPlanApprovals.delete(message.planId);
-          pending.resolve({ approved: message.approved, feedback: message.feedback });
+        resolvePlanApproval(message.requestId, {
+          approved: message.approved === true,
+          targetMode: message.targetMode,
+          feedback: message.feedback,
+        });
+        break;
+      }
+
+      case 'set_permission_mode': {
+        const sessionId = message.sessionId || currentSessionId;
+        let result;
+        try {
+          result = typeof runtime.setPermissionMode === 'function'
+            ? await runtime.setPermissionMode({ sessionId, mode: message.mode })
+            : { mode: message.mode, applied: false, requiresRestart: message.mode === 'bypassPermissions' };
+        } catch (error) {
+          emitSafe(emit, { type: 'error', sessionId, message: normalizeError(error) });
+          break;
         }
+        emitSafe(emit, modeChangedEvent(
+          sessionId,
+          result.mode,
+          result.requiresRestart ? 'manual_requires_restart' : 'manual',
+        ));
         break;
       }
 
       case 'ask_user_question_response': {
-        const pending = pendingUserQuestions.get(message.questionId);
-        if (pending) {
-          pendingUserQuestions.delete(message.questionId);
-          pending.resolve({ answer: message.answer, selectedOption: message.selectedOption });
-        }
+        resolveUserQuestion(message.questionId, {
+          answer: message.answer,
+          selectedOption: message.selectedOption,
+        });
         break;
       }
 
@@ -456,8 +666,8 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     ownedQueries.clear();
     latestRequestBySession.clear();
     pendingPermissions.clear();
-    pendingPlanApprovals.clear();
-    pendingUserQuestions.clear();
+    cancelPlanApprovals();
+    cancelQuestionParents();
   }
 
   // A persistent SDK runtime keeps the provider environment it was created

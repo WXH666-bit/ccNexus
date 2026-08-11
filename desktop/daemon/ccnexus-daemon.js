@@ -1,5 +1,10 @@
 import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
+import {
+  createPreToolUseHook,
+  normalizePermissionMode,
+} from './permissionMode.js';
 
 const require = createRequire(import.meta.url);
 const { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');
@@ -9,6 +14,8 @@ let activeQuery = null;
 let runtime = null;
 let permissionRequestCounter = 0;
 const pendingPermissions = new Map();
+const pendingPlanApprovals = new Map();
+const modeState = { current: 'default' };
 
 class AsyncStream {
   constructor() {
@@ -138,6 +145,47 @@ async function canUseTool(toolName, input, options) {
   });
 }
 
+function settlePlanApproval(requestId, decision) {
+  const pending = pendingPlanApprovals.get(requestId);
+  if (!pending) return false;
+  pendingPlanApprovals.delete(requestId);
+  clearTimeout(pending.timer);
+  pending.resolve(decision);
+  return true;
+}
+
+function settleAllPlanApprovals(message = 'Request aborted') {
+  for (const requestId of pendingPlanApprovals.keys()) {
+    settlePlanApproval(requestId, { approved: false, feedback: message });
+  }
+}
+
+function requestPlanApproval(request = {}) {
+  const requestId = `plan-${activeRequestId || 'idle'}-${randomUUID()}`;
+  const payload = {
+    requestId,
+    toolName: request.toolName || 'ExitPlanMode',
+    plan: typeof request.plan === 'string' ? request.plan : '',
+    allowedPrompts: Array.isArray(request.allowedPrompts) ? request.allowedPrompts : [],
+  };
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      settlePlanApproval(requestId, {
+        approved: false,
+        feedback: 'Plan approval timed out',
+      });
+    }, 300000);
+    timer.unref?.();
+    pendingPlanApprovals.set(requestId, { resolve, timer });
+    writeRawLine({
+      id: activeRequestId,
+      type: 'plan_approval',
+      ...payload,
+    });
+  });
+}
+
 function runtimeSignature(options = {}) {
   const settingsEnv = options.settings?.env || {};
   const modelEnv = options.env || {};
@@ -187,6 +235,7 @@ function touchRuntime(currentRuntime) {
 
 function disposeRuntime(targetRuntime = runtime) {
   if (!targetRuntime || targetRuntime.closed) return;
+  settleAllPlanApprovals('Runtime closed');
   targetRuntime.closed = true;
   targetRuntime.activeTurnCount = 0;
   try { targetRuntime.turnSink?.fail?.(new Error('Runtime closed')); } catch { /* ignore */ }
@@ -204,12 +253,8 @@ function closeRuntime() {
 async function applyDynamicControls(currentRuntime, options = {}) {
   if (!currentRuntime || currentRuntime.closed) return;
 
-  const targetPermissionMode = options.permissionMode || 'default';
-  if (currentRuntime.currentPermissionMode !== targetPermissionMode
-      && typeof currentRuntime.query?.setPermissionMode === 'function') {
-    await currentRuntime.query.setPermissionMode(targetPermissionMode);
-    currentRuntime.currentPermissionMode = targetPermissionMode;
-  }
+  const targetPermissionMode = normalizePermissionMode(options.permissionMode || 'default');
+  await setRuntimePermissionMode(currentRuntime, targetPermissionMode);
 
   const targetModel = options.model || null;
   if (currentRuntime.currentModel !== targetModel
@@ -224,6 +269,28 @@ async function applyDynamicControls(currentRuntime, options = {}) {
     await currentRuntime.query.setMaxThinkingTokens(targetMaxThinkingTokens);
     currentRuntime.currentMaxThinkingTokens = targetMaxThinkingTokens;
   }
+}
+
+async function setRuntimePermissionMode(targetRuntime, mode) {
+  const targetPermissionMode = normalizePermissionMode(mode);
+  if (targetPermissionMode === 'bypassPermissions') {
+    throw new Error('Full access mode requires a runtime restart');
+  }
+
+  if (!targetRuntime || targetRuntime.closed) {
+    modeState.current = targetPermissionMode;
+    return targetPermissionMode;
+  }
+
+  if (targetRuntime.currentPermissionMode !== targetPermissionMode) {
+    if (typeof targetRuntime.query?.setPermissionMode !== 'function') {
+      throw new Error('Claude runtime does not support live permission mode changes');
+    }
+    await targetRuntime.query.setPermissionMode(targetPermissionMode);
+  }
+  targetRuntime.currentPermissionMode = targetPermissionMode;
+  modeState.current = targetPermissionMode;
+  return targetPermissionMode;
 }
 
 function startPerpetualReader(currentRuntime) {
@@ -276,10 +343,32 @@ async function ensureRuntime(options = {}) {
   }
 
   const inputStream = new AsyncStream();
+  const initialPermissionMode = normalizePermissionMode(options.permissionMode || 'default');
+  modeState.current = initialPermissionMode;
+  const planHook = createPreToolUseHook({
+    modeState,
+    requestPlanApproval,
+    applyMode: async (mode, source) => {
+      await setRuntimePermissionMode(runtime, mode);
+      writeRawLine({
+        id: activeRequestId,
+        type: 'mode_changed',
+        mode: normalizePermissionMode(mode),
+        source,
+      });
+    },
+  });
   const query = sdkQuery({
     prompt: inputStream,
     options: {
       ...options,
+      hooks: {
+        ...(options.hooks || {}),
+        PreToolUse: [
+          ...(Array.isArray(options.hooks?.PreToolUse) ? options.hooks.PreToolUse : []),
+          { hooks: [planHook] },
+        ],
+      },
       canUseTool,
     },
   });
@@ -289,7 +378,7 @@ async function ensureRuntime(options = {}) {
     query,
     signature,
     sessionId: options.resume || '',
-    currentPermissionMode: options.permissionMode || 'default',
+    currentPermissionMode: initialPermissionMode,
     currentModel: options.model || null,
     currentMaxThinkingTokens: options.maxThinkingTokens ?? null,
     createdAt: Date.now(),
@@ -398,6 +487,43 @@ async function runContextUsage(id, params = {}) {
   }
 }
 
+async function runSetPermissionMode(id, params = {}) {
+  const mode = normalizePermissionMode(params.mode);
+  if (mode === 'bypassPermissions') {
+    reply(id, {
+      result: {
+        mode,
+        applied: false,
+        requiresRestart: true,
+      },
+    });
+    return;
+  }
+
+  try {
+    const applied = Boolean(runtime && !runtime.closed);
+    if (applied) {
+      await setRuntimePermissionMode(runtime, mode);
+    } else {
+      modeState.current = mode;
+    }
+    reply(id, {
+      result: {
+        mode,
+        applied,
+        requiresRestart: false,
+      },
+    });
+  } catch (err) {
+    writeRawLine({
+      id,
+      done: true,
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 sendDaemonEvent('starting');
 sendDaemonEvent('ready');
 
@@ -419,6 +545,16 @@ rl.on('line', (line) => {
       pendingPermissions.delete(requestId);
       resolve(decision || { behavior: 'deny', message: 'No permission decision received' });
     }
+    return;
+  }
+
+  if (method === 'plan_approval_response') {
+    const { requestId, approved, targetMode, feedback } = command.params || {};
+    settlePlanApproval(requestId, {
+      approved: approved === true,
+      targetMode,
+      feedback,
+    });
     return;
   }
 
@@ -444,6 +580,7 @@ rl.on('line', (line) => {
       pendingPermissions.delete(requestId);
       resolve({ behavior: 'deny', message: 'Request aborted' });
     }
+    settleAllPlanApprovals('Request aborted');
     try { activeQuery?.interrupt?.(); } catch { /* ignore */ }
     closeRuntime();
     activeRequestId = null;
@@ -452,6 +589,7 @@ rl.on('line', (line) => {
   }
 
   if (method === 'shutdown') {
+    settleAllPlanApprovals('Daemon shutting down');
     try { activeQuery?.interrupt?.(); } catch { /* ignore */ }
     closeRuntime();
     reply(id, { result: 'bye' });
@@ -461,6 +599,11 @@ rl.on('line', (line) => {
 
   if (method === 'query') {
     runQuery(id, command.params);
+    return;
+  }
+
+  if (method === 'set_permission_mode') {
+    runSetPermissionMode(id, command.params);
     return;
   }
 

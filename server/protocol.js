@@ -34,3 +34,28 @@ export function permissionRequestEvent({ requestId, toolName, input, title, disp
   if (sessionId !== undefined) event.sessionId = sessionId;
   return event;
 }
+
+export function planApprovalEvent(sessionId, request = {}) {
+  return {
+    type: 'plan_approval',
+    sessionId,
+    ...request,
+  };
+}
+
+export function askUserQuestionEvent(sessionId, request = {}) {
+  return {
+    type: 'ask_user_question',
+    sessionId,
+    ...request,
+  };
+}
+
+export function modeChangedEvent(sessionId, mode, source) {
+  return {
+    type: 'mode_changed',
+    sessionId,
+    mode,
+    source,
+  };
+}

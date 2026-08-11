@@ -17,3 +17,5 @@ export interface InboundMessageQueue<TMessage = unknown> {
 }
 
 export function createInboundMessageQueue<TMessage = unknown>(): InboundMessageQueue<TMessage>;
+
+export function isPriorityDesktopMessage(message: { type?: string } | null | undefined): boolean;

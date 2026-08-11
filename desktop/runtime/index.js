@@ -59,7 +59,14 @@ export function createDesktopRuntime(options = {}) {
     return registry.adoptSessionDaemon({ fromSessionId, toSessionId, title });
   }
 
-  async function queryClaude({ sessionId, title, prompt, options: queryOptions = {}, onPermissionRequest }) {
+  async function queryClaude({
+    sessionId,
+    title,
+    prompt,
+    options: queryOptions = {},
+    onPermissionRequest,
+    onPlanApproval,
+  }) {
     const daemonSessionId = sessionId || `pending-${Date.now()}`;
     const daemon = ensureSessionDaemon({ sessionId: daemonSessionId, title });
     const bridge = daemon.bridge;
@@ -68,6 +75,7 @@ export function createDesktopRuntime(options = {}) {
       options: queryOptions,
     }, {
       onPermissionRequest,
+      onPlanApproval,
     });
 
     stream.daemonSessionId = daemonSessionId;
@@ -80,6 +88,18 @@ export function createDesktopRuntime(options = {}) {
     const daemon = ensureSessionDaemon({ sessionId: daemonSessionId, title });
     if (!daemon?.bridge) throw new Error('Unable to establish the Claude runtime');
     return daemon.bridge.getContextUsage(queryOptions);
+  }
+
+  async function setPermissionMode({ sessionId, mode } = {}) {
+    const bridge = sessionId ? bridges.get(sessionId) : null;
+    if (!bridge) {
+      return {
+        mode,
+        applied: false,
+        requiresRestart: mode === 'bypassPermissions',
+      };
+    }
+    return bridge.setPermissionMode(mode);
   }
 
   function removeSessionDaemon(sessionId) {
@@ -137,6 +157,7 @@ export function createDesktopRuntime(options = {}) {
     adoptSessionDaemon,
     queryClaude,
     getContextUsage,
+    setPermissionMode,
     removeSessionDaemon,
     registerChannel: (args) => registry.registerChannel(args),
     unregisterChannel: (args) => registry.unregisterChannel(args),

@@ -150,7 +150,12 @@ export default function ChatView() {
   const setMode = useCallback((nextMode: PermissionMode) => {
     setModeState(nextMode);
     localStorage.setItem('chatMode', nextMode);
-  }, []);
+    send({
+      type: 'set_permission_mode',
+      sessionId: currentSessionId,
+      mode: nextMode,
+    });
+  }, [currentSessionId, send]);
 
   const setModel = useCallback((nextModel: string) => {
     setModelState(nextModel);
@@ -322,8 +327,9 @@ export default function ChatView() {
     if (!planApproval) return;
     send({
       type: 'plan_approval_response',
-      planId: planApproval.plan_id,
+      requestId: planApproval.requestId,
       approved: true,
+      targetMode: 'auto',
     });
     setPlanApproval(null);
   }, [planApproval, send]);
@@ -332,7 +338,7 @@ export default function ChatView() {
     if (!planApproval) return;
     send({
       type: 'plan_approval_response',
-      planId: planApproval.plan_id,
+      requestId: planApproval.requestId,
       approved: false,
       feedback,
     });
@@ -768,12 +774,31 @@ export default function ChatView() {
 
       // P1 features
       case 'plan_approval': {
-        setPlanApproval(msg.plan);
+        setPlanApproval({
+          requestId: msg.requestId,
+          toolName: msg.toolName,
+          plan: msg.plan,
+          allowedPrompts: msg.allowedPrompts,
+        });
+        break;
+      }
+
+      case 'mode_changed': {
+        if (isPermissionMode(msg.mode)) {
+          setModeState(msg.mode);
+          localStorage.setItem('chatMode', msg.mode);
+        }
         break;
       }
 
       case 'ask_user_question': {
-        setAskQuestion(msg.question);
+        setAskQuestion({
+          question_id: msg.questionId,
+          question: msg.question,
+          options: msg.options,
+          context: msg.context,
+          tool_use_id: msg.toolUseId,
+        });
         break;
       }
 

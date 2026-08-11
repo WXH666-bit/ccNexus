@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   assistantEvent,
+  askUserQuestionEvent,
+  modeChangedEvent,
+  planApprovalEvent,
   permissionRequestEvent,
   sessionEvent,
   streamEvent,
@@ -71,5 +74,42 @@ test('sessionEvent and streamEvent preserve camel-case session ids', () => {
   assert.equal(sessionEvent('s1').sessionId, 's1');
   assert.deepEqual(streamEvent({ type: 'content_block_delta' }, 's1', 'u1'), {
     type: 'stream_event', event: { type: 'content_block_delta' }, sessionId: 's1', uuid: 'u1',
+  });
+});
+
+test('plan approval and mode changes use stable renderer event shapes', () => {
+  assert.deepEqual(planApprovalEvent('s1', {
+    requestId: 'plan-1',
+    toolName: 'ExitPlanMode',
+    plan: '# Plan',
+    allowedPrompts: [],
+  }), {
+    type: 'plan_approval',
+    sessionId: 's1',
+    requestId: 'plan-1',
+    toolName: 'ExitPlanMode',
+    plan: '# Plan',
+    allowedPrompts: [],
+  });
+
+  assert.deepEqual(modeChangedEvent('s1', 'auto', 'exit_plan_mode'), {
+    type: 'mode_changed',
+    sessionId: 's1',
+    mode: 'auto',
+    source: 'exit_plan_mode',
+  });
+});
+
+test('user question events carry one FIFO dialog request at a time', () => {
+  assert.deepEqual(askUserQuestionEvent('s1', {
+    questionId: 'q1',
+    question: 'Which option?',
+    options: ['A', 'B'],
+  }), {
+    type: 'ask_user_question',
+    sessionId: 's1',
+    questionId: 'q1',
+    question: 'Which option?',
+    options: ['A', 'B'],
   });
 });

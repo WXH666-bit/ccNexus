@@ -147,8 +147,24 @@ export type DesktopChatEvent =
   | { type: 'session_renamed'; session_id: string; title: string }
   | { type: 'session_favorite_changed'; sessionId: string; isFavorite: boolean; favoritedAt?: number }
   | { type: 'rewind_complete'; sessionId?: string; messages: ChatMessage[] }
-  | { type: 'plan_approval'; sessionId?: string; plan: PlanApprovalRequest }
-  | { type: 'ask_user_question'; sessionId?: string; question: AskUserQuestionRequest }
+  | {
+      type: 'plan_approval';
+      sessionId?: string;
+      requestId: string;
+      toolName: string;
+      plan: string;
+      allowedPrompts: { tool: string; prompt: string }[];
+    }
+  | { type: 'mode_changed'; sessionId?: string; mode: PermissionMode; source?: string }
+  | {
+      type: 'ask_user_question';
+      sessionId?: string;
+      questionId: string;
+      question: string;
+      options?: string[];
+      context?: string;
+      toolUseId?: string;
+    }
   | { type: 'subagent_update'; sessionId?: string; agents: SubAgentInfo[] }
   | { type: 'undo_complete'; sessionId?: string; success: boolean; filePath?: string; error?: string };
 
@@ -271,9 +287,14 @@ export interface AgentGroupData {
 
 // ─── Plan Approval ───────────────────────────────────────────────
 export interface PlanApprovalRequest {
-  plan_id: string;
-  title: string;
-  steps: string[];
+  requestId: string;
+  toolName?: string;
+  plan: string;
+  allowedPrompts: { tool: string; prompt: string }[];
+  // Kept optional for session history produced by the older renderer contract.
+  plan_id?: string;
+  title?: string;
+  steps?: string[];
   summary?: string;
 }
 

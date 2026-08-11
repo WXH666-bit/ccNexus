@@ -56,3 +56,22 @@ export function createInboundMessageQueue() {
     },
   };
 }
+
+const PRIORITY_DESKTOP_MESSAGE_TYPES = new Set([
+  'session',
+  'assistant',
+  'result',
+  'status',
+  'error',
+  'permission_request',
+  'plan_approval',
+  'ask_user_question',
+  'mode_changed',
+  'tool_result',
+  'rewind_complete',
+  'undo_complete',
+]);
+
+export function isPriorityDesktopMessage(message) {
+  return PRIORITY_DESKTOP_MESSAGE_TYPES.has(message?.type);
+}

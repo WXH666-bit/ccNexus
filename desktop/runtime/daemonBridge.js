@@ -273,6 +273,32 @@ export class DaemonBridge extends EventEmitter {
         return;
       }
 
+      if (message.type === 'plan_approval') {
+        Promise.resolve(options.onPlanApproval?.(message))
+          .then((decision) => {
+            this.writeCommand({
+              method: 'plan_approval_response',
+              params: {
+                requestId: message.requestId,
+                approved: decision?.approved === true,
+                targetMode: decision?.targetMode,
+                feedback: decision?.feedback,
+              },
+            });
+          })
+          .catch((err) => {
+            this.writeCommand({
+              method: 'plan_approval_response',
+              params: {
+                requestId: message.requestId,
+                approved: false,
+                feedback: err instanceof Error ? err.message : String(err),
+              },
+            });
+          });
+        return;
+      }
+
       if (message.done) {
         finish(message.success === false ? new Error(message.error || 'Daemon command failed') : null);
         return;
@@ -324,6 +350,15 @@ export class DaemonBridge extends EventEmitter {
     const response = messages[messages.length - 1];
     if (!response || response.result === undefined) {
       throw new Error('Context usage response was empty');
+    }
+    return response.result;
+  }
+
+  async setPermissionMode(mode) {
+    const messages = await this.sendCommand('set_permission_mode', { mode }, { countsAsActive: false });
+    const response = messages[messages.length - 1];
+    if (!response || response.result === undefined) {
+      throw new Error('Permission mode response was empty');
     }
     return response.result;
   }

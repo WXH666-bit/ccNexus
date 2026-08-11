@@ -11,6 +11,8 @@ interface Props {
 export default function PlanApprovalDialog({ plan, onApprove, onReject }: Props) {
   const [feedback, setFeedback] = useState('');
   const [showFeedback, setShowFeedback] = useState(false);
+  const legacySteps = plan.steps || [];
+  const planText = plan.plan.trim();
 
   return (
     <div className="permission-overlay">
@@ -21,14 +23,28 @@ export default function PlanApprovalDialog({ plan, onApprove, onReject }: Props)
         </div>
         <div className="plan-body">
           {plan.summary && <p className="plan-summary">{plan.summary}</p>}
-          <div className="plan-steps">
-            {plan.steps.map((step, i) => (
-              <div key={i} className="plan-step">
-                <span className="plan-step-num">{i + 1}</span>
-                <span className="plan-step-text">{step}</span>
-              </div>
-            ))}
-          </div>
+          {planText && <pre className="plan-markdown">{planText}</pre>}
+          {legacySteps.length > 0 && (
+            <div className="plan-steps">
+              {legacySteps.map((step, i) => (
+                <div key={i} className="plan-step">
+                  <span className="plan-step-num">{i + 1}</span>
+                  <span className="plan-step-text">{step}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {plan.allowedPrompts.length > 0 && (
+            <div className="plan-allowed-prompts">
+              <div className="plan-allowed-prompts-title">允许的操作</div>
+              {plan.allowedPrompts.map((item, index) => (
+                <div className="plan-allowed-prompt" key={`${item.tool}-${index}`}>
+                  <code>{item.tool}</code>
+                  <span>{item.prompt}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {showFeedback && (
             <div className="plan-feedback">
               <textarea

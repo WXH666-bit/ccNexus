@@ -54,3 +54,28 @@ test('deny stays a one-time denial and does not poison future checks', async () 
   assert.deepEqual(await policy.canUseTool('Bash', { command: 'rm file' }), { behavior: 'deny', message: 'No' });
   assert.deepEqual(await policy.canUseTool('Bash', { command: 'echo ok' }), { behavior: 'allow' });
 });
+
+test('AskUserQuestion blocks on the renderer and returns answers as updated input', async () => {
+  let asked = 0;
+  const policy = createPermissionPolicy({
+    askUser: async () => {
+      throw new Error('AskUserQuestion must not use the generic permission dialog');
+    },
+    askQuestion: async (input) => {
+      asked += 1;
+      assert.equal(input.questions[0].question, 'Which option?');
+      return { answers: { 'Which option?': 'A' } };
+    },
+  });
+
+  assert.deepEqual(await policy.canUseTool('AskUserQuestion', {
+    questions: [{ question: 'Which option?', options: [{ label: 'A' }, { label: 'B' }] }],
+  }), {
+    behavior: 'allow',
+    updatedInput: {
+      questions: [{ question: 'Which option?', options: [{ label: 'A' }, { label: 'B' }] }],
+      answers: { 'Which option?': 'A' },
+    },
+  });
+  assert.equal(asked, 1);
+});

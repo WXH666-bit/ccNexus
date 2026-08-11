@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInboundMessageQueue, createOutboundMessageQueue } from '../src/hooks/desktopMessageQueue.js';
+import {
+  createInboundMessageQueue,
+  createOutboundMessageQueue,
+  isPriorityDesktopMessage,
+} from '../src/hooks/desktopMessageQueue.js';
 
 test('queues commands sent before the desktop event channel is ready and flushes them in order', () => {
   const delivered = [];
@@ -47,4 +51,14 @@ test('keeps rapid incoming desktop events in order until the view consumes them'
     nextCursor: 3,
   });
   assert.deepEqual(queue.consumeFrom(3), { messages: [], nextCursor: 3 });
+});
+
+test('marks terminal and blocking events as priority while coalescing stream deltas', () => {
+  assert.equal(isPriorityDesktopMessage({ type: 'stream_event' }), false);
+  assert.equal(isPriorityDesktopMessage({ type: 'tool_progress' }), false);
+  assert.equal(isPriorityDesktopMessage({ type: 'assistant' }), true);
+  assert.equal(isPriorityDesktopMessage({ type: 'result' }), true);
+  assert.equal(isPriorityDesktopMessage({ type: 'permission_request' }), true);
+  assert.equal(isPriorityDesktopMessage({ type: 'plan_approval' }), true);
+  assert.equal(isPriorityDesktopMessage({ type: 'ask_user_question' }), true);
 });

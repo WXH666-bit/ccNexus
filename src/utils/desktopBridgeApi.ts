@@ -137,8 +137,8 @@ export async function getMcpServerForEdit(server: { id: string; scope: 'global' 
 
 export async function getSkills() {
   return await requireDesktopApi().getSkills() as {
-    global: Record<string, { id: string; skillName?: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
-    local: Record<string, { id: string; skillName?: string; name: string; type: string; scope: string; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
+    global: Record<string, { id: string; skillName?: string; name: string; type: string; scope: 'global'; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
+    local: Record<string, { id: string; skillName?: string; name: string; type: string; scope: 'local'; path: string; enabled: boolean; description?: string; modifiedAt?: string }>;
   };
 }
 
