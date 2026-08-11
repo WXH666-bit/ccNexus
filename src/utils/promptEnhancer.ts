@@ -5,6 +5,8 @@ export interface PromptEnhancerRule {
   enabled?: boolean;
 }
 
+import { createLocalPromptEnhancement } from './promptEnhancerCore.js';
+
 function readRules(): { enabled: boolean; rules: PromptEnhancerRule[] } {
   if (typeof window === 'undefined') return { enabled: false, rules: [] };
   const enabled = window.localStorage.getItem('promptEnhancerEnabled') === 'true';
@@ -30,14 +32,18 @@ function readRules(): { enabled: boolean; rules: PromptEnhancerRule[] } {
 export function enhancePromptText(text: string): string {
   const config = readRules();
   if (!config.enabled || !text) return text;
+  return createLocalPromptEnhancement(text, config.rules);
+}
 
-  return config.rules.reduce((current, rule) => {
-    if (rule.enabled === false || !rule.pattern) return current;
-    try {
-      return current.replace(new RegExp(rule.pattern, 'g'), rule.replacement);
-    } catch {
-      // An unfinished rule must not prevent sending the user's prompt.
-      return current;
-    }
-  }, text);
+export function createPromptEnhancementPreview(text: string): {
+  originalText: string;
+  localResult: string;
+  changed: boolean;
+} {
+  const localResult = enhancePromptText(text);
+  return {
+    originalText: text,
+    localResult,
+    changed: localResult !== text,
+  };
 }
