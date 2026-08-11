@@ -17,14 +17,15 @@ export default function EditToolBlock({ block, result }: Props) {
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
 
   const diffStats = useMemo(() => computeDiffStats(oldStr, newStr), [oldStr, newStr]);
+  const hasBody = Boolean(oldStr || newStr);
   const diffPreview = useMemo(
-    () => expanded && (oldStr || newStr) ? computeDiff(oldStr, newStr) : null,
+    () => expanded && hasBody ? computeDiff(oldStr, newStr) : null,
     [expanded, oldStr, newStr],
   );
 
   return (
     <div className="tool-block edit-block">
-      <div className="tool-block-header" onClick={() => setExpanded(!expanded)}>
+      <div className="tool-block-header" onClick={() => hasBody && setExpanded(!expanded)}>
         <span className="tool-icon"><Pencil size={14} /></span>
         <span className="tool-label">编辑文件</span>
         <span className="file-link">{filePath}</span>
@@ -35,15 +36,20 @@ export default function EditToolBlock({ block, result }: Props) {
           </span>
         )}
         <span className={`status-dot ${statusClass}`} />
-        <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+        {hasBody && <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>}
       </div>
-      {expanded && diffPreview && (
-        <div className="tool-block-body">
-          {diffPreview.truncated ? (
-            <div className="diff-preview-summary">Diff is too large to render here; open the file to inspect the full change.</div>
-          ) : (
-            <div className="diff-view" dangerouslySetInnerHTML={{ __html: diffPreview.html }} />
-          )}
+      {hasBody && (
+        <div
+          className={`tool-block-body ${expanded ? 'is-open' : ''}`}
+          aria-hidden={!expanded}
+        >
+          <div className="tool-block-body-inner">
+            {diffPreview && (diffPreview.truncated ? (
+              <div className="diff-preview-summary">Diff is too large to render here; open the file to inspect the full change.</div>
+            ) : (
+              <div className="diff-view" dangerouslySetInnerHTML={{ __html: diffPreview.html }} />
+            ))}
+          </div>
         </div>
       )}
     </div>

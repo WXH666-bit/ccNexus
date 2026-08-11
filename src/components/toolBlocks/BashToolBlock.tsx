@@ -54,12 +54,15 @@ export default function BashToolBlock({ block, result }: Props) {
         <span className="tool-summary" title={commandSummary}>{commandSummary}</span>
         <span className={`status-dot ${statusClass}`} />
       </div>
-      {expanded && (
-        <div className="tool-block-body">
+      <div
+        className={`tool-block-body ${expanded ? 'is-open' : ''}`}
+        aria-hidden={!expanded}
+      >
+        <div className="tool-block-body-inner">
           <pre className="command-text">{command}</pre>
           {output && <pre className={`command-output ${result?.is_error ? 'error' : ''}`}>{output}</pre>}
         </div>
-      )}
+      </div>
     </div>
   );
 }

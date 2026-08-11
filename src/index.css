@@ -7333,6 +7333,55 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
+/* Stable tool card sizing and expansion */
+.assistant-row .message-content {
+  width: min(900px, 100%);
+  max-width: min(900px, 100%);
+  min-width: 0;
+}
+
+.assistant-row .message-content > .tool-block,
+.assistant-row .message-content > .tool-group-block,
+.assistant-row .message-content > .agent-group-block {
+  width: 100%;
+  max-width: 100%;
+}
+
+.tool-block .tool-block-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  padding: 0;
+  border-top-color: transparent;
+  opacity: 0;
+  overflow: hidden;
+  transition: grid-template-rows 180ms ease, padding 180ms ease, border-color 180ms ease, opacity 140ms ease;
+}
+
+.tool-block .tool-block-body.is-open {
+  grid-template-rows: 1fr;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color);
+  opacity: 1;
+}
+
+.tool-block-body-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bash-block .tool-block-body {
+  margin-left: 18px;
+  padding: 0;
+  border-top: 0;
+  border-left-color: transparent;
+}
+
+.bash-block .tool-block-body.is-open {
+  padding: 10px 0 0 16px;
+  border-top: 0;
+  border-left-color: var(--border-color);
+}
+
 /* Compact assistant response rhythm */
 .assistant-row + .assistant-row {
   /* Streaming assistant chunks are separate rows, but should read as one response. */

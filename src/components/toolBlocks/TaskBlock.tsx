@@ -45,8 +45,11 @@ export default function TaskBlock({ block, result }: Props) {
         <span className="task-desc">{description.slice(0, 80)}{description.length > 80 ? '...' : ''}</span>
         <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
-      {expanded && (
-        <div className="tool-block-body">
+      <div
+        className={`tool-block-body ${expanded ? 'is-open' : ''}`}
+        aria-hidden={!expanded}
+      >
+        <div className="tool-block-body-inner">
           <div className="task-details">
             <div className="task-detail-row">
               <span className="task-detail-label">Description:</span>
@@ -70,7 +73,7 @@ export default function TaskBlock({ block, result }: Props) {
             )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

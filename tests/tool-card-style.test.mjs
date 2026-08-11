@@ -18,6 +18,18 @@ test('tool cards share one header height and truncate long labels', () => {
   assert.ok(css.includes('white-space: nowrap;'));
 });
 
+test('tool cards keep a stable width and animate their bodies in place', () => {
+  assert.ok(css.includes('/* Stable tool card sizing and expansion */'));
+  assert.ok(css.includes(
+    '.assistant-row .message-content {\n  width: min(900px, 100%);',
+  ));
+  assert.ok(css.includes(
+    '.assistant-row .message-content > .tool-block,\n.assistant-row .message-content > .tool-group-block,\n.assistant-row .message-content > .agent-group-block {\n  width: 100%;',
+  ));
+  assert.ok(css.includes('grid-template-rows: 0fr;'));
+  assert.ok(css.includes('grid-template-rows: 1fr;'));
+});
+
 test('the titlebar logo has enough visual weight', () => {
   const logoRuleStart = css.lastIndexOf('.window-title-logo');
   assert.notEqual(logoRuleStart, -1);

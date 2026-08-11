@@ -8,7 +8,8 @@ const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8'
 test('Bash tool block is collapsible from its header like other tool blocks', () => {
   assert.match(source, /useState/);
   assert.match(source, /onClick=\{\(\) => setExpanded\(prev => !prev\)\}/);
-  assert.match(source, /\{expanded && \(/);
+  assert.match(source, /className=\{`tool-block-body \$\{expanded \? 'is-open' : ''\}`\}/);
+  assert.match(source, /tool-block-body-inner/);
 });
 
 test('Bash header mirrors ccgui by showing the run-command label and command description', () => {

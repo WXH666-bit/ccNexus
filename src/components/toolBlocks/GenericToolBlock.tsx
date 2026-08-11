@@ -104,20 +104,25 @@ export default function GenericToolBlock({ block, result }: Props) {
         <span className={`status-dot ${statusClass}`} />
         {hasBody && <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>}
       </div>
-      {expanded && hasBody && (
-        <div className="tool-block-body">
-          {otherParams.map(([key, value]) => (
-            <div className="task-field" key={key}>
-              <div className="task-field-label">{key}</div>
-              <pre className="task-field-content">{formatParamValueCapped(value)}</pre>
-            </div>
-          ))}
-          {output && (
-            <div className="task-field">
-              <div className="task-field-label">Result</div>
-              <pre className="task-field-content">{output}</pre>
-            </div>
-          )}
+      {hasBody && (
+        <div
+          className={`tool-block-body ${expanded ? 'is-open' : ''}`}
+          aria-hidden={!expanded}
+        >
+          <div className="tool-block-body-inner">
+            {otherParams.map(([key, value]) => (
+              <div className="task-field" key={key}>
+                <div className="task-field-label">{key}</div>
+                <pre className="task-field-content">{formatParamValueCapped(value)}</pre>
+              </div>
+            ))}
+            {output && (
+              <div className="task-field">
+                <div className="task-field-label">Result</div>
+                <pre className="task-field-content">{output}</pre>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
