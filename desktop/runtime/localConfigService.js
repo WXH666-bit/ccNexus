@@ -277,6 +277,106 @@ function frontmatterValue(content, key) {
   return line?.[1]?.trim().replace(/^['"]|['"]$/g, '') || '';
 }
 
+const MANAGED_AGENT_CONFIG_VERSION = 1;
+
+function emptyManagedAgentConfig() {
+  return {
+    version: MANAGED_AGENT_CONFIG_VERSION,
+    selectedAgentId: null,
+    agents: {},
+  };
+}
+
+function validateManagedAgentId(id) {
+  if (
+    typeof id !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)
+    || id.includes('..')
+  ) {
+    throw new Error('Invalid agent id');
+  }
+  return id;
+}
+
+function validateAgentLookupName(name) {
+  if (typeof name !== 'string' || !name.trim() || name === '.' || name === '..' || name.includes('/') || name.includes(String.fromCharCode(92))) {
+    throw new Error('Invalid agent name');
+  }
+  return name.trim();
+}
+
+function cloneJsonValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function createManagedAgentId(name) {
+  const candidate = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return candidate || `agent-${Date.now()}`;
+}
+
+function normalizeManagedAgentRecord(id, record = {}) {
+  const prompt = typeof record.prompt === 'string' ? record.prompt : '';
+  const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : id;
+  const description = typeof record.description === 'string' && record.description.trim()
+    ? record.description.trim()
+    : (prompt.split(String.fromCharCode(10), 1)[0].replace(String.fromCharCode(13), '').trim() || `Agent: ${name}`);
+  const normalized = {
+    name,
+    prompt,
+    description,
+  };
+  if (typeof record.createdAt === 'string' || typeof record.createdAt === 'number') {
+    normalized.createdAt = record.createdAt;
+  }
+  if (typeof record.updatedAt === 'string' || typeof record.updatedAt === 'number') {
+    normalized.updatedAt = record.updatedAt;
+  }
+  return normalized;
+}
+
+function normalizeManagedAgentConfig(value) {
+  const config = emptyManagedAgentConfig();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return config;
+
+  const agents = value.agents && typeof value.agents === 'object' && !Array.isArray(value.agents)
+    ? value.agents
+    : {};
+  for (const [id, record] of Object.entries(agents)) {
+    try {
+      validateManagedAgentId(id);
+      config.agents[id] = normalizeManagedAgentRecord(id, record && typeof record === 'object' ? record : {});
+    } catch {
+      // Ignore invalid records from a hand-edited or older export. They must
+      // never become a path or config traversal vector.
+    }
+  }
+
+  if (typeof value.selectedAgentId === 'string' && value.selectedAgentId.trim()) {
+    try {
+      config.selectedAgentId = validateAgentLookupName(value.selectedAgentId.trim());
+    } catch {
+      config.selectedAgentId = null;
+    }
+  }
+  return config;
+}
+
+function managedAgentView(id, record, file) {
+  const normalized = normalizeManagedAgentRecord(id, record);
+  return {
+    id,
+    ...normalized,
+    file,
+    source: 'ccnexus',
+    editable: true,
+  };
+}
+
 export class LocalConfigService {
   constructor({ homeDir = process.env.HOME || os.homedir() || '/tmp' } = {}) {
     this.homeDir = homeDir;
@@ -285,6 +385,7 @@ export class LocalConfigService {
     this.claudeSettingsPath = path.join(this.claudeDir, 'settings.json');
     this.codemossSkillsDir = path.join(homeDir, '.codemoss', 'skills');
     this.providerStatePath = path.join(homeDir, '.ccnexus', 'provider-state.json');
+    this.agentConfigPath = path.join(homeDir, '.ccnexus', 'agent.json');
     this.agentsDir = path.join(this.claudeDir, 'agents');
     this.commandsDir = path.join(this.claudeDir, 'commands');
     // Claude prompt files are read-only. Prompt edits belong to ccNexus-owned
@@ -793,13 +894,38 @@ export class LocalConfigService {
     return { success: true, path: target };
   }
 
+  async readManagedAgentConfig() {
+    try {
+      const config = await readJsonObject(this.agentConfigPath, { allowMissing: true });
+      return normalizeManagedAgentConfig(config);
+    } catch (error) {
+      try {
+        await fs.copyFile(this.agentConfigPath, this.agentConfigPath + '.bak');
+      } catch {
+        // A backup is best effort. The malformed file is never used as runtime input.
+      }
+      console.error('[Desktop Agents] Failed to read ccNexus agent config:', error.message);
+      return emptyManagedAgentConfig();
+    }
+  }
+
+  async writeManagedAgentConfig(config) {
+    const normalized = normalizeManagedAgentConfig(config);
+    await writeJsonAtomic(this.agentConfigPath, normalized);
+    return normalized;
+  }
+
   async listAgents(cwd) {
+    const managedConfig = await this.readManagedAgentConfig();
+    const byId = new Map();
+    for (const [id, record] of Object.entries(managedConfig.agents)) {
+      byId.set(id, managedAgentView(id, record, this.agentConfigPath));
+    }
     try {
       const directories = [
         { directory: path.join(normalizeCwd(cwd || process.cwd()), '.claude', 'agents'), source: 'project' },
         { directory: this.agentsDir, source: 'user' },
       ];
-      const byId = new Map();
       for (const { directory, source } of directories) {
         if (!existsSync(directory)) continue;
         const files = await fs.readdir(directory);
@@ -813,19 +939,38 @@ export class LocalConfigService {
           const description = frontmatterValue(content, 'description')
             || content.split('\n').slice(0, 10).find(line => /^description:/i.test(line))?.replace(/^description:\s*/i, '').trim()
             || `Agent: ${name}`;
-          byId.set(name, { id: name, name, description, file: filePath, source });
+          if (byId.get(name)?.source === 'ccnexus') continue;
+          byId.set(name, {
+            id: name,
+            name,
+            description,
+            file: filePath,
+            source: 'claude',
+            scope: source,
+            editable: false,
+          });
         }
       }
-      return { agents: [...byId.values()] };
+      return { agents: [...byId.values()], selectedAgentId: managedConfig.selectedAgentId };
     } catch (err) {
       console.error('[Desktop Agents] Failed to read agents:', err.message);
-      return { agents: [] };
+      return { agents: [...byId.values()], selectedAgentId: managedConfig.selectedAgentId };
     }
   }
 
   async getAgent(name, cwd) {
     if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\')) {
       throw new Error('Invalid agent name');
+    }
+    const agentName = name.trim();
+    const managedConfig = await this.readManagedAgentConfig();
+    if (Object.prototype.hasOwnProperty.call(managedConfig.agents, agentName)) {
+      const record = managedConfig.agents[agentName];
+      return {
+        ...managedAgentView(agentName, record, this.agentConfigPath),
+        name: record.name || agentName,
+        content: record.prompt || '',
+      };
     }
     const directories = [
       path.join(normalizeCwd(cwd || process.cwd()), '.claude', 'agents'),
@@ -838,12 +983,116 @@ export class LocalConfigService {
       if (!pathInside(resolvedDir, resolvedPath)) continue;
       try {
         const content = await fs.readFile(filePath, 'utf-8');
-        return { name, content, file: filePath };
+        return { id: agentName, name: agentName, content, file: filePath, source: 'claude', editable: false };
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
       }
     }
     throw new Error('Agent not found');
+  }
+
+  async saveAgent({ id, name, prompt, description } = {}) {
+    const agentName = typeof name === 'string' ? name.trim() : '';
+    if (!agentName) throw new Error('Agent name is required');
+    if (agentName.includes('\n') || agentName.includes('\r')) throw new Error('Agent name is invalid');
+    const agentId = id === undefined || id === null || String(id).trim() === ''
+      ? createManagedAgentId(agentName)
+      : validateManagedAgentId(String(id).trim());
+    validateManagedAgentId(agentId);
+
+    const config = await this.readManagedAgentConfig();
+    const existing = config.agents[agentId];
+    const now = new Date().toISOString();
+    const record = normalizeManagedAgentRecord(agentId, {
+      ...(existing || {}),
+      name: agentName,
+      prompt: typeof prompt === 'string' ? prompt : '',
+      ...(typeof description === 'string' ? { description } : {}),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    });
+    config.agents[agentId] = record;
+    await this.writeManagedAgentConfig(config);
+    return { success: true, agent: managedAgentView(agentId, record, this.agentConfigPath) };
+  }
+
+  async deleteAgent(id) {
+    const agentId = validateManagedAgentId(String(id || '').trim());
+    const config = await this.readManagedAgentConfig();
+    const existed = Object.prototype.hasOwnProperty.call(config.agents, agentId);
+    if (existed) delete config.agents[agentId];
+    if (config.selectedAgentId === agentId) config.selectedAgentId = null;
+    if (existed || config.selectedAgentId === null) await this.writeManagedAgentConfig(config);
+    return { success: true, deleted: existed, selectedAgentId: config.selectedAgentId };
+  }
+
+  async setSelectedAgent(id) {
+    const config = await this.readManagedAgentConfig();
+    const selectedAgentId = id === undefined || id === null || String(id).trim() === ''
+      ? null
+      : validateAgentLookupName(String(id).trim());
+    config.selectedAgentId = selectedAgentId;
+    await this.writeManagedAgentConfig(config);
+    return { success: true, selectedAgentId };
+  }
+
+  async exportAgents() {
+    const config = await this.readManagedAgentConfig();
+    return {
+      format: 'ccnexus-agents-export-v1',
+      version: MANAGED_AGENT_CONFIG_VERSION,
+      agents: cloneJsonValue(config.agents),
+    };
+  }
+
+  async importAgents({ agents: importedAgents = [], strategy = 'skip' } = {}) {
+    if (!['skip', 'overwrite', 'duplicate'].includes(strategy)) {
+      throw new Error('Invalid agent import strategy');
+    }
+    const entries = Array.isArray(importedAgents)
+      ? importedAgents.map(agent => [agent?.id, agent])
+      : Object.entries(importedAgents || {});
+    const config = await this.readManagedAgentConfig();
+    const now = new Date().toISOString();
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    let duplicated = 0;
+
+    for (const [entryId, entry] of entries) {
+      const source = entry && typeof entry === 'object' ? entry : {};
+      const rawId = source.id || entryId || createManagedAgentId(source.name);
+      const agentId = validateManagedAgentId(String(rawId).trim());
+      const exists = Object.prototype.hasOwnProperty.call(config.agents, agentId);
+      if (exists && strategy === 'skip') {
+        skipped += 1;
+        continue;
+      }
+
+      let targetId = agentId;
+      if (exists && strategy === 'duplicate') {
+        let suffix = 1;
+        targetId = agentId + '-copy';
+        while (Object.prototype.hasOwnProperty.call(config.agents, targetId)) {
+          suffix += 1;
+          targetId = agentId + '-copy-' + suffix;
+        }
+        duplicated += 1;
+      }
+
+      const previous = config.agents[targetId];
+      const record = normalizeManagedAgentRecord(targetId, {
+        ...source,
+        createdAt: previous?.createdAt || source.createdAt || now,
+        updatedAt: now,
+      });
+      config.agents[targetId] = record;
+      if (exists && strategy === 'overwrite') updated += 1;
+      else added += 1;
+    }
+
+    if (added || updated || duplicated) await this.writeManagedAgentConfig(config);
+    return { success: true, added, updated, skipped, duplicated, total: added + updated + duplicated };
   }
 
   async listCommands() {

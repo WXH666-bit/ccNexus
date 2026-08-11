@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -131,6 +131,95 @@ test('desktop local config service mirrors existing Claude-side readers without 
     await service.deletePrompt('new-prompt');
     assert.ok(!(await service.listPrompts()).prompts.some(prompt => prompt.name === 'new-prompt'));
     await assert.rejects(() => service.savePrompt({ name: '../bad', content: 'nope' }), /Invalid prompt name/);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('ccNexus managed agents support isolated CRUD and preserve native Claude agents', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-agent-store-'));
+  const projectCwd = path.join(homeDir, 'project');
+  const nativeDir = path.join(projectCwd, '.claude', 'agents');
+  const nativeFile = path.join(nativeDir, 'native.md');
+  const agentConfigPath = path.join(homeDir, '.ccnexus', 'agent.json');
+
+  try {
+    await mkdir(nativeDir, { recursive: true });
+    await writeFile(nativeFile, '---\ndescription: Native agent\n---\nNative body', 'utf8');
+
+    const service = new LocalConfigService({ homeDir });
+    const initial = await service.listAgents(projectCwd);
+    assert.equal(initial.selectedAgentId, null);
+    assert.deepEqual(initial.agents.map(({ id, name, source, editable, description }) => ({
+      id, name, source, editable, description,
+    })), [{
+      id: 'native',
+      name: 'native',
+      source: 'claude',
+      editable: false,
+      description: 'Native agent',
+    }]);
+
+    const saved = await service.saveAgent({ id: 'writer', name: 'Writer', prompt: 'Write carefully.' });
+    assert.equal(saved.success, true);
+    assert.equal(saved.agent.source, 'ccnexus');
+    assert.equal(saved.agent.editable, true);
+    assert.equal((await service.getAgent('writer', projectCwd)).content, 'Write carefully.');
+
+    const config = JSON.parse(await readFile(agentConfigPath, 'utf8'));
+    assert.equal(config.version, 1);
+    assert.equal(config.agents.writer.name, 'Writer');
+    assert.equal(config.agents.writer.prompt, 'Write carefully.');
+
+    await service.setSelectedAgent('writer');
+    assert.equal((await service.listAgents(projectCwd)).selectedAgentId, 'writer');
+    await service.saveAgent({ id: 'writer', name: 'Writer 2', prompt: 'Updated.' });
+    assert.equal((await service.getAgent('writer', projectCwd)).content, 'Updated.');
+
+    await service.deleteAgent('writer');
+    assert.equal((await service.listAgents(projectCwd)).selectedAgentId, null);
+    assert.equal(await readFile(nativeFile, 'utf8'), '---\ndescription: Native agent\n---\nNative body');
+    await assert.rejects(
+      () => service.saveAgent({ id: '../outside', name: 'Outside', prompt: 'Nope.' }),
+      /Invalid agent id/,
+    );
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('ccNexus managed agent imports apply skip, overwrite, and duplicate strategies', async () => {
+  const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-agent-import-'));
+
+  try {
+    const service = new LocalConfigService({ homeDir });
+    await service.saveAgent({ id: 'writer', name: 'Writer', prompt: 'Original.' });
+
+    await service.importAgents({
+      strategy: 'skip',
+      agents: [
+        { id: 'writer', name: 'Skipped Writer', prompt: 'Skipped.' },
+        { id: 'reviewer', name: 'Reviewer', prompt: 'Review.' },
+      ],
+    });
+    assert.equal((await service.getAgent('writer')).content, 'Original.');
+    assert.equal((await service.getAgent('reviewer')).content, 'Review.');
+
+    await service.importAgents({
+      strategy: 'overwrite',
+      agents: [{ id: 'writer', name: 'Updated Writer', prompt: 'Overwritten.' }],
+    });
+    assert.equal((await service.getAgent('writer')).content, 'Overwritten.');
+
+    await service.importAgents({
+      strategy: 'duplicate',
+      agents: [{ id: 'writer', name: 'Duplicate Writer', prompt: 'Duplicated.' }],
+    });
+    const exported = await service.exportAgents();
+    assert.equal(exported.version, 1);
+    assert.ok(Object.values(exported.agents).some(agent => agent.prompt === 'Duplicated.'));
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
