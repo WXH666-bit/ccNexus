@@ -104,3 +104,12 @@ export function organizePromptText(text) {
 export function createLocalPromptEnhancement(text, rules = []) {
   return organizePromptText(applyPromptRules(text, rules));
 }
+
+export function createPromptEnhancementPreview(text, rules = []) {
+  const localResult = createLocalPromptEnhancement(text, rules);
+  return {
+    originalText: text,
+    localResult,
+    changed: localResult !== text,
+  };
+}

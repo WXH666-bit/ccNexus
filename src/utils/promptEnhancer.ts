@@ -40,7 +40,8 @@ export function createPromptEnhancementPreview(text: string): {
   localResult: string;
   changed: boolean;
 } {
-  const localResult = enhancePromptText(text);
+  const config = readRules();
+  const localResult = createLocalPromptEnhancement(text, config.rules);
   return {
     originalText: text,
     localResult,

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   applyPromptRules,
   createLocalPromptEnhancement,
+  createPromptEnhancementPreview,
   organizePromptText,
 } from '../src/utils/promptEnhancerCore.js';
 
@@ -54,4 +55,54 @@ test('applies enabled prompt rules in order', () => {
 
 test('organizePromptText leaves already short prompts unchanged', () => {
   assert.equal(organizePromptText('短句'), '短句');
+});
+
+test('preview returns the original text, local result, and change flag', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    localStorage: {
+      getItem(key) {
+        if (key === 'promptEnhancerEnabled') return 'true';
+        if (key === 'promptEnhancerRules') return '[]';
+        return null;
+      },
+    },
+  };
+
+  try {
+    const preview = createPromptEnhancementPreview('帮我做一个 HTML 页面。');
+
+    assert.deepEqual(preview, {
+      originalText: '帮我做一个 HTML 页面。',
+      localResult: preview.localResult,
+      changed: preview.changed,
+    });
+    assert.equal(typeof preview.localResult, 'string');
+    assert.equal(typeof preview.changed, 'boolean');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('preview still computes local output when enhancement is disabled', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    localStorage: {
+      getItem(key) {
+        if (key === 'promptEnhancerEnabled') return 'false';
+        if (key === 'promptEnhancerRules') return '[]';
+        return null;
+      },
+    },
+  };
+
+  try {
+    const preview = createPromptEnhancementPreview('帮我做一个好看的 HTML 页面，要科技风。');
+    assert.match(preview.localResult, /目标：/);
+    assert.match(preview.localResult, /约束：/);
+    assert.equal(preview.originalText, '帮我做一个好看的 HTML 页面，要科技风。');
+    assert.equal(preview.changed, true);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
