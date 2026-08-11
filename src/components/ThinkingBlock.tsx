@@ -14,7 +14,9 @@ export default function ThinkingBlock({
   onToggle,
 }: ThinkingBlockProps) {
   const title = isStreamingLatest ? '思考过程' : '思考';
-  const rendered = renderMarkdown(thinking || '暂无思考内容');
+  const normalizedThinking = typeof thinking === 'string' ? thinking.trim() : '';
+  if (!normalizedThinking) return null;
+  const rendered = renderMarkdown(normalizedThinking);
 
   return (
     <div className="thinking-block">

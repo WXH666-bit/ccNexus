@@ -145,6 +145,63 @@ test('desktop usage aggregation returns an accurate local-day summary', async ()
   }
 });
 
+test('desktop usage dateRange today includes only the local calendar day', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-range-today-'));
+  const workspace = path.join(homeDir, 'workspace');
+
+  try {
+    const service = new DesktopSessionService({ homeDir, cwd: workspace });
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayTimestamp = startOfToday.getTime() + 60 * 60 * 1000;
+    const yesterdayTimestamp = startOfToday.getTime() - 60 * 60 * 1000;
+
+    await service.saveSession({ id: 'range-session', title: 'Range', updatedAt: todayTimestamp });
+    await service.appendMessage('range-session', {
+      id: 'range-today-message',
+      role: 'assistant',
+      model: 'claude-sonnet-4-6',
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 5,
+        cache_read_input_tokens: 20,
+      },
+      timestamp: todayTimestamp,
+      content: [{ type: 'text', text: 'today' }],
+    });
+    await service.appendMessage('range-session', {
+      id: 'range-yesterday-message',
+      role: 'assistant',
+      model: 'claude-sonnet-4-6',
+      usage: {
+        input_tokens: 200,
+        output_tokens: 20,
+        cache_creation_input_tokens: 10,
+        cache_read_input_tokens: 30,
+      },
+      timestamp: yesterdayTimestamp,
+      content: [{ type: 'text', text: 'yesterday' }],
+    });
+
+    const statistics = await service.getUsageStatistics({ dateRange: 'today' });
+    assert.equal(statistics.dateRange, 'today');
+    assert.deepEqual(statistics.totalUsage, {
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheWriteTokens: 5,
+      cacheReadTokens: 20,
+      totalTokens: 135,
+    });
+    assert.equal(statistics.totalSessions, 1);
+    assert.equal(statistics.dailyUsage.length, 1);
+    assert.equal(statistics.todayUsage.requestCount, 1);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
 test('desktop usage aggregation deduplicates Claude JSONL lines by inner message.id', async () => {
   const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-jsonl-'));
@@ -236,8 +293,11 @@ test('desktop usage aggregation supports ccgui current and all-project scopes', 
 test('usage statistics UI renders the backend today summary contract', () => {
   const source = readFileSync(path.join(process.cwd(), 'src/components/settings/UsageStatistics.tsx'), 'utf8');
   assert.match(source, /todayUsage/);
-  assert.match(source, /todayUsage\.requestCount/);
-  assert.match(source, /todayUsage\.cost/);
+  assert.match(source, /selectedUsage\.requestCount/);
+  assert.match(source, /selectedUsage\.cost/);
   assert.match(source, /usage-today-summary/);
-  assert.match(source, /todayCacheHitRate/);
+  assert.match(source, /cacheHitRate/);
+  assert.match(source, /\['today', '7d', '30d', 'all'\]/);
+  assert.match(source, /selectedUsage/);
+  assert.match(source, /range === 'today'/);
 });

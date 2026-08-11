@@ -151,7 +151,7 @@ interface CcNexusDesktopApi {
   exportSession: (sessionId: string, title?: string) => Promise<{ canceled: boolean; path?: string }>;
   deleteSession: (sessionId: string) => Promise<{ type: 'session_deleted'; sessionId: string }>;
   getProcesses: () => Promise<unknown>;
-  getUsageStatistics: (args?: { scope?: 'current' | 'all'; dateRange?: '7d' | '30d' | 'all' }) => Promise<unknown>;
+  getUsageStatistics: (args?: { scope?: 'current' | 'all'; dateRange?: 'today' | '7d' | '30d' | 'all' }) => Promise<unknown>;
   getContextUsage: (args?: { sessionId?: string | null; model?: string }) => Promise<unknown>;
   stopProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;
   restartProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;

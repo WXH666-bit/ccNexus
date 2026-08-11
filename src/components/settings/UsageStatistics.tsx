@@ -65,7 +65,7 @@ interface UsageStatisticsData {
 }
 
 type UsageTab = 'overview' | 'models' | 'sessions' | 'timeline';
-type DateRange = '7d' | '30d' | 'all';
+type DateRange = 'today' | '7d' | '30d' | 'all';
 type ProjectScope = 'current' | 'all';
 
 const EMPTY_USAGE: UsageTotals = {
@@ -114,6 +114,20 @@ function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
   return next.getTime();
+}
+
+function dateRangeStart(range: DateRange, now = Date.now()) {
+  const todayStart = startOfDay(new Date(now));
+  if (range === 'all') return 0;
+  if (range === 'today') return todayStart;
+  return todayStart - (range === '7d' ? 6 : 29) * 24 * 60 * 60 * 1000;
+}
+
+function dateRangeLabel(range: DateRange) {
+  if (range === 'today') return '今日';
+  if (range === '7d') return '近 7 天';
+  if (range === '30d') return '近 30 天';
+  return '全部';
 }
 
 function dateKeyStart(dateKey: string) {
@@ -173,18 +187,25 @@ export default function UsageStatistics() {
     return { week: sumSince(weekStart), month: sumSince(monthStart) };
   }, [statistics]);
 
-  const todayUsage = statistics?.todayUsage || EMPTY_TODAY_USAGE;
-
-  const cacheHitRate = useMemo(() => {
-    return calculateCacheHitRate(statistics?.totalUsage || EMPTY_USAGE);
+  const selectedUsage = useMemo<UsageToday>(() => {
+    const summary = {
+      ...EMPTY_TODAY_USAGE,
+      sessions: statistics?.totalSessions || 0,
+    };
+    addUsage(summary, statistics?.totalUsage || EMPTY_USAGE);
+    for (const day of statistics?.dailyUsage || []) {
+      summary.requestCount += day.requestCount || 0;
+      summary.cost += day.cost || 0;
+    }
+    return summary;
   }, [statistics]);
 
-  const todayCacheHitRate = useMemo(() => calculateCacheHitRate(todayUsage), [todayUsage]);
+  const cacheHitRate = useMemo(() => {
+    return calculateCacheHitRate(selectedUsage);
+  }, [selectedUsage]);
 
   const filteredSessions = useMemo(() => {
-    const cutoff = dateRange === 'all'
-      ? 0
-      : Date.now() - (dateRange === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000;
+    const cutoff = dateRangeStart(dateRange);
     return [...(statistics?.sessions || [])]
       .filter(session => session.timestamp >= cutoff)
       .sort((left, right) => sessionSort === 'cost'
@@ -193,9 +214,7 @@ export default function UsageStatistics() {
   }, [dateRange, sessionSort, statistics]);
 
   const filteredDays = useMemo(() => {
-    const cutoff = dateRange === 'all'
-      ? 0
-      : Date.now() - (dateRange === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000;
+    const cutoff = dateRangeStart(dateRange);
     return (statistics?.dailyUsage || []).filter(day => dateKeyStart(day.date) >= cutoff);
   }, [dateRange, statistics]);
 
@@ -245,9 +264,9 @@ export default function UsageStatistics() {
               </button>
             </div>
             <div className="usage-range-buttons">
-              {(['7d', '30d', 'all'] as const).map(range => (
+              {(['today', '7d', '30d', 'all'] as const).map(range => (
                 <button key={range} className={dateRange === range ? 'active' : ''} onClick={() => setDateRange(range)}>
-                  {range === '7d' ? '近 7 天' : range === '30d' ? '近 30 天' : '全部'}
+                  {dateRangeLabel(range)}
                 </button>
               ))}
             </div>
@@ -268,43 +287,43 @@ export default function UsageStatistics() {
                   <div className="usage-today-primary">
                     <div className="usage-today-icon"><Zap size={24} /></div>
                     <div>
-                      <span className="usage-today-label">今日真实消耗 Tokens</span>
+                      <span className="usage-today-label">{dateRangeLabel(dateRange)}真实消耗 Tokens</span>
                       <div className="usage-today-value">
-                        {formatExactTokens(todayUsage.totalTokens)}
-                        {formatWan(todayUsage.totalTokens) && <span className="usage-today-wan">{formatWan(todayUsage.totalTokens)}</span>}
+                        {formatExactTokens(selectedUsage.totalTokens)}
+                        {formatWan(selectedUsage.totalTokens) && <span className="usage-today-wan">{formatWan(selectedUsage.totalTokens)}</span>}
                       </div>
                     </div>
                   </div>
                   <div className="usage-today-side">
-                    <div><span>总请求数</span><strong>{formatExactTokens(todayUsage.requestCount)}</strong></div>
-                    <div><span>估算成本</span><strong className="usage-today-cost">{formatCost(todayUsage.cost)}</strong></div>
+                    <div><span>总请求数</span><strong>{formatExactTokens(selectedUsage.requestCount)}</strong></div>
+                    <div><span>估算成本</span><strong className="usage-today-cost">{formatCost(selectedUsage.cost)}</strong></div>
                   </div>
                 </div>
                 <div className="usage-today-breakdown">
-                  <div className="usage-today-metric"><span>输入</span><strong>{formatTokens(todayUsage.inputTokens)}</strong></div>
-                  <div className="usage-today-metric"><span>输出</span><strong>{formatTokens(todayUsage.outputTokens)}</strong></div>
-                  <div className="usage-today-metric"><span>缓存创建</span><strong>{formatTokens(todayUsage.cacheWriteTokens)}</strong></div>
-                  <div className="usage-today-metric"><span>缓存读取</span><strong>{formatTokens(todayUsage.cacheReadTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>输入</span><strong>{formatTokens(selectedUsage.inputTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>输出</span><strong>{formatTokens(selectedUsage.outputTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>缓存创建</span><strong>{formatTokens(selectedUsage.cacheWriteTokens)}</strong></div>
+                  <div className="usage-today-metric"><span>缓存读取</span><strong>{formatTokens(selectedUsage.cacheReadTokens)}</strong></div>
                   <div className="usage-today-metric usage-today-cache">
-                    <div><span>缓存命中率</span><strong>{todayCacheHitRate.toFixed(1)}%</strong></div>
-                    <div className="usage-today-progress"><span style={{ width: `${Math.min(100, todayCacheHitRate)}%` }} /></div>
+                    <div><span>缓存命中率</span><strong>{cacheHitRate.toFixed(1)}%</strong></div>
+                    <div className="usage-today-progress"><span style={{ width: `${Math.min(100, cacheHitRate)}%` }} /></div>
                   </div>
                 </div>
               </section>
               <div className="usage-stats">
-                <div className="stat-card"><h4>总费用</h4><div className="stat-value">{formatCost(statistics.estimatedCost)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.cost)} 较上周</span></div></div>
-                <div className="stat-card"><h4>总会话</h4><div className="stat-value">{statistics.totalSessions}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.sessions)} 较上周</span></div></div>
-                <div className="stat-card"><h4>总 Tokens</h4><div className="stat-value">{formatTokens(statistics.totalUsage.totalTokens)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.tokens)} 较上周</span></div></div>
-                <div className="stat-card"><h4>缓存命中率</h4><div className="stat-value">{cacheHitRate.toFixed(1)}%</div><div className="stat-detail"><span>{formatTokens(statistics.totalUsage.cacheReadTokens)} 缓存读取</span></div></div>
+                <div className="stat-card"><h4>总费用</h4><div className="stat-value">{formatCost(selectedUsage.cost)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.cost)} 较上周</span></div></div>
+                <div className="stat-card"><h4>总会话</h4><div className="stat-value">{selectedUsage.sessions}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.sessions)} 较上周</span></div></div>
+                <div className="stat-card"><h4>总 Tokens</h4><div className="stat-value">{formatTokens(selectedUsage.totalTokens)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.tokens)} 较上周</span></div></div>
+                <div className="stat-card"><h4>缓存命中率</h4><div className="stat-value">{cacheHitRate.toFixed(1)}%</div><div className="stat-detail"><span>{formatTokens(selectedUsage.cacheReadTokens)} 缓存读取</span></div></div>
               </div>
               <div className="usage-token-breakdown">
                 {([
-                  ['输入', statistics.totalUsage.inputTokens, 'input'],
-                  ['输出', statistics.totalUsage.outputTokens, 'output'],
-                  ['缓存写入', statistics.totalUsage.cacheWriteTokens, 'cache-write'],
-                  ['缓存读取', statistics.totalUsage.cacheReadTokens, 'cache-read'],
+                  ['输入', selectedUsage.inputTokens, 'input'],
+                  ['输出', selectedUsage.outputTokens, 'output'],
+                  ['缓存写入', selectedUsage.cacheWriteTokens, 'cache-write'],
+                  ['缓存读取', selectedUsage.cacheReadTokens, 'cache-read'],
                 ] as const).map(([label, value, className]) => (
-                  <div key={className} className="usage-token-row"><div><span>{label}</span><strong>{formatTokens(value)}</strong></div><div className="usage-token-track"><span className={className} style={{ width: `${statistics.totalUsage.totalTokens ? Math.min(100, (value / statistics.totalUsage.totalTokens) * 100) : 0}%` }} /></div></div>
+                  <div key={className} className="usage-token-row"><div><span>{label}</span><strong>{formatTokens(value)}</strong></div><div className="usage-token-track"><span className={className} style={{ width: `${selectedUsage.totalTokens ? Math.min(100, (value / selectedUsage.totalTokens) * 100) : 0}%` }} /></div></div>
                 ))}
               </div>
               <div className="usage-period-summary"><span>本周 {formatTokens(periods.week.totalTokens)}</span><span>本月 {formatTokens(periods.month.totalTokens)}</span></div>

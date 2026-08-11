@@ -117,6 +117,12 @@ function dateKey(timestamp) {
   ].join('-');
 }
 
+function startOfLocalDay(timestamp) {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
 const DEFAULT_CLAUDE_PRICING = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 };
 const CLAUDE_PRICING = [
   ['claude-opus-4-8', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
@@ -415,7 +421,7 @@ export class DesktopSessionService {
 
   async getUsageStatistics(options = {}) {
     const scope = options.scope === USAGE_SCOPE_ALL ? USAGE_SCOPE_ALL : USAGE_SCOPE_CURRENT;
-    const dateRange = options.dateRange === '7d' || options.dateRange === '30d'
+    const dateRange = options.dateRange === 'today' || options.dateRange === '7d' || options.dateRange === '30d'
       ? options.dateRange
       : 'all';
     const sessionEntries = scope === USAGE_SCOPE_ALL
@@ -430,9 +436,13 @@ export class DesktopSessionService {
     const modelUsage = new Map();
     const now = Date.now();
     const todayKey = dateKey(now);
+    const todayStart = startOfLocalDay(now);
+    const dayDuration = 24 * 60 * 60 * 1000;
     const cutoffTime = dateRange === 'all'
       ? 0
-      : now - (dateRange === '30d' ? 30 : 7) * 24 * 60 * 60 * 1000;
+      : dateRange === 'today'
+        ? todayStart
+        : todayStart - (dateRange === '30d' ? 29 : 6) * dayDuration;
     const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
     const twoWeeksAgo = now - 14 * 24 * 60 * 60 * 1000;
     const currentWeek = { sessions: 0, cost: 0, tokens: 0 };

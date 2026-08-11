@@ -186,7 +186,7 @@ export async function restartProcess(processRef: { pid: number; id?: string }) {
   return await requireDesktopApi().restartProcess(processRef);
 }
 
-export async function getUsageStatistics(args: { scope?: 'current' | 'all'; dateRange?: '7d' | '30d' | 'all' } = {}) {
+export async function getUsageStatistics(args: { scope?: 'current' | 'all'; dateRange?: 'today' | '7d' | '30d' | 'all' } = {}) {
   return await requireDesktopApi().getUsageStatistics(args);
 }
 
