@@ -92,6 +92,8 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
   assert.equal(calls[0].options.persistSession, false);
   assert.equal(calls[0].options.strictMcpConfig, true);
   assert.deepEqual(calls[0].options.mcpServers, {});
+  assert.equal(calls[0].options.isolatedDenyAllTools, true);
+  assert.equal(calls[0].signal?.aborted, false);
   assert.equal(result.requestId, 'req-1');
   assert.equal(result.model, 'claude-sonnet-4-6');
   assert.equal(result.text, 'Rewrite the request with the same intent.\n\nKeep error handling and examples.');
@@ -406,6 +408,84 @@ test('awaits asynchronous query close before enhancement resolves', async () => 
   releaseClose();
   await pending;
   assert.equal(settled, true);
+});
+
+test('cancel returns before unresolved query acquisition and closes the query after it arrives', async () => {
+  let resolveAcquisition;
+  let queryCalled = false;
+  let acquisitionSignal;
+  const acquisition = new Promise((resolve) => { resolveAcquisition = resolve; });
+  const acquiredQuery = {
+    interruptCalls: 0,
+    closeCalls: 0,
+    async interrupt() {
+      this.interruptCalls += 1;
+    },
+    async close() {
+      this.closeCalls += 1;
+    },
+    async *[Symbol.asyncIterator]() {},
+  };
+  const service = createPromptEnhancementService({
+    query: async ({ signal }) => {
+      queryCalled = true;
+      acquisitionSignal = signal;
+      return acquisition;
+    },
+    localConfig: { getProviders: async () => ({ currentEnv: {}, providerMode: '' }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }) },
+  });
+
+  const pending = service.enhance({ requestId: 'req-unresolved-acquisition', text: 'cancel now', localResult: {} });
+  await waitFor(() => queryCalled);
+  const cancelPromise = service.cancel('req-unresolved-acquisition');
+  const cancelResult = await Promise.race([
+    cancelPromise.then(() => 'cancelled'),
+    new Promise((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+  ]);
+  resolveAcquisition(acquiredQuery);
+  await cancelPromise;
+  await assert.rejects(pending, /cancelled|aborted/i);
+  assert.equal(cancelResult, 'cancelled');
+  assert.equal(acquisitionSignal.aborted, true);
+  assert.equal(acquiredQuery.interruptCalls, 1);
+  assert.equal(acquiredQuery.closeCalls, 1);
+  await service.dispose();
+});
+
+test('dispose closes admission before a concurrent enhance can reserve a new request', async () => {
+  let releaseProviders;
+  let providerStarted = false;
+  const providersReady = new Promise((resolve) => { releaseProviders = resolve; });
+  const query = createMockQuery([
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } },
+    { type: 'result', subtype: 'success' },
+  ]);
+  const service = createPromptEnhancementService({
+    query: async () => query,
+    localConfig: {
+      getProviders: async () => {
+        providerStarted = true;
+        await providersReady;
+        return { currentEnv: {}, providerMode: '' };
+      },
+    },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }) },
+  });
+
+  const first = service.enhance({ requestId: 'req-dispose-race-a', text: 'first', localResult: {} });
+  await waitFor(() => providerStarted);
+  const disposing = service.dispose();
+  const second = service.enhance({ requestId: 'req-dispose-race-b', text: 'second', localResult: {} });
+  const secondOutcome = await Promise.race([
+    second.then(() => 'resolved', () => 'rejected'),
+    new Promise((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+  ]);
+  releaseProviders();
+  await assert.rejects(first, /cancelled|aborted/i);
+  await second.catch(() => {});
+  await disposing;
+  assert.equal(secondOutcome, 'rejected');
 });
 
 function createMockQuery(source) {

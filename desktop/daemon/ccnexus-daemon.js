@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');
 
 let activeRequestId = null;
+let activeRequest = null;
 let activeQuery = null;
 let runtime = null;
 let permissionRequestCounter = 0;
@@ -145,6 +146,13 @@ async function canUseTool(toolName, input, options) {
   });
 }
 
+async function denyIsolatedToolUse() {
+  return {
+    behavior: 'deny',
+    message: 'Prompt enhancement cannot use tools',
+  };
+}
+
 function settlePlanApproval(requestId, decision) {
   const pending = pendingPlanApprovals.get(requestId);
   if (!pending) return false;
@@ -205,6 +213,7 @@ function runtimeSignature(options = {}) {
     persistSession: options.persistSession !== false,
     strictMcpConfig: options.strictMcpConfig === true,
     mcpServers: options.mcpServers ?? null,
+    isolatedDenyAllTools: options.isolatedDenyAllTools === true,
   });
 }
 
@@ -371,7 +380,7 @@ async function ensureRuntime(options = {}) {
           { hooks: [planHook] },
         ],
       },
-      canUseTool,
+      canUseTool: options.isolatedDenyAllTools === true ? denyIsolatedToolUse : canUseTool,
     },
   });
   runtime = {
@@ -405,6 +414,8 @@ async function runQuery(id, params = {}) {
     return;
   }
 
+  const request = { id, state: 'running' };
+  activeRequest = request;
   activeRequestId = id;
   let currentRuntime = null;
   try {
@@ -452,12 +463,22 @@ async function runQuery(id, params = {}) {
       endRuntimeTurn(currentRuntime);
       currentRuntime.turnSink = null;
     }
-    activeRequestId = null;
+    if (activeRequest === request && request.state === 'running' && activeRequestId === request.id) {
+      activeRequest = null;
+      activeRequestId = null;
+    }
   }
 }
 
-async function runAbort(id) {
-  const abortedRequestId = activeRequestId;
+async function runAbort(id, params = {}) {
+  const targetRequestId = params.requestId;
+  const request = activeRequest;
+  if (!request || request.state !== 'running' || activeRequestId !== targetRequestId || request.id !== targetRequestId) {
+    reply(id, { result: { abortedRequestId: null, ignored: true } });
+    return;
+  }
+
+  request.state = 'aborting';
   for (const [requestId, resolve] of pendingPermissions.entries()) {
     pendingPermissions.delete(requestId);
     resolve({ behavior: 'deny', message: 'Request aborted' });
@@ -465,14 +486,26 @@ async function runAbort(id) {
   settleAllPlanApprovals('Request aborted');
   try { await activeQuery?.interrupt?.(); } catch { /* ignore */ }
   await closeRuntime();
-  activeRequestId = null;
-  reply(id, { result: { abortedRequestId } });
+  if (activeRequest === request && activeRequestId === targetRequestId) {
+    activeRequest = null;
+    activeRequestId = null;
+  }
+  reply(id, { result: { abortedRequestId: targetRequestId } });
 }
 
 async function runShutdown(id) {
+  const request = activeRequest;
+  const targetRequestId = activeRequestId;
+  if (request) request.state = 'shutting-down';
   settleAllPlanApprovals('Daemon shutting down');
   try { await activeQuery?.interrupt?.(); } catch { /* ignore */ }
   await closeRuntime();
+  if (request && activeRequest === request && activeRequestId === targetRequestId) {
+    activeRequest = null;
+    activeRequestId = null;
+  } else if (!request && activeRequestId === targetRequestId) {
+    activeRequestId = null;
+  }
   reply(id, { result: 'bye' });
   process.exit(0);
 }
@@ -598,7 +631,7 @@ rl.on('line', (line) => {
   }
 
   if (method === 'abort') {
-    void runAbort(id);
+    void runAbort(id, command.params);
     return;
   }
 

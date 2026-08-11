@@ -244,6 +244,7 @@ export function buildPromptEnhancementQueryOptions({
     persistSession: false,
     strictMcpConfig: true,
     mcpServers: {},
+    isolatedDenyAllTools: true,
     permissionMode: 'default',
     canUseTool: async () => ({ behavior: 'deny', message: 'Prompt enhancement cannot use tools' }),
   };

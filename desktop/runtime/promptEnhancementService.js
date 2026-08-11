@@ -70,6 +70,7 @@ export function createPromptEnhancementService({
   }
 
   const activeRequests = new Map();
+  let disposing = false;
 
   async function closeActiveRequest(active) {
     if (!active || !active.query) return;
@@ -95,15 +96,14 @@ export function createPromptEnhancementService({
     const active = activeRequests.get(requestId);
     if (!active) return false;
     active.cancelled = true;
-    if (!active.query && active.queryPromise) {
-      try { active.query = await active.queryPromise; } catch { /* ignore */ }
-    }
+    active.abortController.abort();
     await interruptActiveRequest(active);
     await closeActiveRequest(active);
     return true;
   }
 
   async function enhance({ requestId, text, localResult, model = DEFAULT_MODEL } = {}) {
+    if (disposing) throw new Error('Prompt enhancement service is disposing');
     const normalizedRequestId = normalizeNonEmptyString(requestId);
     if (!normalizedRequestId) throw new Error('Prompt enhancement requires a requestId');
     if (text === undefined || text === null) throw new Error('Prompt enhancement requires text');
@@ -128,6 +128,7 @@ export function createPromptEnhancementService({
       closePromise: null,
       queryPromise: null,
       interruptPromise: null,
+      abortController: new AbortController(),
     };
     activeRequests.set(normalizedRequestId, active);
 
@@ -151,6 +152,7 @@ export function createPromptEnhancementService({
         title: QUERY_TITLE,
         prompt: buildPromptEnhancementInput({ text: normalizedText, localResult }),
         options,
+        signal: active.abortController.signal,
       }));
       active.queryPromise = queryPromise;
       const runningQuery = await queryPromise;
@@ -206,12 +208,11 @@ export function createPromptEnhancementService({
   }
 
   async function dispose() {
+    disposing = true;
     const active = [...activeRequests.values()];
     await Promise.all(active.map(async (request) => {
       request.cancelled = true;
-      if (!request.query && request.queryPromise) {
-        try { request.query = await request.queryPromise; } catch { /* ignore */ }
-      }
+      request.abortController.abort();
       await interruptActiveRequest(request);
       await closeActiveRequest(request);
       if (activeRequests.get(request.requestId) === request) {

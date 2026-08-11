@@ -191,3 +191,219 @@ test('desktop daemon reuses one SDK query across consecutive turns in the same s
   assert.equal(state.closed, 0);
   assert.deepEqual(state.permissionModes, ['plan', 'auto', 'acceptEdits']);
 });
+
+test('daemon ignores a stale abort requestId and leaves the newer query untouched', async () => {
+  let releaseSecondTurn;
+  const secondTurn = new Promise((resolve) => { releaseSecondTurn = resolve; });
+  const harness = createDaemonHarness({ turnGates: [Promise.resolve(), secondTurn] });
+
+  harness.send({
+    id: 'turn-a',
+    method: 'query',
+    params: { prompt: 'first', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  await waitForCondition(() => harness.state.turnCount === 1);
+  await waitForDone(harness.state.messages, 'turn-a');
+
+  harness.send({
+    id: 'turn-b',
+    method: 'query',
+    params: { prompt: 'second', options: { cwd: 'D:/ccNexus', model: 'sonnet', resume: 'session-1' } },
+  });
+  await waitForCondition(() => harness.state.turnCount === 2);
+  harness.send({ id: 'abort-stale', method: 'abort', params: { requestId: 'turn-a' } });
+  await waitForDone(harness.state.messages, 'abort-stale');
+
+  assert.equal(harness.state.interruptCalls, 0);
+  releaseSecondTurn();
+  const secondDone = await waitForDone(harness.state.messages, 'turn-b');
+  assert.equal(secondDone.success, true);
+});
+
+test('daemon keeps the active busy guard while matching abort cleanup overlaps query completion', async () => {
+  let releaseTurn;
+  let releaseInterrupt;
+  const turnGate = new Promise((resolve) => { releaseTurn = resolve; });
+  const interruptGate = new Promise((resolve) => { releaseInterrupt = resolve; });
+  const harness = createDaemonHarness({ turnGates: [turnGate], interruptGate });
+
+  harness.send({
+    id: 'turn-abort',
+    method: 'query',
+    params: { prompt: 'abort', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  await waitForCondition(() => harness.state.turnCount === 1);
+  harness.send({ id: 'abort-active', method: 'abort', params: { requestId: 'turn-abort' } });
+  await waitForCondition(() => harness.state.interruptCalls === 1);
+
+  releaseTurn();
+  await waitForDone(harness.state.messages, 'turn-abort');
+  harness.send({
+    id: 'turn-after-abort',
+    method: 'query',
+    params: { prompt: 'must stay busy', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  const busy = await waitForDone(harness.state.messages, 'turn-after-abort');
+  assert.equal(busy.success, false);
+  assert.match(busy.error, /busy/i);
+
+  releaseInterrupt();
+  await waitForDone(harness.state.messages, 'abort-active');
+});
+
+test('daemon keeps the active busy guard while shutdown cleanup overlaps query completion', async () => {
+  let releaseTurn;
+  let releaseInterrupt;
+  const turnGate = new Promise((resolve) => { releaseTurn = resolve; });
+  const interruptGate = new Promise((resolve) => { releaseInterrupt = resolve; });
+  const harness = createDaemonHarness({ turnGates: [turnGate], interruptGate });
+
+  harness.send({
+    id: 'turn-shutdown',
+    method: 'query',
+    params: { prompt: 'shutdown', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  await waitForCondition(() => harness.state.turnCount === 1);
+  harness.send({ id: 'shutdown-1', method: 'shutdown' });
+  await waitForCondition(() => harness.state.interruptCalls === 1);
+
+  releaseTurn();
+  await waitForDone(harness.state.messages, 'turn-shutdown');
+  harness.send({
+    id: 'turn-after-shutdown',
+    method: 'query',
+    params: { prompt: 'must stay busy', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  const busy = await waitForDone(harness.state.messages, 'turn-after-shutdown');
+  assert.equal(busy.success, false);
+  assert.match(busy.error, /busy/i);
+
+  releaseInterrupt();
+  await waitForDone(harness.state.messages, 'shutdown-1');
+  assert.equal(harness.state.exitCalls, 1);
+});
+
+test('daemon enforces serialized deny-all-tools policy for isolated prompt enhancement', async () => {
+  const harness = createDaemonHarness({ turnGates: [Promise.resolve()], invokeTool: true });
+  harness.send({
+    id: 'isolated-query',
+    method: 'query',
+    params: {
+      prompt: 'rewrite',
+      options: {
+        cwd: 'D:/ccNexus',
+        model: 'sonnet',
+        tools: [],
+        strictMcpConfig: true,
+        isolatedDenyAllTools: true,
+      },
+    },
+  });
+
+  await waitForDone(harness.state.messages, 'isolated-query');
+  assert.equal(harness.state.toolDecision?.behavior, 'deny');
+  assert.equal(harness.state.toolDecision?.message, 'Prompt enhancement cannot use tools');
+});
+
+function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool = false } = {}) {
+  const state = {
+    messages: [],
+    queryCalls: 0,
+    turnCount: 0,
+    interruptCalls: 0,
+    closeCalls: 0,
+    exitCalls: 0,
+    toolDecision: undefined,
+  };
+  let lineHandler = null;
+
+  const context = {
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    globalThis: {
+      __daemonDeps: {
+        randomUUID: () => 'test-plan-id',
+        createPreToolUseHook,
+        normalizePermissionMode,
+        createInterface() {
+          return {
+            on(event, handler) {
+              if (event === 'line') lineHandler = handler;
+            },
+          };
+        },
+        sdkQuery({ prompt, options }) {
+          state.queryCalls += 1;
+          const input = prompt[Symbol.asyncIterator]();
+          const queue = [];
+          let sessionId = '';
+          return {
+            async next() {
+              if (queue.length) return { done: false, value: queue.shift() };
+              const nextInput = await input.next();
+              if (nextInput.done) return { done: true, value: undefined };
+              const turnIndex = state.turnCount;
+              state.turnCount += 1;
+              sessionId = sessionId || nextInput.value.session_id || 'session-1';
+              queue.push({ type: 'system', subtype: 'init', session_id: sessionId });
+              const gate = turnGates[turnIndex];
+              if (gate) await gate;
+              if (invokeTool && turnIndex === 0) {
+                state.toolDecision = await Promise.race([
+                  options.canUseTool('Read', { file_path: 'D:/ccNexus/file.txt' }),
+                  new Promise((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+                ]);
+              }
+              queue.push({ type: 'result', subtype: 'success', session_id: sessionId });
+              return { done: false, value: queue.shift() };
+            },
+            async interrupt() {
+              state.interruptCalls += 1;
+              if (interruptGate) await interruptGate;
+            },
+            async close() {
+              state.closeCalls += 1;
+            },
+            async setPermissionMode() {},
+            async setModel() {},
+            async setMaxThinkingTokens() {},
+          };
+        },
+      },
+    },
+    process: {
+      pid: 1234,
+      uptime: () => 1,
+      stdout: {
+        write(chunk) {
+          for (const line of String(chunk).split('\n')) {
+            if (!line.trim()) continue;
+            state.messages.push(JSON.parse(line));
+          }
+          return true;
+        },
+      },
+      stdin: { on() {} },
+      on() {},
+      exit() { state.exitCalls += 1; },
+    },
+  };
+
+  vm.runInNewContext(daemonSource, context, { filename: 'ccnexus-daemon.js' });
+  return {
+    state,
+    send(command) {
+      lineHandler(JSON.stringify(command));
+    },
+  };
+}
+
+async function waitForCondition(predicate, { attempts = 200 } = {}) {
+  for (let index = 0; index < attempts; index += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.fail('Condition was not met in time');
+}

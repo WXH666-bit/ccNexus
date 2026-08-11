@@ -7,6 +7,32 @@ import { DesktopProcessRegistry } from './processRegistry.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultDaemonScript = path.resolve(__dirname, '../daemon/ccnexus-daemon.js');
 
+function createAbortError() {
+  const error = new Error('Prompt enhancement was cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+function awaitWithAbort(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(createAbortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(promise).then((value) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(value);
+    }, (error) => {
+      signal.removeEventListener('abort', onAbort);
+      reject(error);
+    });
+  });
+}
+
 export function createDesktopRuntime(options = {}) {
   let runtimeCwd = options.cwd || process.cwd();
   const registry = new DesktopProcessRegistry(options);
@@ -85,6 +111,7 @@ export function createDesktopRuntime(options = {}) {
   }
 
   async function queryClaudeDisposable(args = {}) {
+    const signal = args.signal;
     const disposableRuntime = createDesktopRuntime({
       cwd: args.options?.cwd || runtimeCwd,
       provider: options.provider,
@@ -92,21 +119,41 @@ export function createDesktopRuntime(options = {}) {
       electronRunAsNode: options.electronRunAsNode ?? Boolean(process.versions?.electron),
     });
 
+    let acquisition = null;
+    let cleanupPromise = null;
+    const cleanupAcquisition = () => {
+      if (!cleanupPromise) {
+        const shutdownPromise = disposableRuntime.shutdown().catch(() => {});
+        cleanupPromise = Promise.resolve(acquisition)
+          .then(query => query?.close?.(), () => {})
+          .catch(() => {})
+          .then(() => shutdownPromise);
+      }
+      return cleanupPromise;
+    };
+
     try {
-      const query = await disposableRuntime.queryClaude({
+      acquisition = disposableRuntime.queryClaude({
         ...args,
         options: {
           ...(args.options || {}),
           persistSession: false,
           strictMcpConfig: true,
           mcpServers: {},
+          isolatedDenyAllTools: true,
         },
       });
+      const query = await awaitWithAbort(acquisition, signal);
       return createDisposableQuery({
         query,
         dispose: () => disposableRuntime.shutdown(),
+        signal,
       });
     } catch (error) {
+      if (signal?.aborted) {
+        void cleanupAcquisition();
+        throw createAbortError();
+      }
       await disposableRuntime.shutdown();
       throw error;
     }
