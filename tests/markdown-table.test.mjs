@@ -28,3 +28,13 @@ test('ccNexus markdown tables use ccgui-style borders and overflow handling', ()
   assert.match(css, /\.markdown-body th,\s*\.markdown-body td\s*\{[\s\S]*border:\s*1px solid var\(--border-color\)/);
   assert.match(css, /\.markdown-body th\s*\{[\s\S]*background-color:\s*var\(--bg-tertiary\)/);
 });
+
+test('light theme keeps highlighted markdown code readable', () => {
+  const css = read('src/index.css');
+  const lightTheme = css.match(/\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+  assert.match(lightTheme, /--code-text:/);
+  assert.match(lightTheme, /--code-comment:/);
+  assert.match(css, /\.markdown-body pre code\.hljs\s*\{[\s\S]*color:\s*var\(--code-text\);/);
+  assert.match(css, /\.markdown-body pre code\.hljs \.hljs-comment[\s\S]*color:\s*var\(--code-comment\);/);
+});

@@ -44,6 +44,43 @@
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
   --scrollbar-thumb: #58616d;
   --scrollbar-thumb-hover: #79a8e8;
+
+  --file-explorer-bg: #242629;
+  --file-explorer-collapsed-bg: #202124;
+  --file-tree-title-icon: #c8cdd4;
+  --file-tree-row-text: #d8dde5;
+  --file-tree-row-hover: #33363b;
+  --file-tree-row-selected: #3f4349;
+  --file-tree-caret: #a9b0ba;
+  --file-tree-icon: #93c47d;
+  --file-editor-bg: #1f2023;
+  --file-editor-text: #d7dce3;
+  --file-editor-surface-alpha: 0%;
+
+  --selector-menu-bg: #242424;
+  --selector-option-hover: rgba(255, 255, 255, 0.06);
+  --selector-option-selected: #0d5684;
+  --selected-option-description: rgba(255, 255, 255, 0.76);
+
+  --code-text: #c9d1d9;
+  --code-keyword: #ff7b72;
+  --code-title: #d2a8ff;
+  --code-constant: #79c0ff;
+  --code-string: #a5d6ff;
+  --code-built-in: #ffa657;
+  --code-comment: #8b949e;
+  --code-tag: #7ee787;
+  --code-section: #1f6feb;
+  --code-bullet: #f2cc60;
+  --code-addition: #aff5b4;
+  --code-addition-bg: #033a16;
+  --code-deletion: #ffdcd7;
+  --code-deletion-bg: #67060c;
+
+  --chat-chrome-alpha: 68%;
+  --chat-file-header-alpha: 64%;
+  --chat-surface-alpha: 76%;
+  --chat-panel-alpha: 80%;
 }
 
 /* ─── Reset & Base ──────────────────────────────────────────── */
@@ -213,7 +250,7 @@ html, body, #root {
   min-width: 300px;
   max-width: 42vw;
   height: 100%;
-  background: #242629;
+  background: var(--file-explorer-bg);
   border-right: 1px solid #151618;
   color: var(--text-primary);
   overflow: hidden;
@@ -224,7 +261,7 @@ html, body, #root {
   min-width: 40px;
   max-width: 40px;
   align-items: center;
-  background: #202124;
+  background: var(--file-explorer-collapsed-bg);
 }
 
 .file-explorer-rail-btn,
@@ -277,7 +314,7 @@ html, body, #root {
 }
 
 .file-explorer-title svg {
-  color: #c8cdd4;
+  color: var(--file-tree-title-icon);
   flex-shrink: 0;
 }
 
@@ -362,30 +399,30 @@ html, body, #root {
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #d8dde5;
+  color: var(--file-tree-row-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .file-tree-row:hover {
-  background: #33363b;
+  background: var(--file-tree-row-hover);
 }
 
 .file-tree-row.selected {
-  background: #3f4349;
+  background: var(--file-tree-row-selected);
 }
 
 .file-tree-caret {
   display: inline-flex;
   width: 14px;
-  color: #a9b0ba;
+  color: var(--file-tree-caret);
   flex-shrink: 0;
 }
 
 .file-tree-icon {
   display: inline-flex;
-  color: #93c47d;
+  color: var(--file-tree-icon);
   flex-shrink: 0;
 }
 
@@ -407,7 +444,7 @@ html, body, #root {
   min-height: 180px;
   flex-direction: column;
   overflow: hidden;
-  background: #1f2023;
+  background: var(--file-editor-bg);
 }
 
 .file-editor-header {
@@ -449,8 +486,8 @@ html, body, #root {
   resize: none;
   border: none;
   outline: none;
-  background: #1f2023;
-  color: #d7dce3;
+  background: var(--file-editor-bg);
+  color: var(--file-editor-text);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
@@ -480,7 +517,7 @@ html, body, #root {
 }
 
 .file-explorer-error {
-  color: #ff8b8b;
+  color: var(--accent-red);
 }
 
 .file-explorer-notice {
@@ -815,6 +852,90 @@ html, body, #root {
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* highlight.js ships with GitHub Dark by default; keep code readable in both themes. */
+.markdown-body pre code.hljs {
+  color: var(--code-text);
+}
+
+.markdown-body pre code.hljs .hljs-doctag,
+.markdown-body pre code.hljs .hljs-keyword,
+.markdown-body pre code.hljs .hljs-template-tag,
+.markdown-body pre code.hljs .hljs-template-variable,
+.markdown-body pre code.hljs .hljs-type,
+.markdown-body pre code.hljs .hljs-variable.language_ {
+  color: var(--code-keyword);
+}
+
+.markdown-body pre code.hljs .hljs-title,
+.markdown-body pre code.hljs .hljs-title.class_,
+.markdown-body pre code.hljs .hljs-title.class_.inherited__,
+.markdown-body pre code.hljs .hljs-title.function_ {
+  color: var(--code-title);
+}
+
+.markdown-body pre code.hljs .hljs-attr,
+.markdown-body pre code.hljs .hljs-attribute,
+.markdown-body pre code.hljs .hljs-literal,
+.markdown-body pre code.hljs .hljs-meta,
+.markdown-body pre code.hljs .hljs-number,
+.markdown-body pre code.hljs .hljs-operator,
+.markdown-body pre code.hljs .hljs-variable,
+.markdown-body pre code.hljs .hljs-selector-attr,
+.markdown-body pre code.hljs .hljs-selector-class,
+.markdown-body pre code.hljs .hljs-selector-id {
+  color: var(--code-constant);
+}
+
+.markdown-body pre code.hljs .hljs-regexp,
+.markdown-body pre code.hljs .hljs-string,
+.markdown-body pre code.hljs .hljs-meta .hljs-string {
+  color: var(--code-string);
+}
+
+.markdown-body pre code.hljs .hljs-built_in,
+.markdown-body pre code.hljs .hljs-symbol {
+  color: var(--code-built-in);
+}
+
+.markdown-body pre code.hljs .hljs-comment,
+.markdown-body pre code.hljs .hljs-code,
+.markdown-body pre code.hljs .hljs-formula {
+  color: var(--code-comment);
+}
+
+.markdown-body pre code.hljs .hljs-name,
+.markdown-body pre code.hljs .hljs-quote,
+.markdown-body pre code.hljs .hljs-selector-tag,
+.markdown-body pre code.hljs .hljs-selector-pseudo {
+  color: var(--code-tag);
+}
+
+.markdown-body pre code.hljs .hljs-subst,
+.markdown-body pre code.hljs .hljs-emphasis,
+.markdown-body pre code.hljs .hljs-strong {
+  color: var(--code-text);
+}
+
+.markdown-body pre code.hljs .hljs-section {
+  color: var(--code-section);
+  font-weight: bold;
+}
+
+.markdown-body pre code.hljs .hljs-bullet {
+  color: var(--code-bullet);
+}
+
+.markdown-body pre code.hljs .hljs-addition {
+  color: var(--code-addition);
+  background-color: var(--code-addition-bg);
+}
+
+.markdown-body pre code.hljs .hljs-deletion {
+  color: var(--code-deletion);
+  background-color: var(--code-deletion-bg);
+}
+
 .markdown-body blockquote {
   border-left: 3px solid var(--accent-blue);
   padding-left: 16px;
@@ -2354,7 +2475,7 @@ html, body, #root {
   z-index: 10000;
   max-width: calc(100vw - 16px);
   padding: 4px;
-  background: #242424;
+  background: var(--selector-menu-bg);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.38);
@@ -2387,11 +2508,11 @@ html, body, #root {
 }
 
 .selector-option:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--selector-option-hover);
 }
 
 .selector-option.selected {
-  background: #0d5684;
+  background: var(--selector-option-selected);
 }
 
 .selector-option.selected.mode-auto-option {
@@ -2461,7 +2582,7 @@ html, body, #root {
 }
 
 .selector-option.selected .mode-option-description {
-  color: rgba(255, 255, 255, 0.76);
+  color: var(--selected-option-description);
 }
 
 .mode-dangerous-option .mode-option-label {
@@ -2494,7 +2615,7 @@ html, body, #root {
 }
 
 .selector-option.selected .model-option-subtitle {
-  color: rgba(255, 255, 255, 0.76);
+  color: var(--selected-option-description);
 }
 
 .mode-option-check,
@@ -4995,6 +5116,9 @@ html, body, #root {
   --bg-primary: #ffffff;
   --bg-secondary: #f5f5f5;
   --bg-tertiary: #e8e8e8;
+  --bg-hover: #edf1f6;
+  --bg-active: #dbe3ee;
+  --border-light: #b8c2cf;
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
   --text-tertiary: #999999;
@@ -5006,9 +5130,46 @@ html, body, #root {
   --accent-yellow: #ca8a04;
   --accent-purple: #9333ea;
   --mode-dangerous-selected: rgba(220, 38, 38, 0.14);
-  --mode-dangerous-foreground: #f87171;
+  --mode-dangerous-foreground: #b42318;
   --scrollbar-thumb: #b6beca;
   --scrollbar-thumb-hover: #7f8da1;
+
+  --file-explorer-bg: #f5f7fa;
+  --file-explorer-collapsed-bg: #edf1f5;
+  --file-tree-title-icon: #667085;
+  --file-tree-row-text: #344054;
+  --file-tree-row-hover: #e8eef7;
+  --file-tree-row-selected: #dbeafe;
+  --file-tree-caret: #667085;
+  --file-tree-icon: #16803c;
+  --file-editor-bg: #ffffff;
+  --file-editor-text: #1f2937;
+  --file-editor-surface-alpha: 86%;
+
+  --selector-menu-bg: #ffffff;
+  --selector-option-hover: #eef4ff;
+  --selector-option-selected: #dbeafe;
+  --selected-option-description: #475569;
+
+  --code-text: #24292e;
+  --code-keyword: #d73a49;
+  --code-title: #6f42c1;
+  --code-constant: #005cc5;
+  --code-string: #032f62;
+  --code-built-in: #e36209;
+  --code-comment: #6a737d;
+  --code-tag: #22863a;
+  --code-section: #005cc5;
+  --code-bullet: #735c0f;
+  --code-addition: #22863a;
+  --code-addition-bg: #f0fff4;
+  --code-deletion: #b31d28;
+  --code-deletion-bg: #ffeef0;
+
+  --chat-chrome-alpha: 94%;
+  --chat-file-header-alpha: 94%;
+  --chat-surface-alpha: 96%;
+  --chat-panel-alpha: 94%;
 }
 
 [data-theme="light"] body {
@@ -7228,6 +7389,14 @@ textarea:focus-visible,
   --chat-bg-image-opacity: 0;
   --chat-bg-image-blur: 0px;
   --chat-bg-overlay-opacity: 0;
+  --chat-bg-effective-image-opacity: var(--chat-bg-image-opacity);
+  --chat-bg-effective-overlay-opacity: var(--chat-bg-overlay-opacity);
+}
+
+/* Bright custom images need a stronger veil in light mode so dark text remains readable. */
+[data-theme="light"] {
+  --chat-bg-effective-image-opacity: var(--chat-bg-image-opacity);
+  --chat-bg-effective-overlay-opacity: max(var(--chat-bg-overlay-opacity), 0.58);
 }
 
 .app-root {
@@ -7251,7 +7420,7 @@ textarea:focus-visible,
   background-repeat: no-repeat;
   background-size: cover;
   filter: blur(var(--chat-bg-image-blur));
-  opacity: var(--chat-bg-image-opacity);
+  opacity: var(--chat-bg-effective-image-opacity);
   transform: scale(1.04);
   transition: opacity 180ms ease, filter 180ms ease;
 }
@@ -7259,7 +7428,7 @@ textarea:focus-visible,
 .app-root::after {
   z-index: 0;
   background: var(--bg-primary);
-  opacity: var(--chat-bg-overlay-opacity);
+  opacity: var(--chat-bg-effective-overlay-opacity);
   transition: opacity 180ms ease;
 }
 
@@ -7276,7 +7445,7 @@ textarea:focus-visible,
 }
 
 .window-drag-region {
-  background: color-mix(in srgb, var(--bg-primary) 68%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) var(--chat-chrome-alpha), transparent);
 }
 
 .chat-header,
@@ -7284,27 +7453,30 @@ textarea:focus-visible,
 .settings-sidebar,
 .file-explorer,
 .file-explorer.collapsed {
-  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) var(--chat-chrome-alpha), transparent);
 }
 
 .file-explorer-header {
-  background: color-mix(in srgb, var(--bg-secondary) 64%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) var(--chat-file-header-alpha), transparent);
 }
 
 .file-editor,
-.file-editor-textarea,
+.file-editor-textarea {
+  background: color-mix(in srgb, var(--file-editor-bg) var(--file-editor-surface-alpha), transparent);
+}
+
 .settings-content,
 .message-list {
   background: transparent;
 }
 
 .chat-input-box {
-  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+  background: color-mix(in srgb, var(--surface-panel) var(--chat-surface-alpha), transparent);
 }
 
 .status-panel-tabs,
 .status-panel-popover {
-  background: color-mix(in srgb, var(--surface-panel) 80%, transparent);
+  background: color-mix(in srgb, var(--surface-panel) var(--chat-panel-alpha), transparent);
 }
 
 .status-panel-toggle-button {

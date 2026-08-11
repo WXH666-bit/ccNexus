@@ -122,8 +122,22 @@ test('appearance background is rendered by the whole app shell', () => {
   const css = read('src/index.css');
   assert.match(css, /\.app-root\s*\{[^}]*position:\s*relative;/s);
   assert.match(css, /\.app-root::before[\s\S]*--bg-chat-image/);
-  assert.match(css, /\.app-root::after[\s\S]*--chat-bg-overlay-opacity/);
+  assert.match(css, /\.app-root::after[\s\S]*--chat-bg-effective-overlay-opacity/);
+  assert.match(css, /--chat-bg-overlay-opacity:/);
   assert.match(css, /\.app-root\s*>\s*\*[^}]*z-index:\s*1;/s);
   assert.match(css, /\.chat-main\s*\{[^}]*background:\s*transparent;/s);
   assert.doesNotMatch(css, /\.chat-main::before/);
+});
+
+test('light theme defines readable state colors and background contrast guards', () => {
+  const css = read('src/index.css');
+  const lightTheme = css.match(/\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+  assert.match(lightTheme, /--bg-hover:/);
+  assert.match(lightTheme, /--bg-active:/);
+  assert.match(lightTheme, /--border-light:/);
+  assert.match(lightTheme, /--file-tree-row-text:/);
+  assert.match(css, /--chat-bg-effective-overlay-opacity:/);
+  assert.match(css, /\.app-root::after\s*\{[\s\S]*opacity:\s*var\(--chat-bg-effective-overlay-opacity\);/);
+  assert.match(css, /\.file-tree-row\s*\{[\s\S]*color:\s*var\(--file-tree-row-text\);/);
 });
