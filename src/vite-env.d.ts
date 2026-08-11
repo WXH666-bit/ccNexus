@@ -118,8 +118,13 @@ interface CcNexusDesktopApi {
     provider?: { id: string; name: string; [key: string]: unknown };
     providerMode?: string;
   }>;
-  getAgents: () => Promise<{ agents: unknown[] }>;
+  getAgents: () => Promise<{ agents: unknown[]; selectedAgentId?: string | null }>;
   getAgent: (name: string) => Promise<unknown>;
+  saveAgent: (agent: { id?: string; name: string; prompt: string; description?: string }) => Promise<unknown>;
+  deleteAgent: (id: string) => Promise<unknown>;
+  setSelectedAgent: (id: string | null) => Promise<unknown>;
+  exportAgents: () => Promise<unknown>;
+  importAgents: (payload: { agents: unknown[] | Record<string, unknown>; strategy: 'skip' | 'overwrite' | 'duplicate' }) => Promise<unknown>;
   getMcpServers: () => Promise<unknown>;
   saveMcpServer: (server: { id: string; config: Record<string, unknown>; scope: 'global' | 'project' }) => Promise<unknown>;
   deleteMcpServer: (server: { id: string; scope: 'global' | 'project' }) => Promise<unknown>;

@@ -340,6 +340,16 @@ ipcMain.handle('desktop:get-agents', async () => localConfig.listAgents(workspac
 
 ipcMain.handle('desktop:get-agent', async (_event, args = {}) => localConfig.getAgent(args.name, workspaceFiles.getWorkspace().cwd));
 
+ipcMain.handle('desktop:save-agent', async (_event, args = {}) => localConfig.saveAgent(args));
+
+ipcMain.handle('desktop:delete-agent', async (_event, args = {}) => localConfig.deleteAgent(args.id));
+
+ipcMain.handle('desktop:set-selected-agent', async (_event, args = {}) => localConfig.setSelectedAgent(args.id));
+
+ipcMain.handle('desktop:export-agents', async () => localConfig.exportAgents());
+
+ipcMain.handle('desktop:import-agents', async (_event, args = {}) => localConfig.importAgents(args));
+
 ipcMain.handle('desktop:get-mcp-servers', async () => localConfig.listMcpServers(workspaceFiles.getWorkspace().cwd));
 
 ipcMain.handle('desktop:save-mcp-server', async (_event, args = {}) => localConfig.saveMcpServer({

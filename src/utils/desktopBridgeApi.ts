@@ -11,6 +11,9 @@ interface AgentItem {
   name: string;
   description: string;
   file?: string;
+  prompt?: string;
+  source: 'ccnexus' | 'claude' | string;
+  editable: boolean;
 }
 
 interface PromptItem {
@@ -80,7 +83,51 @@ export async function switchProvider(providerId: string) {
 }
 
 export async function getAgents() {
-  return await requireDesktopApi().getAgents() as { agents: AgentItem[] };
+  return await requireDesktopApi().getAgents() as { agents: AgentItem[]; selectedAgentId?: string | null };
+}
+
+export async function saveAgent(agent: { id?: string; name: string; prompt: string; description?: string }) {
+  return await requireDesktopApi().saveAgent(agent) as {
+    success: boolean;
+    agent?: AgentItem;
+  };
+}
+
+export async function deleteAgent(id: string) {
+  return await requireDesktopApi().deleteAgent(id) as {
+    success: boolean;
+    deleted: boolean;
+    selectedAgentId?: string | null;
+  };
+}
+
+export async function setSelectedAgent(id: string | null) {
+  return await requireDesktopApi().setSelectedAgent(id) as {
+    success: boolean;
+    selectedAgentId: string | null;
+  };
+}
+
+export async function exportAgents() {
+  return await requireDesktopApi().exportAgents() as {
+    format: string;
+    version: number;
+    agents: Record<string, { name: string; prompt: string; description?: string }>;
+  };
+}
+
+export async function importAgents(payload: {
+  agents: Array<{ id?: string; name: string; prompt: string; description?: string }> | Record<string, { name: string; prompt: string; description?: string }>;
+  strategy: 'skip' | 'overwrite' | 'duplicate';
+}) {
+  return await requireDesktopApi().importAgents(payload) as {
+    success: boolean;
+    added: number;
+    updated: number;
+    skipped: number;
+    duplicated: number;
+    total: number;
+  };
 }
 
 export async function getMcpServers() {

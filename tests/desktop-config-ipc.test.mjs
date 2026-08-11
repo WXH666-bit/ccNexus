@@ -18,6 +18,11 @@ test('desktop main and preload expose local config and completion IPC', () => {
   assert.doesNotMatch(main, /desktop:add-provider|desktop:update-provider|desktop:delete-provider/);
   assert.match(main, /ipcMain\.handle\('desktop:get-agents'/);
   assert.match(main, /ipcMain\.handle\('desktop:get-agent'/);
+  assert.match(main, /ipcMain\.handle\('desktop:save-agent'/);
+  assert.match(main, /ipcMain\.handle\('desktop:delete-agent'/);
+  assert.match(main, /ipcMain\.handle\('desktop:set-selected-agent'/);
+  assert.match(main, /ipcMain\.handle\('desktop:export-agents'/);
+  assert.match(main, /ipcMain\.handle\('desktop:import-agents'/);
   assert.match(main, /ipcMain\.handle\('desktop:save-mcp-server'/);
   assert.match(main, /ipcMain\.handle\('desktop:delete-mcp-server'/);
   assert.match(main, /ipcMain\.handle\('desktop:toggle-mcp-server'/);
@@ -39,6 +44,11 @@ test('desktop main and preload expose local config and completion IPC', () => {
   assert.doesNotMatch(preload, /addProvider:|updateProvider:|deleteProvider:/);
   assert.match(preload, /getAgents:/);
   assert.match(preload, /getAgent:/);
+  assert.match(preload, /saveAgent:/);
+  assert.match(preload, /deleteAgent:/);
+  assert.match(preload, /setSelectedAgent:/);
+  assert.match(preload, /exportAgents:/);
+  assert.match(preload, /importAgents:/);
   assert.match(preload, /saveMcpServer:/);
   assert.match(preload, /deleteMcpServer:/);
   assert.match(preload, /toggleMcpServer:/);
@@ -63,6 +73,11 @@ test('client data api uses desktop IPC without broker fetch fallback', () => {
   assert.match(api, /requireDesktopApi\(\)\.switchProvider/);
   assert.doesNotMatch(api, /requireDesktopApi\(\)\.(addProvider|updateProvider|deleteProvider)/);
   assert.match(api, /requireDesktopApi\(\)\.getAgents/);
+  assert.match(api, /requireDesktopApi\(\)\.saveAgent/);
+  assert.match(api, /requireDesktopApi\(\)\.deleteAgent/);
+  assert.match(api, /requireDesktopApi\(\)\.setSelectedAgent/);
+  assert.match(api, /requireDesktopApi\(\)\.exportAgents/);
+  assert.match(api, /requireDesktopApi\(\)\.importAgents/);
   assert.match(api, /requireDesktopApi\(\)\.saveMcpServer/);
   assert.match(api, /requireDesktopApi\(\)\.deleteMcpServer/);
   assert.match(api, /requireDesktopApi\(\)\.toggleMcpServer/);
