@@ -31,22 +31,26 @@ interface Props {
 }
 
 const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
-  'claude-sonnet-5',
-  'claude-sonnet-4-6',
+  'claude-fable-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
-  'claude-fable-5',
+  'claude-opus-4-6[1m]',
+  'claude-sonnet-5',
+  'claude-sonnet-4-6',
 ]);
 
 const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
-  'claude-sonnet-5',
+  'claude-fable-5',
   'claude-opus-4-8',
-  'claude-opus-4-6',
 ]);
 
 const MAX_EFFORT_CLAUDE_MODELS = new Set([
+  'claude-fable-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
+  'claude-opus-4-6[1m]',
+  'claude-sonnet-5',
+  'claude-sonnet-4-6',
 ]);
 
 export default function ButtonArea({

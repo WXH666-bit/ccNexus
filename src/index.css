@@ -6163,9 +6163,9 @@ textarea:focus-visible,
 }
 
 .window-title-logo {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
   object-fit: contain;
   filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent-blue) 34%, transparent));
 }
@@ -7314,4 +7314,41 @@ textarea:focus-visible,
     grid-template-columns: minmax(86px, 1fr) minmax(96px, 1.4fr) 44px;
     gap: 8px;
   }
+}
+
+/* Shared tool card geometry */
+.tool-block-header {
+  height: 42px;
+  min-height: 42px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tool-block-header .file-link,
+.tool-block-header .tool-summary,
+.tool-block-header .task-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compact assistant response rhythm */
+.assistant-row + .assistant-row {
+  /* Streaming assistant chunks are separate rows, but should read as one response. */
+  margin-top: -20px;
+}
+
+.assistant-row .message-content > .thinking-block {
+  margin: 0 0 6px;
+}
+
+.assistant-row .message-content > .tool-block,
+.assistant-row .message-content > .tool-group-block,
+.assistant-row .message-content > .agent-group-block {
+  margin: 6px 0;
+}
+
+.assistant-row .message-content > .markdown-body {
+  margin: 0;
 }
