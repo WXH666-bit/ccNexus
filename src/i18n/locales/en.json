@@ -21,6 +21,24 @@
       "queue": "Queue",
       "queued": "Queued"
     },
+    "promptEnhancer": {
+      "trigger": "Enhance prompt preview",
+      "title": "Prompt enhancement preview",
+      "description": "Review the local rewrite first, then optionally ask AI to polish it.",
+      "original": "Original draft",
+      "localResult": "Local preview",
+      "aiResult": "AI polish",
+      "useResult": "Use result",
+      "useAiResult": "Use AI result",
+      "restore": "Restore original",
+      "cancel": "Cancel",
+      "aiEnhance": "AI polish",
+      "cancelAi": "Cancel AI",
+      "aiNote": "AI polish uses an extra model request. The local preview always works offline-first.",
+      "aiPlaceholder": "AI polish appears here after you request it.",
+      "loading": "Generating AI enhancement…",
+      "error": "AI enhancement failed. You can still use the local preview."
+    },
     "message": {
       "copy": "Copy",
       "copied": "Copied",

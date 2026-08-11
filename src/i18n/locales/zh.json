@@ -21,6 +21,24 @@
       "queue": "排队",
       "queued": "已排队"
     },
+    "promptEnhancer": {
+      "trigger": "增强提示词预览",
+      "title": "提示词增强预览",
+      "description": "先查看本地改写结果，再按需请求 AI 润色。",
+      "original": "原始草稿",
+      "localResult": "本地预览",
+      "aiResult": "AI 润色",
+      "useResult": "使用结果",
+      "useAiResult": "使用 AI 结果",
+      "restore": "恢复原文",
+      "cancel": "取消",
+      "aiEnhance": "AI 润色",
+      "cancelAi": "取消 AI",
+      "aiNote": "AI 润色会额外发起一次模型请求，本地预览始终可直接使用。",
+      "aiPlaceholder": "请求 AI 后，润色结果会显示在这里。",
+      "loading": "正在生成 AI 增强结果…",
+      "error": "AI 增强失败，你仍然可以使用本地预览结果。"
+    },
     "message": {
       "copy": "复制",
       "copied": "已复制",

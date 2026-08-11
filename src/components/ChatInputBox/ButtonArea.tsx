@@ -1,4 +1,5 @@
 import { AlertTriangle, ListOrdered, Send, Sparkles, Square } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import ConfigSelect from '../ConfigSelect';
 import ReasoningSelect from '../ReasoningSelect';
 import ModeSelect from './ModeSelect';
@@ -7,6 +8,7 @@ import type { PermissionMode } from '../../types';
 
 interface Props {
   hasInputContent: boolean;
+  hasPromptText: boolean;
   isStreaming: boolean;
   mode: PermissionMode;
   setMode: (mode: PermissionMode) => void;
@@ -55,6 +57,7 @@ const MAX_EFFORT_CLAUDE_MODELS = new Set([
 
 export default function ButtonArea({
   hasInputContent,
+  hasPromptText,
   isStreaming,
   mode,
   setMode,
@@ -77,6 +80,8 @@ export default function ButtonArea({
   onEnhancePrompt,
   onStop,
 }: Props) {
+  const { t } = useTranslation();
+
   return (
     <div className="button-area" data-provider="claude">
       <div className="button-area-left">
@@ -114,9 +119,9 @@ export default function ButtonArea({
         <button
           type="button"
           className="enhance-prompt-button"
-          disabled={!hasInputContent || isStreaming}
+          disabled={!hasPromptText || isStreaming}
           onClick={onEnhancePrompt}
-          title="增强提示词"
+          title={t('chat.promptEnhancer.trigger', 'Enhance prompt preview')}
         >
           <Sparkles size={16} />
         </button>

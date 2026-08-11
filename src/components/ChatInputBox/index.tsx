@@ -3,10 +3,19 @@ import ContextBar from './ContextBar';
 import InputEditable from './InputEditable';
 import CompletionDropdown, { type CompletionItem } from './CompletionDropdown';
 import ButtonArea from './ButtonArea';
+import PromptEnhanceDialog from './PromptEnhanceDialog';
 import { applyLongContextSuffix } from '../../utils/modelResolution';
 import { calculateContextPercentage, getModelContextLimit } from '../../utils/contextUsage';
-import { getAgents, getCommands, getFileTree, getPrompts, setSelectedAgent as persistSelectedAgent } from '../../utils/desktopBridgeApi';
-import { enhancePromptText } from '../../utils/promptEnhancer';
+import {
+  enhancePrompt,
+  cancelPromptEnhancement,
+  getAgents,
+  getCommands,
+  getFileTree,
+  getPrompts,
+  setSelectedAgent as persistSelectedAgent,
+} from '../../utils/desktopBridgeApi';
+import { createPromptEnhancementPreview } from '../../utils/promptEnhancer';
 import { useInputHistory } from './useInputHistory';
 import type { PermissionMode } from '../../types';
 
@@ -63,6 +72,15 @@ interface CommandEntry {
   description?: string;
 }
 
+type PromptEnhancementState = {
+  originalText: string;
+  localResult: string;
+  aiResult: string;
+  aiStatus: 'idle' | 'loading' | 'success' | 'error';
+  aiError: string;
+  requestId: string | null;
+};
+
 type Trigger = '@' | '#' | '!' | '/';
 
 const PLACEHOLDER = '@引用文件，#唤起智能体，!插入提示词，Enter 发送';
@@ -100,6 +118,13 @@ function shouldFocusEditor(event: MouseEvent<HTMLDivElement>) {
   return !target.closest('.button-area, .context-bar, .chat-completion-dropdown, button, select, input, textarea, [role="button"]');
 }
 
+function createPromptEnhancementRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `prompt-enhancement-${Date.now()}`;
+}
+
 export default function ChatInputBox({
   onSend,
   onContextUsage,
@@ -131,7 +156,10 @@ export default function ChatInputBox({
   const [streaming, setStreamingState] = useState(() => localStorage.getItem('streaming') !== 'false');
   const [alwaysThinking, setAlwaysThinkingState] = useState(() => localStorage.getItem('alwaysThinking') === 'true');
   const [longContextEnabled, setLongContextEnabledState] = useState(() => localStorage.getItem('longContextEnabled') !== 'false');
+  const [promptEnhancement, setPromptEnhancement] = useState<PromptEnhancementState | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const promptEnhancementRef = useRef<PromptEnhancementState | null>(null);
+  const activePromptEnhancementRequestIdRef = useRef<string | null>(null);
 
   const getEditorText = useCallback(() => editorRef.current?.innerText ?? text, [text]);
   const syncHistoryText = useCallback(() => {
@@ -147,14 +175,6 @@ export default function ChatInputBox({
   const effectiveModel = applyLongContextSuffix(model === 'default' ? 'claude-sonnet-4-6' : model, longContextEnabled);
   const usageMaxTokens = getModelContextLimit(effectiveModel);
   const usagePercentage = calculateContextPercentage(usageUsedTokens ?? 0, usageMaxTokens);
-
-  // ccgui clears draft text and attachments when the active session changes.
-  // Keeping a draft from the previous conversation is both surprising and a
-  // data-leak risk when the user switches projects or history entries.
-  useEffect(() => {
-    setText('');
-    setAttachments([]);
-  }, [sessionKey]);
 
   useEffect(() => {
     let disposed = false;
@@ -191,6 +211,48 @@ export default function ChatInputBox({
     setLongContextEnabledState(enabled);
     localStorage.setItem('longContextEnabled', String(enabled));
   }, []);
+
+  useEffect(() => {
+    promptEnhancementRef.current = promptEnhancement;
+  }, [promptEnhancement]);
+
+  const closePromptEnhancer = useCallback(() => {
+    const activeEnhancement = promptEnhancementRef.current;
+    if (activeEnhancement?.aiStatus === 'loading' && activeEnhancement.requestId) {
+      void cancelPromptEnhancement(activeEnhancement.requestId).catch(() => {});
+    }
+    activePromptEnhancementRequestIdRef.current = null;
+    promptEnhancementRef.current = null;
+    setPromptEnhancement(null);
+  }, []);
+
+  const openPromptEnhancer = useCallback(() => {
+    const originalText = getEditorText().trim();
+    if (!originalText || isStreaming) return;
+    const preview = createPromptEnhancementPreview(originalText);
+    setPromptEnhancement({
+      originalText,
+      localResult: preview.localResult,
+      aiResult: '',
+      aiStatus: 'idle',
+      aiError: '',
+      requestId: null,
+    });
+  }, [getEditorText, isStreaming]);
+
+  // ccgui clears draft text and attachments when the active session changes.
+  // Keeping a draft from the previous conversation is both surprising and a
+  // data-leak risk when the user switches projects or history entries.
+  useEffect(() => {
+    closePromptEnhancer();
+    setText('');
+    setAttachments([]);
+  }, [closePromptEnhancer, sessionKey]);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+    closePromptEnhancer();
+  }, [closePromptEnhancer, isStreaming]);
 
   useEffect(() => {
     if (!activeTrigger) return;
@@ -302,10 +364,6 @@ export default function ChatInputBox({
     setAttachments([]);
   }, [alwaysThinking, attachments, effectiveModel, longContextEnabled, model, onContextUsage, onSend, reasoning, recordInputHistory, selectedAgent, streaming, text]);
 
-  const enhancePrompt = useCallback(() => {
-    setText(current => enhancePromptText(current));
-  }, []);
-
   const selectCompletion = (item: CompletionItem) => {
     if (!activeTrigger) return;
     setText(prev => replaceTrigger(prev, activeTrigger.trigger, item.value));
@@ -352,6 +410,7 @@ export default function ChatInputBox({
 
       <ButtonArea
         hasInputContent={!!text.trim() || attachments.length > 0}
+        hasPromptText={!!text.trim()}
         isStreaming={isStreaming}
         mode={mode}
         setMode={setMode}
@@ -371,9 +430,91 @@ export default function ChatInputBox({
         setShowToolAnchors={setShowToolAnchors}
         onProviderSwitch={onProviderSwitch}
         onSubmit={submit}
-        onEnhancePrompt={enhancePrompt}
+        onEnhancePrompt={openPromptEnhancer}
         onStop={onStop}
       />
+
+      {promptEnhancement ? (
+        <PromptEnhanceDialog
+          originalText={promptEnhancement.originalText}
+          localResult={promptEnhancement.localResult}
+          aiResult={promptEnhancement.aiResult}
+          aiStatus={promptEnhancement.aiStatus}
+          aiError={promptEnhancement.aiError}
+          onUse={(nextText) => {
+            setText(nextText);
+            closePromptEnhancer();
+          }}
+          onRestore={() => {
+            setText(promptEnhancement.originalText);
+            closePromptEnhancer();
+          }}
+          onCancel={closePromptEnhancer}
+          onCancelAi={() => {
+            if (promptEnhancement.requestId) {
+              void cancelPromptEnhancement(promptEnhancement.requestId).catch(() => {});
+            }
+            activePromptEnhancementRequestIdRef.current = null;
+            setPromptEnhancement(current => (
+              current
+                ? {
+                    ...current,
+                    aiStatus: 'idle',
+                    aiError: '',
+                    requestId: null,
+                  }
+                : current
+            ));
+          }}
+          onAiEnhance={async () => {
+            if (promptEnhancement.aiStatus === 'loading') return;
+
+            const requestId = createPromptEnhancementRequestId();
+            activePromptEnhancementRequestIdRef.current = requestId;
+            setPromptEnhancement(current => (
+              current
+                ? {
+                    ...current,
+                    aiStatus: 'loading',
+                    aiError: '',
+                    requestId,
+                  }
+                : current
+            ));
+
+            try {
+              const result = await enhancePrompt({
+                requestId,
+                text: promptEnhancement.originalText,
+                localResult: promptEnhancement.localResult,
+              });
+
+              if (activePromptEnhancementRequestIdRef.current !== result.requestId) return;
+
+              setPromptEnhancement(current => {
+                if (!current || current.requestId !== result.requestId) return current;
+                return {
+                  ...current,
+                  aiResult: result.text,
+                  aiStatus: 'success',
+                  aiError: '',
+                };
+              });
+            } catch (error) {
+              if (activePromptEnhancementRequestIdRef.current !== requestId) return;
+
+              setPromptEnhancement(current => {
+                if (!current || current.requestId !== requestId) return current;
+                return {
+                  ...current,
+                  aiStatus: 'error',
+                  aiError: error instanceof Error ? error.message : String(error),
+                };
+              });
+            }
+          }}
+        />
+      ) : null}
 
       {!connected && <div className="connection-status">连接断开，重连中...</div>}
     </div>
