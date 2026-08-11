@@ -166,6 +166,23 @@ test('agent settings UI exposes managed CRUD, native read-only state, and import
   assert.match(dialog, /provider-dialog-overlay/);
 });
 
+test('chat agent selection hydrates from and persists to the ccNexus agent store', async () => {
+  const input = await readFile(path.join(process.cwd(), 'src/components/ChatInputBox/index.tsx'), 'utf8');
+  assert.match(input, /selectedAgentId/);
+  assert.match(input, /setSelectedAgent as persistSelectedAgent/);
+  assert.match(input, /persistSelectedAgent/);
+
+  const { buildClaudeClientOptions } = await import('../server/claudeRequestContext.js');
+  const options = await buildClaudeClientOptions({
+    cwd: process.cwd(),
+    clientOptions: { agent: 'writer' },
+    loadAgent: async () => ({ content: 'Managed writer instructions.' }),
+    loadMcpServers: async () => null,
+  });
+  assert.equal(options.agentPrompt, 'Managed writer instructions.');
+  assert.equal(options.agent, 'writer');
+});
+
 test('ccNexus managed agents support isolated CRUD and preserve native Claude agents', async () => {
   const { LocalConfigService } = await import('../desktop/runtime/localConfigService.js');
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-agent-store-'));

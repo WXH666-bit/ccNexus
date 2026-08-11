@@ -5,7 +5,7 @@ import CompletionDropdown, { type CompletionItem } from './CompletionDropdown';
 import ButtonArea from './ButtonArea';
 import { applyLongContextSuffix } from '../../utils/modelResolution';
 import { calculateContextPercentage, getModelContextLimit } from '../../utils/contextUsage';
-import { getAgents, getCommands, getFileTree, getPrompts } from '../../utils/desktopBridgeApi';
+import { getAgents, getCommands, getFileTree, getPrompts, setSelectedAgent as persistSelectedAgent } from '../../utils/desktopBridgeApi';
 import { enhancePromptText } from '../../utils/promptEnhancer';
 import { useInputHistory } from './useInputHistory';
 import type { PermissionMode } from '../../types';
@@ -156,9 +156,25 @@ export default function ChatInputBox({
     setAttachments([]);
   }, [sessionKey]);
 
+  useEffect(() => {
+    let disposed = false;
+    getAgents()
+      .then(data => {
+        if (disposed || data.selectedAgentId === undefined) return;
+        const nextAgent = data.selectedAgentId || '';
+        setSelectedAgentState(nextAgent);
+        localStorage.setItem('selectedAgent', nextAgent);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
   const setSelectedAgent = useCallback((agent: string) => {
     setSelectedAgentState(agent);
     localStorage.setItem('selectedAgent', agent);
+    void persistSelectedAgent(agent || null).catch(() => {});
   }, []);
 
   const setStreaming = useCallback((enabled: boolean) => {
