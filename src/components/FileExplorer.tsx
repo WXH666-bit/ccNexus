@@ -9,10 +9,10 @@ import {
   FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
-  RefreshCw,
   Save,
   X,
 } from 'lucide-react';
+import RefreshIcon from './RefreshIcon';
 
 interface FileNode {
   name: string;
@@ -320,7 +320,7 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
             <FolderPlus size={15} />
           </button>
           <button type="button" onClick={loadTree} title="刷新文件" aria-label="刷新文件" disabled={loadingTree}>
-            <RefreshCw size={15} className={loadingTree ? 'spinning' : ''} />
+            <RefreshIcon size={15} spinning={loadingTree} />
           </button>
           <button type="button" onClick={() => setExplorerCollapsed(true)} title="收起文件" aria-label="收起文件">
             <PanelLeftClose size={15} />

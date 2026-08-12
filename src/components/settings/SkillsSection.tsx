@@ -8,10 +8,10 @@ import {
   Folder,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react';
+import RefreshIcon from '../RefreshIcon';
 import { useTranslation } from 'react-i18next';
 import { deleteSkill, getSkills, importSkills, openSkill, toggleSkill } from '../../utils/desktopBridgeApi';
 import { buildSkillsViewModel } from '../../utils/skillsViewModel';
@@ -141,7 +141,7 @@ export default function SkillsSection() {
             <button className="provider-primary-button" onClick={() => setImportMenu(open => !open)} disabled={busyId?.startsWith('import-')}><Plus size={15} /> 导入 Skill <ChevronDown size={13} /></button>
             {importMenu && <div className="skills-import-menu"><button onClick={() => void handleImport('global')}><Folder size={14} />导入到全局</button><button onClick={() => void handleImport('local')}><Folder size={14} />导入到当前项目</button></div>}
           </div>
-          <button className="icon-button" onClick={() => void loadSkills()} disabled={loading} title="刷新"><RefreshCw size={16} className={loading ? 'spin' : ''} /></button>
+          <button className="icon-button" onClick={() => void loadSkills()} disabled={loading} title="刷新"><RefreshIcon size={16} spinning={loading} /></button>
         </div>
       </div>
 

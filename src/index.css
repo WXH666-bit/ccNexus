@@ -541,6 +541,35 @@ html, body, #root {
   object-fit: contain;
 }
 
+.refresh-icon {
+  transform-origin: center;
+}
+
+.refresh-icon--spinning {
+  animation: refresh-icon-spin 1100ms linear infinite;
+}
+
+.refresh-icon--clicked:not(.refresh-icon--spinning) {
+  animation: refresh-icon-click 1000ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes refresh-icon-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes refresh-icon-click {
+  0% { transform: rotate(0deg); }
+  45% { transform: rotate(190deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh-icon--spinning,
+  .refresh-icon--clicked {
+    animation: none;
+  }
+}
+
 .spinning {
   animation: spin 0.8s linear infinite;
 }
@@ -2791,7 +2820,10 @@ html, body, #root {
 .chat-completion-dropdown {
   left: 8px;
   right: 8px;
-  bottom: 42px;
+  bottom: calc(100% + 8px);
+  margin-bottom: 0;
+  max-height: min(30vh, 240px);
+  overscroll-behavior: contain;
 }
 
 .chat-completion-item {

@@ -149,6 +149,15 @@ test('ModeSelect dropdown is left aligned so it stays inside the chat input boun
   assert.match(styles, /\.mode-select-dropdown\s*\{[^}]*right:\s*auto;/s);
 });
 
+test('slash completion menu is positioned above the full composer', () => {
+  const styles = read('src/index.css');
+  const completionRule = styles.match(/\.chat-completion-dropdown\s*\{[^}]*\}/s)?.[0] || '';
+
+  assert.match(completionRule, /bottom:\s*calc\(100%\s*\+\s*8px\);/);
+  assert.match(completionRule, /max-height:\s*min\(30vh,\s*240px\);/);
+  assert.match(completionRule, /overscroll-behavior:\s*contain;/);
+});
+
 test('permission mode labels distinguish SDK auto from full access', () => {
   const modeSelect = read('src/components/ChatInputBox/ModeSelect.tsx');
   const buttonArea = read('src/components/ChatInputBox/ButtonArea.tsx');

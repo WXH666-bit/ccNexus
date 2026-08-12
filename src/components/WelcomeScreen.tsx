@@ -15,7 +15,7 @@ export default function WelcomeScreen({ onSuggestion }: Props) {
     <div className="welcome-screen">
       <div className="welcome-logo">
         <div className="logo-icon">
-          <img className="welcome-brand-logo" src="/ccnexus-logo.png" alt="" draggable="false" />
+          <img className="welcome-brand-logo" src="./ccnexus-logo.png" alt="" draggable="false" />
         </div>
         <h1 className="welcome-title">ccNexus</h1>
         <p className="welcome-subtitle">可视化 Claude Code 客户端</p>

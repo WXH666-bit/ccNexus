@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, CheckSquare, ChevronLeft, Copy, Download, Edit3, MessageSquare, RefreshCw, Search, Star, Trash2, X } from 'lucide-react';
+import { Check, CheckSquare, ChevronLeft, Copy, Download, Edit3, MessageSquare, Search, Star, Trash2, X } from 'lucide-react';
+import RefreshIcon from '../components/RefreshIcon';
 import type { Session } from '../types';
 import { useDesktopChat } from '../hooks/useDesktopChat';
 import { deleteSession, getSessions, loadSession, renameSession, toggleFavoriteSession } from '../utils/sessionBridgeApi';
@@ -194,7 +195,7 @@ export default function HistoryView() {
             title="深度搜索"
             aria-label="深度搜索"
           >
-            <RefreshCw size={16} className={deepSearching ? 'spin' : ''} />
+            <RefreshIcon size={16} spinning={deepSearching} />
           </button>
           {selectionMode && (
             <>

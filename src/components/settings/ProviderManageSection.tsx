@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Check, RefreshCw, Server, Terminal } from 'lucide-react';
+import { Check, Server, Terminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import RefreshIcon from '../RefreshIcon';
 import { getProviders, switchProvider } from '../../utils/desktopBridgeApi';
 
 const LOCAL_SETTINGS_ID = '__local_settings_json__';
@@ -79,7 +80,7 @@ export default function ProviderManageSection() {
           disabled={loading}
           title={t('common.refresh', { defaultValue: 'Refresh' })}
         >
-          <RefreshCw size={16} className={loading ? 'spin' : ''} />
+          <RefreshIcon size={16} spinning={loading} />
         </button>
       </div>
 

@@ -6,10 +6,10 @@ import {
   Lock,
   Pencil,
   Plus,
-  RefreshCw,
   Trash2,
   Upload,
 } from 'lucide-react';
+import RefreshIcon from '../RefreshIcon';
 import { useTranslation } from 'react-i18next';
 import AgentDialog, { type AgentEditorValue } from '../AgentDialog';
 import {
@@ -156,7 +156,7 @@ export default function AgentSection() {
             {t('settings.agents.add')}
           </button>
           <button className="icon-button" onClick={() => void loadAgents()} disabled={loading} title={t('common.refresh', { defaultValue: 'Refresh' })}>
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+            <RefreshIcon size={16} spinning={loading} />
           </button>
         </div>
       </div>

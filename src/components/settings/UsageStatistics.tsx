@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, ChevronLeft, ChevronRight, Folder, FolderOpen, LayoutDashboard, List, RefreshCw, Sparkles, Zap } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, Folder, FolderOpen, LayoutDashboard, List, Sparkles, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import RefreshIcon from '../RefreshIcon';
 import { getUsageStatistics } from '../../utils/desktopBridgeApi';
 
 interface UsageTotals {
@@ -258,7 +259,7 @@ export default function UsageStatistics() {
           <p className="settings-desc">{t('settings.usage.desc')} 按 ccgui 方式读取真实 assistant usage，并按内层 message.id 去重。</p>
         </div>
         <button className="icon-button" onClick={() => void loadStatistics()} disabled={loading} title="刷新">
-          <RefreshCw size={16} className={loading ? 'spin' : ''} />
+          <RefreshIcon size={16} spinning={loading} />
         </button>
       </div>
 

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
-import { RefreshCcw, Sparkles, X } from 'lucide-react';
+import { Sparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import RefreshIcon from '../RefreshIcon';
 
 type PromptEnhancementAiStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -161,7 +162,7 @@ export default function PromptEnhanceDialog({
 
         <div className="provider-dialog-footer prompt-enhance-actions">
           <button type="button" className="provider-secondary-button" onClick={onRestore}>
-            <RefreshCcw size={16} />
+            <RefreshIcon size={16} counterClockwise />
             {t('chat.promptEnhancer.restore', 'Restore original')}
           </button>
           <div className="prompt-enhance-actions-right">

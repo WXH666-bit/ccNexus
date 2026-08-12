@@ -10,10 +10,10 @@ import {
   Brain,
   Wrench,
   X,
-  RefreshCw,
   RotateCcw,
   Square,
 } from 'lucide-react';
+import RefreshIcon from './RefreshIcon';
 import { useTranslation } from 'react-i18next';
 import {
   getAgents,
@@ -400,7 +400,7 @@ export default function ConfigSelect({
                 <button className="back-btn" onClick={() => setMenuState('main')}>←</button>
                 <span>{t('config.processes')}</span>
                 <button className="process-refresh-btn" onClick={() => loadProcesses()} title="刷新">
-                  <RefreshCw size={14} className={processesLoading ? 'spin' : ''} />
+                  <RefreshIcon size={14} spinning={processesLoading} />
                 </button>
               </div>
               <div className="config-menu-items process-menu-items">

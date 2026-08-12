@@ -14,7 +14,7 @@ export default function App() {
     <div className="app-root">
       <div className="window-drag-region" aria-hidden="true">
         <div className="window-title-brand">
-          <img className="window-title-logo" src="/ccnexus-logo.png" alt="ccNexus" draggable="false" />
+          <img className="window-title-logo" src="./ccnexus-logo.png" alt="ccNexus" draggable="false" />
           <span className="window-title">ccNexus</span>
         </div>
       </div>

@@ -11,7 +11,6 @@ import {
   Folder,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Server,
   Terminal,
@@ -19,6 +18,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import RefreshIcon from '../RefreshIcon';
 import { useTranslation } from 'react-i18next';
 import {
   deleteMcpServer,
@@ -224,7 +224,7 @@ export default function MCPSection() {
             <Plus size={15} /> 添加服务器
           </button>
           <button className="icon-button" onClick={() => void loadServers()} disabled={loading} title="刷新">
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+            <RefreshIcon size={16} spinning={loading} />
           </button>
         </div>
       </div>

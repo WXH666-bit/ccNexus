@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { KeyRound, RefreshCw } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import RefreshIcon from '../RefreshIcon';
 import { getProviders } from '../../utils/desktopBridgeApi';
 
 interface ProviderResponse {
@@ -50,7 +51,7 @@ export default function EnvVarEditor() {
           <p className="settings-desc">{t('settings.env.desc')} 当前仅展示生效环境，不会写入 Claude Code 配置。</p>
         </div>
         <button className="icon-button" onClick={() => void loadEnvironment()} disabled={loading} title="刷新">
-          <RefreshCw size={16} className={loading ? 'spin' : ''} />
+          <RefreshIcon size={16} spinning={loading} />
         </button>
       </div>
 

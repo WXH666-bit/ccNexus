@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, Download, RefreshCw, RotateCw } from 'lucide-react';
+import { AlertCircle, Download, RotateCw } from 'lucide-react';
+import RefreshIcon from '../RefreshIcon';
 import {
   checkForUpdates,
   downloadUpdate,
@@ -110,7 +111,7 @@ export default function AppUpdateSection() {
       <div className="app-update-header">
         <div className="app-update-heading">
           <span className="app-update-icon" aria-hidden="true">
-            <RefreshCw size={16} />
+            <RefreshIcon size={16} spinning={isChecking || isDownloading} />
           </span>
           <div>
             <div className="app-update-title" id="app-update-title">
@@ -159,7 +160,7 @@ export default function AppUpdateSection() {
 
           {state.isPackaged && !isChecking && !isDownloading && state.status !== 'available' && state.status !== 'downloaded' && (
             <button className="app-update-action app-update-action-secondary" disabled={busy} onClick={() => void runAction(checkForUpdates)}>
-              <RefreshCw size={14} aria-hidden="true" />
+              <RefreshIcon size={14} spinning={busy} aria-hidden="true" />
               {state.status === 'error' ? t('settings.update.retry') : t('settings.update.check')}
             </button>
           )}
