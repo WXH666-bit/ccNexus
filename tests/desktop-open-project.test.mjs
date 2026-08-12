@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -119,6 +119,37 @@ test('desktop workspace service restores the last active session per workspace',
     assert.equal(await restarted.getActiveSessionId(), 'session-b');
     await restarted.setWorkspace(workspaceA);
     assert.equal(await restarted.getActiveSessionId(), 'session-a');
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('desktop workspace service rejects symlink targets outside the workspace', async (t) => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-workspace-symlink-'));
+  try {
+    const workspace = path.join(tempRoot, 'workspace');
+    const outside = path.join(tempRoot, 'outside');
+    await mkdir(workspace);
+    await mkdir(outside);
+    await writeFile(path.join(outside, 'secret.txt'), 'private', 'utf8');
+
+    try {
+      await symlink(outside, path.join(workspace, 'linked'), 'junction');
+    } catch (error) {
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') {
+        t.skip('directory junctions are unavailable in this environment');
+        return;
+      }
+      throw error;
+    }
+
+    const service = new WorkspaceFileService({ cwd: workspace });
+    await assert.rejects(() => service.readFile('linked/secret.txt'), /Access denied/);
+    await assert.rejects(() => service.listTree({ path: 'linked' }), /Access denied/);
+    await assert.rejects(
+      () => service.saveFile({ path: 'linked/secret.txt', content: 'changed' }),
+      /Access denied/,
+    );
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

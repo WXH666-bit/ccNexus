@@ -1,4 +1,17 @@
 const DEFAULT_RULE_FLAGS = 'g';
+const MAX_RULE_PATTERN_LENGTH = 256;
+const MAX_RULE_INPUT_LENGTH = 100_000;
+
+function hasNestedQuantifier(pattern) {
+  // Reject common catastrophic-backtracking shapes such as `(a+)+` and
+  // quantified character classes followed by another quantifier.
+  return /(?:\([^)]*[+*][^)]*\)|\[[^\]]+\][+*]|\\[dDsSwW][+*])\s*(?:[+*?]|\{\d)/.test(pattern)
+    || /(?:[+*?]|\{\d+(?:,\d*)?\})\s*(?:[+*?]|\{\d)/.test(pattern);
+}
+
+function isSafeRulePattern(pattern) {
+  return pattern.length <= MAX_RULE_PATTERN_LENGTH && !hasNestedQuantifier(pattern);
+}
 
 function normalizeText(text) {
   return String(text ?? '').replace(/\r\n?/g, '\n').trim();
@@ -41,10 +54,14 @@ function restoreSegments(text, protectedParts) {
 
 export function applyPromptRules(text, rules = []) {
   let current = normalizeText(text);
+  if (current.length > MAX_RULE_INPUT_LENGTH) return current;
+
   for (const rule of rules) {
     if (!rule || rule.enabled === false || !rule.pattern) continue;
+    const pattern = String(rule.pattern);
+    if (!isSafeRulePattern(pattern)) continue;
     try {
-      current = current.replace(new RegExp(rule.pattern, DEFAULT_RULE_FLAGS), rule.replacement ?? '');
+      current = current.replace(new RegExp(pattern, DEFAULT_RULE_FLAGS), rule.replacement ?? '');
     } catch {
       // Invalid custom rule must not affect the prompt.
     }

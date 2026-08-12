@@ -25,6 +25,7 @@ import type {
 } from '../types';
 import { computeDiff } from '../utils/diff';
 import { buildSubagentProcessModel, formatSubagentDuration } from '../utils/subagentProcess';
+import { sanitizeHtml } from '../utils/markdown';
 
 type StatusTab = 'tasks' | 'subagents' | 'edits';
 
@@ -389,7 +390,7 @@ function StatusFileChangesList({
               {expanded && (diffHtml || diffTruncated) ? (
                 <div className="status-file-diff">
                   {diffTruncated ? <div className="status-file-diff-summary">{t('status.diffTooLarge', { defaultValue: '变更过大，已隐藏预览；点击文件名打开编辑器查看。' })}</div> : null}
-                  {diffHtml ? <div dangerouslySetInnerHTML={{ __html: diffHtml }} /> : null}
+                  {diffHtml ? <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(diffHtml) }} /> : null}
                 </div>
               ) : null}
             </div>

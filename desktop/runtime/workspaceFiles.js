@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 const MAX_FILE_SIZE = 1024 * 1024;
@@ -21,9 +21,18 @@ function isDotfile(name) {
   return name.startsWith('.') && name !== '.' && name !== '..';
 }
 
+function realpathOrResolve(targetPath) {
+  const resolved = path.resolve(targetPath);
+  try {
+    return realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 export class WorkspaceFileService {
   constructor({ cwd = process.cwd(), stateFile = null } = {}) {
-    this.workspaceRoot = path.resolve(cwd);
+    this.workspaceRoot = realpathOrResolve(cwd);
     this.stateFile = stateFile;
     this.stateWritePromise = Promise.resolve();
   }
@@ -39,7 +48,7 @@ export class WorkspaceFileService {
     if (typeof nextPath !== 'string' || !nextPath.trim()) {
       throw new Error('Missing workspace path');
     }
-    const resolved = path.resolve(nextPath);
+    const resolved = await fs.realpath(path.resolve(nextPath));
     const stat = await fs.stat(resolved);
     if (!stat.isDirectory()) throw new Error('Workspace path is not a directory');
     this.workspaceRoot = resolved;
@@ -54,7 +63,7 @@ export class WorkspaceFileService {
       if (typeof state.lastWorkspace !== 'string' || !state.lastWorkspace.trim()) {
         return this.getWorkspace();
       }
-      const resolved = path.resolve(state.lastWorkspace);
+      const resolved = await fs.realpath(path.resolve(state.lastWorkspace));
       const stat = await fs.stat(resolved);
       if (stat.isDirectory()) this.workspaceRoot = resolved;
     } catch {
@@ -127,6 +136,18 @@ export class WorkspaceFileService {
     return resolved;
   }
 
+  async resolveSafePath(requestedPath) {
+    const lexicalPath = this.safePath(requestedPath);
+    if (!lexicalPath) return null;
+
+    const [workspaceRoot, targetPath] = await Promise.all([
+      fs.realpath(this.workspaceRoot).catch(() => this.workspaceRoot),
+      fs.realpath(lexicalPath).catch(() => null),
+    ]);
+    if (!targetPath || !isPathInside(workspaceRoot, targetPath)) return null;
+    return targetPath;
+  }
+
   isProtectedWorkspacePath(absPath) {
     const relativePath = path.relative(this.workspaceRoot, absPath).replace(/\\/g, '/');
     const segments = relativePath.split('/').filter(Boolean);
@@ -163,6 +184,7 @@ export class WorkspaceFileService {
         if (count >= maxItems) break;
         if (!showDotfiles && isDotfile(entry.name)) continue;
         if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        if (entry.isSymbolicLink()) continue;
 
         const absPath = path.join(nodePath, entry.name);
         const relativePath = path.relative(this.workspaceRoot, absPath) || '.';
@@ -195,7 +217,7 @@ export class WorkspaceFileService {
       showDotfiles = true,
       maxItems: requestedMaxItems = 10000,
     } = options;
-    const targetPath = this.safePath(requestedPath);
+    const targetPath = await this.resolveSafePath(requestedPath);
     if (!targetPath) throw new Error('Access denied');
 
     const stat = await fs.stat(targetPath);
@@ -239,6 +261,7 @@ export class WorkspaceFileService {
       for (const entry of entries) {
         if (files.length >= limit) break;
         if (excludeDirs.has(entry.name) || isDotfile(entry.name)) continue;
+        if (entry.isSymbolicLink()) continue;
 
         const fullPath = path.join(dir, entry.name);
         const relativePath = path.join(basePath, entry.name).replace(/\\/g, '/');
@@ -257,7 +280,7 @@ export class WorkspaceFileService {
 
   async readFile(filePath) {
     const requestedPath = typeof filePath === 'string' ? filePath : filePath?.path;
-    const absPath = this.safePath(requestedPath);
+    const absPath = await this.resolveSafePath(requestedPath);
     if (!absPath) throw new Error('Access denied');
 
     const stat = await fs.stat(absPath);
@@ -293,7 +316,7 @@ export class WorkspaceFileService {
       throw new Error('Content must be text');
     }
 
-    const absPath = this.safePath(requestedPath);
+    const absPath = await this.resolveSafePath(requestedPath);
     if (!absPath) throw new Error('Access denied');
     if (this.isProtectedWorkspacePath(absPath)) {
       throw new Error('Protected workspace files cannot be modified');

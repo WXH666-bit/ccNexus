@@ -11,7 +11,7 @@ import ToolGroupBlock from './toolBlocks/ToolGroupBlock';
 import AskUserQuestionCard from './AskUserQuestionCard';
 import CollapsibleBlock from './CollapsibleBlock';
 import ThinkingBlock from './ThinkingBlock';
-import { renderMarkdown } from '../utils/markdown';
+import { renderMarkdown, sanitizeHtml } from '../utils/markdown';
 import {
   AGENT_TOOL_NAMES,
   BASH_TOOL_NAMES,
@@ -44,6 +44,16 @@ function highlightText(text: string, query: string, isCurrentMatch: boolean): st
   const regex = new RegExp(`(${escapedQuery})`, 'gi');
   const className = isCurrentMatch ? 'search-highlight-current' : 'search-highlight';
   return text.replace(regex, `<mark class="${className}">$1</mark>`);
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] || character);
 }
 
 function textFromMessage(message: ChatMessage): string {
@@ -130,9 +140,10 @@ export default function MessageItem({
 
   if (message.role === 'user') {
     const displayText = textFromMessage(message);
+    const escapedText = escapeHtml(displayText);
     const highlightedText = searchHighlight?.query
-      ? highlightText(displayText, searchHighlight.query, isCurrentSearchMatch)
-      : displayText;
+      ? highlightText(escapedText, searchHighlight.query, isCurrentSearchMatch)
+      : escapedText;
 
     return (
       <div className={`message-row user-row ${isCurrentSearchMatch ? 'search-match' : ''}`} id={`msg-${message.id}`}>
@@ -259,7 +270,7 @@ export default function MessageItem({
             if (!block.text.trim() && message.isStreaming) return null;
             const rendered = renderMarkdown(block.text);
             const highlighted = searchHighlight?.query
-              ? highlightText(rendered, searchHighlight.query, isCurrentSearchMatch)
+              ? sanitizeHtml(highlightText(rendered, searchHighlight.query, isCurrentSearchMatch))
               : rendered;
             return <div key={idx} className="markdown-body" dangerouslySetInnerHTML={{ __html: highlighted }} />;
           }

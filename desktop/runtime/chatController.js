@@ -315,7 +315,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   async function rememberEditableFile(sessionId, block) {
     if (block?.type !== 'tool_use' || !['Edit', 'MultiEdit', 'Write'].includes(block.name)) return;
     const filePath = block.input?.file_path || block.input?.path;
-    const absPath = filePath && workspaceFiles.safePath(filePath);
+    const absPath = filePath && (typeof workspaceFiles.resolveSafePath === 'function'
+      ? await workspaceFiles.resolveSafePath(filePath)
+      : workspaceFiles.safePath(filePath));
     if (!absPath) return;
     if (workspaceFiles.isProtectedWorkspacePath?.(absPath)) return;
     if (!fileEditHistory.has(sessionId)) fileEditHistory.set(sessionId, new Map());
@@ -633,7 +635,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
 
       case 'undo_file': {
         const targetSessionId = message.sessionId || currentSessionId;
-        const absPath = workspaceFiles.safePath(message.filePath);
+        const absPath = typeof workspaceFiles.resolveSafePath === 'function'
+          ? await workspaceFiles.resolveSafePath(message.filePath)
+          : workspaceFiles.safePath(message.filePath);
         if (!absPath || workspaceFiles.isProtectedWorkspacePath?.(absPath)) {
           emitSafe(emit, { type: 'undo_complete', sessionId: targetSessionId, success: false, error: 'Access denied' });
           break;

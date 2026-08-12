@@ -51,6 +51,7 @@ interface UsageStatisticsData {
   projectName?: string;
   totalSessions: number;
   totalUsage: UsageTotals;
+  promptEnhancementUsage?: UsageTotals;
   estimatedCost: number;
   sessions: UsageSession[];
   dailyUsage: UsageDay[];
@@ -110,6 +111,16 @@ function addUsage(target: UsageTotals, source: UsageTotals) {
   target.totalTokens += source.totalTokens || 0;
 }
 
+function subtractUsage(total: UsageTotals, excluded: UsageTotals): UsageTotals {
+  return {
+    inputTokens: Math.max(0, (total.inputTokens || 0) - (excluded.inputTokens || 0)),
+    outputTokens: Math.max(0, (total.outputTokens || 0) - (excluded.outputTokens || 0)),
+    cacheWriteTokens: Math.max(0, (total.cacheWriteTokens || 0) - (excluded.cacheWriteTokens || 0)),
+    cacheReadTokens: Math.max(0, (total.cacheReadTokens || 0) - (excluded.cacheReadTokens || 0)),
+    totalTokens: Math.max(0, (total.totalTokens || 0) - (excluded.totalTokens || 0)),
+  };
+}
+
 function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -152,7 +163,7 @@ export default function UsageStatistics() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<UsageTab>('overview');
   const [projectScope, setProjectScope] = useState<ProjectScope>('current');
-  const [dateRange, setDateRange] = useState<DateRange>('7d');
+  const [dateRange, setDateRange] = useState<DateRange>('today');
   const [sessionSort, setSessionSort] = useState<'cost' | 'time'>('cost');
   const [sessionPage, setSessionPage] = useState(1);
 
@@ -200,9 +211,16 @@ export default function UsageStatistics() {
     return summary;
   }, [statistics]);
 
+  const conversationUsage = useMemo(() => (
+    subtractUsage(
+      statistics?.totalUsage || EMPTY_USAGE,
+      statistics?.promptEnhancementUsage || EMPTY_USAGE,
+    )
+  ), [statistics]);
+
   const cacheHitRate = useMemo(() => {
-    return calculateCacheHitRate(selectedUsage);
-  }, [selectedUsage]);
+    return calculateCacheHitRate(conversationUsage);
+  }, [conversationUsage]);
 
   const filteredSessions = useMemo(() => {
     const cutoff = dateRangeStart(dateRange);
@@ -305,7 +323,7 @@ export default function UsageStatistics() {
                   <div className="usage-today-metric"><span>缓存创建</span><strong>{formatTokens(selectedUsage.cacheWriteTokens)}</strong></div>
                   <div className="usage-today-metric"><span>缓存读取</span><strong>{formatTokens(selectedUsage.cacheReadTokens)}</strong></div>
                   <div className="usage-today-metric usage-today-cache">
-                    <div><span>缓存命中率</span><strong>{cacheHitRate.toFixed(1)}%</strong></div>
+                    <div><span>正常对话缓存命中率</span><strong>{cacheHitRate.toFixed(1)}%</strong></div>
                     <div className="usage-today-progress"><span style={{ width: `${Math.min(100, cacheHitRate)}%` }} /></div>
                   </div>
                 </div>
@@ -314,7 +332,7 @@ export default function UsageStatistics() {
                 <div className="stat-card"><h4>总费用</h4><div className="stat-value">{formatCost(selectedUsage.cost)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.cost)} 较上周</span></div></div>
                 <div className="stat-card"><h4>总会话</h4><div className="stat-value">{selectedUsage.sessions}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.sessions)} 较上周</span></div></div>
                 <div className="stat-card"><h4>总 Tokens</h4><div className="stat-value">{formatTokens(selectedUsage.totalTokens)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.tokens)} 较上周</span></div></div>
-                <div className="stat-card"><h4>缓存命中率</h4><div className="stat-value">{cacheHitRate.toFixed(1)}%</div><div className="stat-detail"><span>{formatTokens(selectedUsage.cacheReadTokens)} 缓存读取</span></div></div>
+                <div className="stat-card"><h4>正常对话缓存命中率</h4><div className="stat-value">{cacheHitRate.toFixed(1)}%</div><div className="stat-detail"><span>{formatTokens(conversationUsage.cacheReadTokens)} 缓存读取</span></div></div>
               </div>
               <div className="usage-token-breakdown">
                 {([

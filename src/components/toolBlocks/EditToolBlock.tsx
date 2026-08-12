@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Pencil } from 'lucide-react';
 import type { ToolResultBlock, ToolUseBlock } from '../../types';
 import { computeDiff, computeDiffStats } from '../../utils/diff';
+import { sanitizeHtml } from '../../utils/markdown';
 
 interface Props {
   block: ToolUseBlock;
@@ -47,7 +48,7 @@ export default function EditToolBlock({ block, result }: Props) {
             {diffPreview && (diffPreview.truncated ? (
               <div className="diff-preview-summary">Diff is too large to render here; open the file to inspect the full change.</div>
             ) : (
-              <div className="diff-view" dangerouslySetInnerHTML={{ __html: diffPreview.html }} />
+              <div className="diff-view" dangerouslySetInnerHTML={{ __html: sanitizeHtml(diffPreview.html) }} />
             ))}
           </div>
         </div>

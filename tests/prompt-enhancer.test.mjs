@@ -53,6 +53,14 @@ test('applies enabled prompt rules in order', () => {
   assert.equal(result, 'one two');
 });
 
+test('ignores custom regular expressions with nested quantifiers', () => {
+  const result = applyPromptRules('aaaa', [
+    { pattern: '(a+)+', replacement: 'unsafe', enabled: true },
+  ]);
+
+  assert.equal(result, 'aaaa');
+});
+
 test('organizePromptText leaves already short prompts unchanged', () => {
   assert.equal(organizePromptText('短句'), '短句');
 });

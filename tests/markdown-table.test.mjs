@@ -38,3 +38,13 @@ test('light theme keeps highlighted markdown code readable', () => {
   assert.match(css, /\.markdown-body pre code\.hljs\s*\{[\s\S]*color:\s*var\(--code-text\);/);
   assert.match(css, /\.markdown-body pre code\.hljs \.hljs-comment[\s\S]*color:\s*var\(--code-comment\);/);
 });
+
+test('rendered markdown is sanitized before it reaches dangerouslySetInnerHTML', () => {
+  const markdown = read('src/utils/markdown.ts');
+  const messageItem = read('src/components/MessageItem.tsx');
+
+  assert.match(markdown, /DOMPurify\.sanitize/);
+  assert.match(markdown, /sanitizeHtml/);
+  assert.match(messageItem, /escapeHtml\(displayText\)/);
+  assert.match(messageItem, /sanitizeHtml\(highlightText\(/);
+});

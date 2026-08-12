@@ -430,6 +430,7 @@ test('desktop usage statistics merge prompt enhancement ledger usage without cre
 
 test('usage statistics UI renders the backend today summary contract', () => {
   const source = readFileSync(path.join(process.cwd(), 'src/components/settings/UsageStatistics.tsx'), 'utf8');
+  assert.match(source, /useState<DateRange>\('today'\)/);
   assert.match(source, /todayUsage/);
   assert.match(source, /selectedUsage\.requestCount/);
   assert.match(source, /selectedUsage\.cost/);
@@ -438,4 +439,12 @@ test('usage statistics UI renders the backend today summary contract', () => {
   assert.match(source, /\['today', '7d', '30d', 'all'\]/);
   assert.match(source, /selectedUsage/);
   assert.match(source, /range === 'today'/);
+});
+
+test('usage statistics keeps prompt enhancement usage out of the normal chat cache-rate calculation', () => {
+  const source = readFileSync(path.join(process.cwd(), 'src/components/settings/UsageStatistics.tsx'), 'utf8');
+
+  assert.match(source, /promptEnhancementUsage/);
+  assert.match(source, /conversationUsage/);
+  assert.match(source, /calculateCacheHitRate\(conversationUsage\)/);
 });

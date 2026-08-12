@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import hljs from 'highlight.js';
+import DOMPurify from 'dompurify';
 
 // Configure marked
 marked.setOptions({
@@ -17,12 +18,18 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
 
 marked.use({ renderer });
 
+export function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ADD_ATTR: ['data-file'],
+  });
+}
+
 export function renderMarkdown(text: string): string {
   try {
     const html = marked.parse(text) as string;
     // Convert file references to clickable links
-    return html.replace(/`([^`\n]+\.\w{1,4})`/g, '<code class="file-link" data-file="$1">$1</code>');
+    return sanitizeHtml(html.replace(/`([^`\n]+\.\w{1,4})`/g, '<code class="file-link" data-file="$1">$1</code>'));
   } catch {
-    return text;
+    return sanitizeHtml(text);
   }
 }
