@@ -7,7 +7,8 @@ interface Props {
 }
 
 export default function ReadToolBlock({ block, result }: Props) {
-  const filePath = (block.input.file_path as string) || (block.input.path as string) || 'unknown';
+  const filePath = (block.input.file_path as string) || (block.input.path as string)
+    || (block._partialInput ? '正在解析路径…' : '正在准备参数…');
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
 
   return (

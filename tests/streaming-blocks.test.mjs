@@ -27,8 +27,25 @@ test('streaming tool input keeps partial json until it becomes valid', () => {
   applyStreamEventToBlocks(state, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'bash-1', name: 'Bash' } });
   applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command"' } });
   assert.deepEqual(state.blocks[0].input, {});
+  assert.equal(state.blocks[0]._partialInput, '{"command"');
+  assert.equal(state.blocks[0]._partialCommand, '');
   applyStreamEventToBlocks(state, { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: ':"npm test"}' } });
   assert.deepEqual(state.blocks[0].input, { command: 'npm test' });
+  assert.equal(state.blocks[0]._partialInput, undefined);
+  assert.equal(state.blocks[0]._partialCommand, undefined);
+});
+
+test('streaming write blocks expose content while the JSON input is incomplete', () => {
+  const state = createStreamingBlockState();
+  applyStreamEventToBlocks(state, { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'write-1', name: 'Write' } });
+  applyStreamEventToBlocks(state, {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'input_json_delta', partial_json: '{"path":"page.html","content":"<h1>Live' },
+  });
+
+  assert.equal(state.blocks[0]._partialContent, '<h1>Live');
+  assert.deepEqual(state.blocks[0].input, {});
 });
 
 test('streaming accumulator keeps tool_result blocks across later deltas', () => {

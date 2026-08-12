@@ -35,6 +35,8 @@ export interface ToolUseBlock {
   name: string;
   input: Record<string, unknown>;
   _partialInput?: string;
+  _partialCommand?: string;
+  _partialContent?: string;
 }
 
 export interface ToolResultBlock {

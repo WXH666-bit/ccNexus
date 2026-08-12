@@ -35,6 +35,12 @@ test('renderer chat hook uses desktop IPC without a browser transport fallback',
   assert.doesNotMatch(hookSource, /location\.host/);
 });
 
+test('renderer coalesces non-priority stream events at a modest refresh cadence', () => {
+  assert.match(hookSource, /const INBOUND_STREAM_FLUSH_INTERVAL_MS = 50;/);
+  assert.match(hookSource, /window\.setTimeout\([\s\S]*INBOUND_STREAM_FLUSH_INTERVAL_MS/);
+  assert.match(hookSource, /if \(isPriorityDesktopMessage\(nextMessage\)\)/);
+});
+
 test('desktop API typings include chat command and event stream', () => {
   assert.match(typingsSource, /sendChatCommand/);
   assert.match(typingsSource, /onChatMessage/);

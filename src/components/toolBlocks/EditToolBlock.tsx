@@ -12,7 +12,8 @@ interface Props {
 export default function EditToolBlock({ block, result }: Props) {
   const [expanded, setExpanded] = useState(false);
   const input = block.input;
-  const filePath = (input.file_path as string) || (input.path as string) || 'unknown';
+  const filePath = (input.file_path as string) || (input.path as string)
+    || (block._partialInput ? '正在解析文件…' : '正在准备参数…');
   const oldStr = (input.old_string as string) || '';
   const newStr = (input.new_string as string) || '';
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';

@@ -1069,6 +1069,21 @@ html, body, #root {
   white-space: nowrap;
 }
 
+.tool-card-live {
+  width: 100%;
+  max-width: 100%;
+  animation: tool-card-live-in 160ms ease-out both;
+}
+
+@keyframes tool-card-live-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tool-group-block.is-live {
+  animation: tool-card-live-in 160ms ease-out both;
+}
+
 .bash-block .status-dot {
   margin-left: auto;
 }
@@ -1220,6 +1235,12 @@ html, body, #root {
   cursor: pointer;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.tool-live-preview {
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .tool-group-header:hover { background: var(--bg-hover); }
 .tool-group-header .expand-icon { margin-left: 0; }
@@ -7826,6 +7847,11 @@ textarea:focus-visible,
 .assistant-row .message-content > .tool-block,
 .assistant-row .message-content > .tool-group-block,
 .assistant-row .message-content > .agent-group-block {
+  width: 100%;
+  max-width: 100%;
+}
+
+.assistant-row .message-content > .tool-card-live {
   width: 100%;
   max-width: 100%;
 }

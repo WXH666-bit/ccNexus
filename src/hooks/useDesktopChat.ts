@@ -13,6 +13,10 @@ interface UseDesktopChatReturn {
   connected: boolean;
 }
 
+// Stream deltas stay queued in order; this only controls how often React gets
+// asked to paint the latest snapshot. Priority events still flush immediately.
+const INBOUND_STREAM_FLUSH_INTERVAL_MS = 50;
+
 export function useDesktopChat(): UseDesktopChatReturn {
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<DesktopChatEvent | null>(null);
@@ -57,7 +61,7 @@ export function useDesktopChat(): UseDesktopChatReturn {
       inboundFlushTimerRef.current = window.setTimeout(() => {
         inboundFlushTimerRef.current = null;
         if (latestInboundMessageRef.current) setLastMessage(latestInboundMessageRef.current);
-      }, 33);
+      }, INBOUND_STREAM_FLUSH_INTERVAL_MS);
     });
     setConnected(true);
     outboundQueueRef.current?.flush();

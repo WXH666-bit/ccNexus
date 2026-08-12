@@ -83,6 +83,15 @@ test('tool group headers keep their label on the left like other tool cards', ()
   assert.match(styles, /\.tool-group-header \.expand-icon\s*\{[^}]*margin-left:\s*0;/s);
 });
 
+test('live tool groups expand while the assistant turn is streaming', () => {
+  const messageItem = read('src/components/MessageItem.tsx');
+  const toolGroup = read('src/components/toolBlocks/ToolGroupBlock.tsx');
+
+  assert.match(messageItem, /isStreaming=\{isMessageStreaming\}/);
+  assert.match(toolGroup, /isStreaming/);
+  assert.match(toolGroup, /useEffect/);
+});
+
 test('finds the nearest later tool result by tool id', () => {
   const messages = [
     {

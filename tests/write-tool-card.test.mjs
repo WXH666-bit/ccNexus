@@ -31,10 +31,15 @@ test('write card field styles keep content readable instead of raw JSON blob', (
   assert.match(styles, /\.task-field-content\s*\{[^}]*white-space:\s*pre-wrap;/s);
 });
 
-test('streaming tools wait for parsed input before rendering an empty card', () => {
+test('streaming tools render a live card before input JSON is complete', () => {
   const source = read('src/components/MessageItem.tsx');
+  const bash = read('src/components/toolBlocks/BashToolBlock.tsx');
+  const generic = read('src/components/toolBlocks/GenericToolBlock.tsx');
 
-  assert.match(source, /isStreaming && \(!block\.input \|\| Object\.keys\(block\.input\)\.length === 0\)/);
+  assert.doesNotMatch(source, /isStreaming && \(!block\.input \|\| Object\.keys\(block\.input\)\.length === 0\)/);
+  assert.match(source, /tool-card-live/);
+  assert.match(bash, /_partialCommand/);
+  assert.match(generic, /_partialContent/);
 });
 
 test('edit status counts Write only after a successful tool result', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Pencil, Wrench } from 'lucide-react';
 import type { ToolResultBlock, ToolUseBlock } from '../../types';
 import { normalizeToolName } from '../../utils/toolRendering.js';
@@ -7,6 +7,7 @@ import { normalizeToolInput } from '../../utils/toolInputNormalization.js';
 interface Props {
   block: ToolUseBlock;
   result?: ToolResultBlock | null;
+  isStreaming?: boolean;
 }
 
 function resultText(result?: ToolResultBlock | null): string {
@@ -72,8 +73,7 @@ function getToolDisplayName(name: string): string {
   return name;
 }
 
-export default function GenericToolBlock({ block, result }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export default function GenericToolBlock({ block, result, isStreaming = false }: Props) {
   const name = block.name;
   const normalizedInput = normalizeToolInput(name, block.input) ?? block.input;
   const normalizedName = normalizeToolName(name);
@@ -83,11 +83,23 @@ export default function GenericToolBlock({ block, result }: Props) {
     (typeof normalizedInput.path === 'string' ? normalizedInput.path : undefined);
   const displayName = getToolDisplayName(name);
   const isWriteTool = normalizedName === 'write' || normalizedName === 'write_file' || normalizedName === 'write_to_file' || normalizedName === 'create_file';
+  const partialContent = isWriteTool ? (block._partialContent || '') : '';
   const otherParams = Object.entries(block.input).filter(([key]) => !OMIT_SUMMARY_FIELDS.has(key));
-  const hasBody = otherParams.length > 0 || Boolean(output);
   const statusClass = result ? (result.is_error ? 'error' : 'success') : 'running';
-  const writeContent = isWriteTool && typeof normalizedInput.content === 'string' ? normalizedInput.content : '';
+  const completeWriteContent = isWriteTool && typeof normalizedInput.content === 'string' ? normalizedInput.content : '';
+  const writeContent = completeWriteContent || partialContent;
+  const hasLiveContent = isWriteTool && !completeWriteContent && Boolean(partialContent);
+  const hasBody = otherParams.length > 0 || Boolean(output) || hasLiveContent;
   const writeLineCount = countLines(writeContent);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isStreaming && hasLiveContent) setExpanded(true);
+  }, [hasLiveContent, isStreaming]);
+
+  const pendingSummary = !filePath && !hasBody
+    ? (block._partialInput ? '正在解析参数…' : '正在准备参数…')
+    : '';
 
   return (
     <div className="tool-block generic-block">
@@ -95,6 +107,7 @@ export default function GenericToolBlock({ block, result }: Props) {
         <span className="tool-icon">{isWriteTool ? <Pencil size={14} /> : <Wrench size={14} />}</span>
         <span className="tool-label">{displayName}</span>
         {filePath && <span className="file-link">{getFileName(filePath)}</span>}
+        {pendingSummary && <span className="tool-summary">{pendingSummary}</span>}
         {isWriteTool && writeLineCount > 0 && (
           <span className="diff-stats">
             <span className="stat-add">+{writeLineCount}</span>
@@ -116,6 +129,12 @@ export default function GenericToolBlock({ block, result }: Props) {
                 <pre className="task-field-content">{formatParamValueCapped(value)}</pre>
               </div>
             ))}
+            {hasLiveContent && (
+              <div className="task-field">
+                <div className="task-field-label">CONTENT · LIVE</div>
+                <pre className="task-field-content tool-live-preview">{partialContent}</pre>
+              </div>
+            )}
             {output && (
               <div className="task-field">
                 <div className="task-field-label">Result</div>

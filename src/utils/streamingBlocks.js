@@ -1,5 +1,96 @@
 import { normalizeStreamDelta, resetTurnBlockState } from './streamDeltaNormalizer.js';
 
+const MAX_PARTIAL_TOOL_PREVIEW_CHARS = 32000;
+
+function decodeJsonEscape(escape, source, index) {
+  if (escape === 'n') return { value: '\n', nextIndex: index + 1 };
+  if (escape === 'r') return { value: '\r', nextIndex: index + 1 };
+  if (escape === 't') return { value: '\t', nextIndex: index + 1 };
+  if (escape === 'b') return { value: '\b', nextIndex: index + 1 };
+  if (escape === 'f') return { value: '\f', nextIndex: index + 1 };
+  if (escape === '"') return { value: '"', nextIndex: index + 1 };
+  if (escape === '\\') return { value: '\\', nextIndex: index + 1 };
+  if (escape === '/') return { value: '/', nextIndex: index + 1 };
+  if (escape === 'u') {
+    const hex = source.slice(index + 1, index + 5);
+    if (/^[0-9a-f]{4}$/i.test(hex)) {
+      return { value: String.fromCharCode(parseInt(hex, 16)), nextIndex: index + 5 };
+    }
+  }
+  return { value: `\\${escape}`, nextIndex: index + 1 };
+}
+
+function readPartialJsonString(source, startIndex) {
+  let value = '';
+  let index = startIndex;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === '"') return { value, complete: true };
+    if (character === '\\') {
+      if (index + 1 >= source.length) return { value: `${value}\\`, complete: false };
+      const decoded = decodeJsonEscape(source[index + 1], source, index + 1);
+      value += decoded.value;
+      index = decoded.nextIndex;
+    } else {
+      value += character;
+      index += 1;
+    }
+    if (value.length >= MAX_PARTIAL_TOOL_PREVIEW_CHARS) {
+      return { value: value.slice(0, MAX_PARTIAL_TOOL_PREVIEW_CHARS), complete: false };
+    }
+  }
+  return { value, complete: false };
+}
+
+function extractPartialToolPreviews(source) {
+  const previews = {};
+  if (typeof source !== 'string' || !source) return previews;
+
+  let depth = 0;
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index];
+    if (character === '"') {
+      const keyStart = index;
+      let keyEnd = index + 1;
+      let escaped = false;
+      while (keyEnd < source.length) {
+        const keyCharacter = source[keyEnd];
+        if (escaped) {
+          escaped = false;
+        } else if (keyCharacter === '\\') {
+          escaped = true;
+        } else if (keyCharacter === '"') {
+          break;
+        }
+        keyEnd += 1;
+      }
+      if (keyEnd >= source.length) break;
+
+      const key = source.slice(keyStart + 1, keyEnd);
+      if (depth === 1 && (key === 'command' || key === 'content')) {
+        let valueStart = keyEnd + 1;
+        while (/\s/.test(source[valueStart] || '')) valueStart += 1;
+        if (source[valueStart] === ':') {
+          valueStart += 1;
+          while (/\s/.test(source[valueStart] || '')) valueStart += 1;
+          if (source[valueStart] === '"') {
+            const partial = readPartialJsonString(source, valueStart + 1);
+            previews[key] = partial.value;
+            if (!partial.complete) break;
+          }
+        }
+      }
+      index = keyEnd + 1;
+      continue;
+    }
+    if (character === '{') depth += 1;
+    if (character === '}' && depth > 0) depth -= 1;
+    index += 1;
+  }
+  return previews;
+}
+
 export function createStreamingBlockState() {
   return {
     blocks: [],
@@ -78,8 +169,16 @@ export function applyStreamEventToBlocks(state, event) {
       state.partialToolInputs.set(blockIndex, input);
       try {
         block.input = JSON.parse(input);
+        delete block._partialInput;
+        delete block._partialCommand;
+        delete block._partialContent;
       } catch {
-        // Keep buffering until the SDK emits valid JSON.
+        // Keep buffering until the SDK emits valid JSON, while exposing a
+        // display-only preview so the renderer can show the live tool card.
+        block._partialInput = input;
+        const previews = extractPartialToolPreviews(input);
+        block._partialCommand = previews.command ?? '';
+        block._partialContent = previews.content ?? '';
       }
     }
   }

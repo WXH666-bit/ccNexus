@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ToolResultBlock, ToolUseBlock } from '../../types';
 import EditToolBlock from './EditToolBlock';
@@ -16,6 +16,7 @@ interface Props {
   name: string;
   blocks: ToolUseBlock[];
   getResult?: (toolId: string | undefined) => ToolResultBlock | null;
+  isStreaming?: boolean;
 }
 
 function getToolLabel(name: string) {
@@ -25,18 +26,22 @@ function getToolLabel(name: string) {
   return name;
 }
 
-function renderBlock(block: ToolUseBlock, result?: ToolResultBlock | null) {
+function renderBlock(block: ToolUseBlock, result?: ToolResultBlock | null, isStreaming = false) {
   if (isToolName(block.name, EDIT_TOOL_NAMES)) return <EditToolBlock block={block} result={result} />;
-  if (isToolName(block.name, BASH_TOOL_NAMES)) return <BashToolBlock block={block} result={result} />;
+  if (isToolName(block.name, BASH_TOOL_NAMES)) return <BashToolBlock block={block} result={result} isStreaming={isStreaming} />;
   if (isToolName(block.name, READ_TOOL_NAMES)) return <ReadToolBlock block={block} result={result} />;
-  return <GenericToolBlock block={block} result={result} />;
+  return <GenericToolBlock block={block} result={result} isStreaming={isStreaming} />;
 }
 
-export default function ToolGroupBlock({ name, blocks, getResult }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export default function ToolGroupBlock({ name, blocks, getResult, isStreaming = false }: Props) {
+  const [expanded, setExpanded] = useState(isStreaming);
+
+  useEffect(() => {
+    setExpanded(isStreaming);
+  }, [isStreaming]);
 
   return (
-    <div className="tool-group-block">
+    <div className={`tool-group-block ${isStreaming ? 'is-live' : ''}`}>
       <div className="tool-group-header" onClick={() => setExpanded(!expanded)}>
         <span className="expand-icon">{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
         <span className="tool-group-label">{getToolLabel(name)}</span>
@@ -46,7 +51,7 @@ export default function ToolGroupBlock({ name, blocks, getResult }: Props) {
         <div className="tool-group-body">
           {blocks.map((block, i) => (
             <div key={block.id || i} className="group-item">
-              {renderBlock(block, getResult?.(block.id))}
+              {renderBlock(block, getResult?.(block.id), isStreaming)}
             </div>
           ))}
         </div>

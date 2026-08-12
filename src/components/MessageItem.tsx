@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, RotateCcw } from 'lucide-react';
 import type { ChatMessage, ContentBlock, SubAgentInfo, ToolResultBlock, ToolUseBlock } from '../types';
 import EditToolBlock from './toolBlocks/EditToolBlock';
@@ -73,24 +73,29 @@ function ToolCard({
   isStreaming: boolean;
 }) {
   if (!shouldRenderToolUse(block.name, isStreaming)) return null;
-  if (isStreaming && (!block.input || Object.keys(block.input).length === 0)) return null;
 
-  if (isToolName(block.name, EDIT_TOOL_NAMES)) return <EditToolBlock block={block} result={result} />;
-  if (isToolName(block.name, BASH_TOOL_NAMES)) return <BashToolBlock block={block} result={result} />;
-  if (isToolName(block.name, READ_TOOL_NAMES)) return <ReadToolBlock block={block} result={result} />;
-  if (isToolName(block.name, AGENT_TOOL_NAMES)) return <TaskBlock block={block} result={result} />;
-
-  if (block.name === 'AskUserQuestion') {
-    return <AskUserQuestionCard question={{
+  let card: ReactNode;
+  if (isToolName(block.name, EDIT_TOOL_NAMES)) {
+    card = <EditToolBlock block={block} result={result} />;
+  } else if (isToolName(block.name, BASH_TOOL_NAMES)) {
+    card = <BashToolBlock block={block} result={result} isStreaming={isStreaming} />;
+  } else if (isToolName(block.name, READ_TOOL_NAMES)) {
+    card = <ReadToolBlock block={block} result={result} />;
+  } else if (isToolName(block.name, AGENT_TOOL_NAMES)) {
+    card = <TaskBlock block={block} result={result} />;
+  } else if (block.name === 'AskUserQuestion') {
+    card = <AskUserQuestionCard question={{
       question_id: block.id,
       question: (block.input.question as string) || '',
       options: block.input.options as string[] | undefined,
       context: block.input.context as string | undefined,
       tool_use_id: block.id,
     }} onAnswer={() => {}} />;
+  } else {
+    card = <GenericToolBlock block={block} result={result} isStreaming={isStreaming} />;
   }
 
-  return <GenericToolBlock block={block} result={result} />;
+  return isStreaming ? <div className="tool-card-live">{card}</div> : card;
 }
 
 function CompactSummary({ block }: { block: Extract<ContentBlock, { type: 'compact_summary' }> }) {
@@ -242,6 +247,7 @@ export default function MessageItem({
                 name={grouped.blocks[0].name}
                 blocks={grouped.blocks}
                 getResult={getResult}
+                isStreaming={isMessageStreaming}
               />
             );
           }
