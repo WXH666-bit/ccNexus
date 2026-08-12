@@ -21,6 +21,15 @@ test('main process owns the updater service and exposes the four update commands
   assert.match(main, /appUpdater\.dispose\(\)/);
 });
 
+test('main process prevents a second app process during updates or repeated launches', () => {
+  const main = read('desktop/main.js');
+
+  assert.match(main, /app\.requestSingleInstanceLock\(\)/);
+  assert.match(main, /if \(!singleInstanceLock\)/);
+  assert.match(main, /app\.on\(['"]second-instance['"]/);
+  assert.match(main, /second-instance[\s\S]*showMainWindow\(\)/);
+});
+
 test('startup update check happens after the main window is created and does not block it', () => {
   const main = read('desktop/main.js');
   const startupIndex = main.indexOf('app.whenReady()');

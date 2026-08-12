@@ -47,6 +47,15 @@ const windowPreferencesFile = path.join(appDataDirectory, 'window-preferences.js
 const appIconPath = path.resolve(__dirname, app.isPackaged ? '../dist/ccnexus-logo.png' : '../public/ccnexus-logo.png');
 const FALLBACK_TRAY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
+// NSIS updates start a new process after the old one has exited. Keep a
+// single Electron instance so a slow handoff can never leave two app
+// processes running at the same time.
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
 const runtime = createDesktopRuntime({
   cwd: process.cwd(),
   provider: 'claude',
@@ -126,6 +135,10 @@ function showMainWindow() {
   mainWindow.show();
   mainWindow.focus();
 }
+
+app.on('second-instance', () => {
+  showMainWindow();
+});
 
 async function resolveTrayIcon() {
   const brandIcon = nativeImage.createFromPath(appIconPath);
