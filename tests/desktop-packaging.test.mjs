@@ -13,6 +13,7 @@ test('package has desktop packaging scripts and electron-builder config', () => 
   assert.equal(pkg.devDependencies['electron-builder'], '26.15.3');
   assert.equal(pkg.build.appId, 'com.ccnexus.app');
   assert.equal(pkg.build.productName, 'ccNexus');
+  assert.equal(pkg.build.artifactName, '${productName}-Setup-${version}.${ext}');
   assert.ok(pkg.build.files.includes('dist/**'));
   assert.ok(pkg.build.files.includes('desktop/**'));
   assert.ok(pkg.build.files.includes('server/claudeHistory.js'));

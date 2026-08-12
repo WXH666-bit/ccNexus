@@ -49,6 +49,23 @@ jobs:
             Get-Item -Path 'release\latest.yml' -ErrorAction Stop
           ) | ForEach-Object { $_.FullName }
 
+          $metadata = Get-Content -Path 'release\latest.yml' -Raw
+          $pathMatch = [regex]::Match($metadata, '(?m)^\s*path:\s*(?<path>.+?)\s*$')
+          if (-not $pathMatch.Success) {
+            throw 'latest.yml does not contain an update package path.'
+          }
+
+          $metadataPath = $pathMatch.Groups['path'].Value.Trim()
+          $metadataFile = Join-Path 'release' $metadataPath
+          if (-not (Test-Path -LiteralPath $metadataFile -PathType Leaf)) {
+            throw "latest.yml points to missing package: $metadataPath"
+          }
+
+          $metadataBlockmap = "$metadataFile.blockmap"
+          if (-not (Test-Path -LiteralPath $metadataBlockmap -PathType Leaf)) {
+            throw "latest.yml package is missing its blockmap: $metadataPath.blockmap"
+          }
+
           Write-Host 'Release assets:'
           $assets | ForEach-Object { Write-Host " - $_" }
 

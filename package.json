@@ -1,6 +1,6 @@
 {
   "name": "ccnexus",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
@@ -45,6 +45,7 @@
   "build": {
     "appId": "com.ccnexus.app",
     "productName": "ccNexus",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "files": [
       "dist/**",
       "desktop/**",
