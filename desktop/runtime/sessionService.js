@@ -128,7 +128,16 @@ function startOfLocalDay(timestamp) {
 }
 
 const DEFAULT_CLAUDE_PRICING = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 };
+// DeepSeek publishes separate cache-hit and cache-miss input prices. The
+// Anthropic-compatible usage payload exposes cache creation as a separate
+// bucket, so treat cache creation as cache-miss input for the estimate.
+const DEEPSEEK_FLASH_PRICING = { input: 0.14, output: 0.28, cacheWrite: 0.14, cacheRead: 0.0028 };
+const DEEPSEEK_PRO_PRICING = { input: 0.435, output: 0.87, cacheWrite: 0.435, cacheRead: 0.003625 };
 const CLAUDE_PRICING = [
+  ['deepseek-v4-flash', DEEPSEEK_FLASH_PRICING],
+  ['deepseek-v4-pro', DEEPSEEK_PRO_PRICING],
+  ['deepseek-chat', DEEPSEEK_FLASH_PRICING],
+  ['deepseek-reasoner', DEEPSEEK_FLASH_PRICING],
   ['claude-opus-4-8', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
   ['claude-opus-4-7', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
   ['claude-opus-4-6', { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }],
@@ -145,9 +154,10 @@ const CLAUDE_PRICING = [
 ];
 
 function pricingForModel(model) {
-  const raw = typeof model === 'string' && model.trim() ? model.toLowerCase() : 'claude-sonnet-4-6';
-  const claudeIndex = raw.indexOf('claude-');
-  const normalized = claudeIndex >= 0 ? raw.slice(claudeIndex) : raw;
+  const raw = typeof model === 'string' && model.trim() ? model.toLowerCase().trim() : 'claude-sonnet-4-6';
+  const normalizedRaw = raw.replace(/\[1m\]$/i, '');
+  const modelIndex = normalizedRaw.search(/(?:claude|deepseek)-/i);
+  const normalized = modelIndex >= 0 ? normalizedRaw.slice(modelIndex) : normalizedRaw;
   return CLAUDE_PRICING.find(([prefix]) => normalized.startsWith(prefix))?.[1] || DEFAULT_CLAUDE_PRICING;
 }
 
@@ -524,25 +534,32 @@ export class DesktopSessionService {
         daily.get(key).sessions += 1;
       }
 
-      const resolvedSessionModel = sessionModel || DEFAULT_CLAUDE_MODEL;
-      const model = modelUsage.get(resolvedSessionModel) || {
-        model: resolvedSessionModel,
-        totalCost: 0,
-        totalTokens: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-        sessionCount: 0,
-      };
-      model.totalCost += sessionCost;
-      model.totalTokens += sessionUsage.totalTokens;
-      model.inputTokens += sessionUsage.inputTokens;
-      model.outputTokens += sessionUsage.outputTokens;
-      model.cacheCreationTokens += sessionUsage.cacheWriteTokens;
-      model.cacheReadTokens += sessionUsage.cacheReadTokens;
-      model.sessionCount += 1;
-      modelUsage.set(resolvedSessionModel, model);
+      const modelsInSession = new Set();
+      for (const record of records) {
+        const model = modelUsage.get(record.model) || {
+          model: record.model,
+          totalCost: 0,
+          totalTokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          sessionCount: 0,
+        };
+        model.totalCost += record.cost;
+        model.totalTokens += record.usage.totalTokens;
+        model.inputTokens += record.usage.inputTokens;
+        model.outputTokens += record.usage.outputTokens;
+        model.cacheCreationTokens += record.usage.cacheWriteTokens;
+        model.cacheReadTokens += record.usage.cacheReadTokens;
+        modelUsage.set(record.model, model);
+        modelsInSession.add(record.model);
+      }
+      for (const modelName of modelsInSession) {
+        modelUsage.get(modelName).sessionCount += 1;
+      }
+
+      const resolvedSessionModel = [...modelsInSession].join(', ') || sessionModel || DEFAULT_CLAUDE_MODEL;
 
       const week = sessionTimestamp > oneWeekAgo
         ? currentWeek

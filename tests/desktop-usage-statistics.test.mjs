@@ -49,10 +49,60 @@ test('desktop usage aggregation follows ccgui message-id deduplication and model
       totalTokens: 1010,
     });
     assert.equal(statistics.sessions[0].model, 'deepseek-v4-pro');
-    assert.equal(statistics.sessions[0].cost, 0.00072);
+    assert.ok(Math.abs(statistics.sessions[0].cost - 0.0000554625) < 1e-15);
     assert.equal(statistics.byModel[0].model, 'deepseek-v4-pro');
     assert.equal(statistics.byModel[0].sessionCount, 1);
     assert.equal(statistics.dailyUsage[0].sessions, 1);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('desktop usage pricing follows each recorded DeepSeek model, including 1M suffixes', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-usage-model-pricing-'));
+  const workspace = path.join(homeDir, 'workspace');
+
+  try {
+    const service = new DesktopSessionService({ homeDir, cwd: workspace });
+    const timestamp = Date.now();
+    await service.saveSession({ id: 'mixed-model-session', title: 'Mixed models', updatedAt: timestamp });
+    await service.appendMessage('mixed-model-session', {
+      id: 'flash-message',
+      role: 'assistant',
+      model: 'deepseek-v4-flash[1M]',
+      usage: {
+        input_tokens: 1_000,
+        output_tokens: 200,
+        cache_creation_input_tokens: 300,
+        cache_read_input_tokens: 400,
+      },
+      timestamp,
+      content: [{ type: 'text', text: 'flash' }],
+    });
+    await service.appendMessage('mixed-model-session', {
+      id: 'pro-message',
+      role: 'assistant',
+      model: 'deepseek-v4-pro',
+      usage: {
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_creation_input_tokens: 30,
+        cache_read_input_tokens: 40,
+      },
+      timestamp: timestamp + 1,
+      content: [{ type: 'text', text: 'pro' }],
+    });
+
+    const statistics = await service.getUsageStatistics();
+    assert.equal(statistics.sessions[0].cost, 0.000313215);
+    assert.deepEqual(
+      statistics.byModel.map(model => ({ model: model.model, totalCost: model.totalCost, sessionCount: model.sessionCount })),
+      [
+        { model: 'deepseek-v4-flash[1M]', totalCost: 0.00023912, sessionCount: 1 },
+        { model: 'deepseek-v4-pro', totalCost: 0.000074095, sessionCount: 1 },
+      ],
+    );
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
