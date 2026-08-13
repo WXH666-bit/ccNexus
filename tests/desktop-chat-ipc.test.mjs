@@ -80,11 +80,23 @@ test('desktop context usage follows ccgui persistent runtime control request', a
     workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }) },
   });
 
-  const result = await controller.getContextUsage({ sessionId: 'session-1', model: 'claude-sonnet-4-6[1m]' });
+  const result = await controller.getContextUsage({
+    sessionId: 'session-1',
+    model: 'claude-sonnet-4-6[1m]',
+    mode: 'plan',
+    reasoning: 'low',
+    agent: 'reviewer',
+    streaming: false,
+    alwaysThinking: true,
+  });
 
   assert.equal(result.totalTokens, 1200);
   assert.equal(captured.sessionId, 'session-1');
+  assert.equal(captured.rawModelId, 'claude-sonnet-4-6[1m]');
   assert.equal(captured.options.resume, 'session-1');
+  assert.equal(captured.options.permissionMode, 'plan');
+  assert.equal(captured.options.includePartialMessages, false);
+  assert.equal(captured.options.effort, 'low');
   assert.equal(captured.options.settings.env.CLAUDE_CODE_DISABLE_1M_CONTEXT, '');
 });
 
@@ -106,8 +118,9 @@ test('desktop chat controller sends ccgui-style current provider env to the daem
   }
 
   const runtime = {
-    queryClaude: async ({ options }) => {
+    queryClaude: async ({ options, rawModelId }) => {
       capturedEnv = options.env;
+      capturedEnv.__rawModelId = rawModelId;
       const stream = successfulQuery();
       stream.daemonSessionId = 'pending-1';
       stream.close = () => {};
@@ -153,6 +166,51 @@ test('desktop chat controller sends ccgui-style current provider env to the daem
 
   assert.equal(capturedEnv.ANTHROPIC_MODEL, 'deepseek-v4-pro[1M]');
   assert.equal(capturedEnv.ANTHROPIC_BASE_URL, 'https://api.deepseek.com/anthropic');
+  assert.equal(capturedEnv.__rawModelId, 'default');
+});
+
+test('desktop chat passes the raw model id separately from SDK options', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  let capturedRawModelId = null;
+
+  async function* successfulQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'raw-model-session' };
+    yield { type: 'result', session_id: 'raw-model-session', subtype: 'success', is_error: false };
+  }
+
+  const runtime = {
+    queryClaude: async ({ rawModelId }) => {
+      capturedRawModelId = rawModelId;
+      const stream = successfulQuery();
+      stream.daemonSessionId = 'pending-raw-model';
+      stream.close = () => {};
+      return stream;
+    },
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+  };
+  const sessions = {
+    loadSession: async () => ({ messages: [] }),
+    saveSession: async () => {},
+    appendMessage: async () => {},
+    deleteSession: async () => {},
+  };
+  const controller = createDesktopChatController({
+    runtime,
+    sessions,
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  await controller.handle({
+    type: 'chat',
+    text: '1M',
+    options: { model: 'claude-sonnet-4-6[1m]' },
+  }, () => {});
+
+  assert.equal(capturedRawModelId, 'claude-sonnet-4-6[1m]');
 });
 
 test('chat input keeps ccgui local command handling in the session view', () => {

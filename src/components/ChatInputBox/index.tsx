@@ -14,6 +14,7 @@ import {
   getFileTree,
   getPrompts,
   setSelectedAgent as persistSelectedAgent,
+  type ContextUsageRequest,
 } from '../../utils/desktopBridgeApi';
 import { createPromptEnhancementPreview } from '../../utils/promptEnhancer';
 import { useInputHistory } from './useInputHistory';
@@ -30,7 +31,7 @@ interface ChatInputBoxProps {
     alwaysThinking?: boolean,
     modelOverride?: string,
   ) => void;
-  onContextUsage?: (model: string) => void;
+  onContextUsage?: (request: ContextUsageRequest) => void;
   onStop: () => void;
   isStreaming: boolean;
   connected: boolean;
@@ -372,7 +373,14 @@ export default function ChatInputBox({
     if (!trimmed && attachments.length === 0) return;
     recordInputHistory(text);
     if (attachments.length === 0 && /^\/context(?:\s|$)/i.test(trimmed)) {
-      onContextUsage?.(effectiveModel);
+      onContextUsage?.({
+        model: effectiveModel,
+        mode,
+        reasoning,
+        agent: selectedAgent || undefined,
+        streaming,
+        alwaysThinking,
+      });
       setText('');
       return;
     }

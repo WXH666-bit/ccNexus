@@ -29,7 +29,7 @@ import {
 } from '../utils/streamWatchdog.js';
 import { estimateMessagesUsedTokens, extractMessagesUsedTokens } from '../utils/contextUsage.js';
 import { getDesktopEventSessionId, normalizeDesktopChatEvent } from '../utils/desktopChatEvents.js';
-import { getContextUsage as loadContextUsage } from '../utils/desktopBridgeApi';
+import { getContextUsage as loadContextUsage, type ContextUsageRequest } from '../utils/desktopBridgeApi';
 import { getActiveSession, getSessions, loadSession, renameSession, setActiveSession } from '../utils/sessionBridgeApi';
 import { deriveStatusData } from '../utils/statusPanelData';
 import { useFileChangesManagement } from '../hooks/useFileChangesManagement';
@@ -201,14 +201,14 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, []);
 
   const contextUsageRequestRef = useRef(0);
-  const handleContextUsage = useCallback(async (requestedModel: string) => {
+  const handleContextUsage = useCallback(async (request: ContextUsageRequest) => {
     const requestId = ++contextUsageRequestRef.current;
     const sessionId = currentSession?.id ?? urlSessionId ?? undefined;
     setContextUsage(null);
     setContextUsageError('');
     setContextUsageLoading(true);
     try {
-      const result = await loadContextUsage({ sessionId, model: requestedModel }) as ContextUsageData;
+      const result = await loadContextUsage({ ...request, sessionId }) as ContextUsageData;
       if (requestId !== contextUsageRequestRef.current) return;
       if (sessionId && (currentSession?.id ?? urlSessionId ?? undefined) !== sessionId) return;
       setContextUsage(result);

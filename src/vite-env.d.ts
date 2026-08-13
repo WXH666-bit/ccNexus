@@ -182,7 +182,15 @@ interface CcNexusDesktopApi {
   deleteSession: (sessionId: string) => Promise<{ type: 'session_deleted'; sessionId: string }>;
   getProcesses: () => Promise<unknown>;
   getUsageStatistics: (args?: { scope?: 'current' | 'all'; dateRange?: 'today' | '7d' | '30d' | 'all' }) => Promise<unknown>;
-  getContextUsage: (args?: { sessionId?: string | null; model?: string }) => Promise<unknown>;
+  getContextUsage: (args?: {
+    sessionId?: string | null;
+    model?: string;
+    mode?: 'default' | 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions';
+    reasoning?: string;
+    agent?: string;
+    streaming?: boolean;
+    alwaysThinking?: boolean;
+  }) => Promise<unknown>;
   enhancePrompt: (args: PromptEnhancementArgs) => Promise<PromptEnhancementResult>;
   cancelPromptEnhancement: (requestId: string) => Promise<PromptEnhancementCancelResult>;
   stopProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;

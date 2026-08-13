@@ -17,6 +17,8 @@ let activeRequestId = null;
 let activeRequest = null;
 let activeQuery = null;
 let runtime = null;
+let contextUsageRunning = false;
+const pendingContextUsage = [];
 let permissionRequestCounter = 0;
 const pendingPermissions = new Map();
 const pendingPlanApprovals = new Map();
@@ -328,6 +330,22 @@ function assertRuntimeDescriptor(runtimeDescriptor = {}) {
   }
 }
 
+function failContextUsageRequest(id, error) {
+  writeRawLine({
+    id,
+    done: true,
+    success: false,
+    error: error instanceof Error ? error.message : String(error || 'Context usage request failed'),
+  });
+}
+
+function failPendingContextUsage(error) {
+  while (pendingContextUsage.length > 0) {
+    const request = pendingContextUsage.shift();
+    if (request) failContextUsageRequest(request.id, error);
+  }
+}
+
 function assertRuntimeOwnership(currentRuntime, runtimeDescriptor) {
   assertRuntimeDescriptor(runtimeDescriptor);
   if (currentRuntime
@@ -405,12 +423,13 @@ async function ensureRuntime(options = {}, runtimeDescriptor = {}) {
 }
 
 async function runQuery(id, params = {}) {
-  if (activeRequestId) {
+  if (activeRequestId || contextUsageRunning) {
+    const busyRequestId = activeRequestId || 'context_usage';
     writeRawLine({
       id,
       done: true,
       success: false,
-      error: `Daemon is busy with ${activeRequestId}`,
+      error: `Daemon is busy with ${busyRequestId}`,
     });
     return;
   }
@@ -468,6 +487,7 @@ async function runQuery(id, params = {}) {
       activeRequest = null;
       activeRequestId = null;
     }
+    void drainContextUsageQueue();
   }
 }
 
@@ -492,6 +512,7 @@ async function runAbort(id, params = {}) {
     activeRequestId = null;
   }
   reply(id, { result: { abortedRequestId: targetRequestId } });
+  void drainContextUsageQueue();
 }
 
 async function runShutdown(id) {
@@ -499,6 +520,7 @@ async function runShutdown(id) {
   const targetRequestId = activeRequestId;
   if (request) request.state = 'shutting-down';
   settleAllPlanApprovals('Daemon shutting down');
+  failPendingContextUsage(new Error('Daemon shutting down'));
   try { await activeQuery?.interrupt?.(); } catch { /* ignore */ }
   await closeRuntime();
   if (request && activeRequest === request && activeRequestId === targetRequestId) {
@@ -511,21 +533,15 @@ async function runShutdown(id) {
   process.exit(0);
 }
 
-async function runContextUsage(id, params = {}) {
-  if (activeRequestId && (!runtime || runtime.closed)) {
-    writeRawLine({
-      id,
-      done: true,
-      success: false,
-      error: `Daemon is busy with ${activeRequestId}`,
-    });
-    return;
-  }
-
-  const previousRequestId = activeRequestId;
-  if (!activeRequestId) activeRequestId = id;
+async function runContextUsageNow(id, params = {}) {
   try {
-    const currentRuntime = await ensureRuntime(params.options || {}, params.runtimeDescriptor || {});
+    const options = params.options || {};
+    const runtimeDescriptor = params.runtimeDescriptor || {};
+    let currentRuntime = runtime;
+    if (!currentRuntime || currentRuntime.closed
+      || !hasSameContextModel(currentRuntime.descriptor, runtimeDescriptor)) {
+      currentRuntime = await ensureRuntime(options, runtimeDescriptor);
+    }
     if (!currentRuntime || currentRuntime.closed || typeof currentRuntime.query?.getContextUsage !== 'function') {
       throw new Error('getContextUsage is not available on the current runtime');
     }
@@ -539,9 +555,26 @@ async function runContextUsage(id, params = {}) {
       success: false,
       error: err instanceof Error ? err.message : String(err),
     });
-  } finally {
-    if (activeRequestId === id) activeRequestId = previousRequestId;
   }
+}
+
+async function drainContextUsageQueue() {
+  if (contextUsageRunning || activeRequestId) return;
+  const request = pendingContextUsage.shift();
+  if (!request) return;
+
+  contextUsageRunning = true;
+  try {
+    await runContextUsageNow(request.id, request.params);
+  } finally {
+    contextUsageRunning = false;
+    void drainContextUsageQueue();
+  }
+}
+
+function runContextUsage(id, params = {}) {
+  pendingContextUsage.push({ id, params });
+  void drainContextUsageQueue();
 }
 
 async function runSetPermissionMode(id, params = {}) {

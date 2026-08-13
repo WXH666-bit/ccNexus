@@ -252,6 +252,51 @@ test('daemon rejects a context request from a stale runtime epoch', async () => 
   assert.equal(harness.state.contextCalls, 0);
 });
 
+test('daemon queues context usage behind an active turn and reuses the current runtime', async () => {
+  let releaseTurn;
+  const turnGate = new Promise((resolve) => { releaseTurn = resolve; });
+  const harness = createDaemonHarness({ turnGates: [turnGate] });
+
+  harness.send({
+    id: 'turn-context',
+    method: 'query',
+    params: {
+      prompt: 'working',
+      options: { cwd: 'D:/ccNexus', model: 'sonnet' },
+      runtimeDescriptor: testRuntimeDescriptor,
+    },
+  });
+  await waitForCondition(() => harness.state.turnCount === 1);
+
+  harness.send({
+    id: 'context-queued',
+    method: 'context_usage',
+    params: {
+      options: { cwd: 'D:/ccNexus', model: 'sonnet', permissionMode: 'plan' },
+      runtimeDescriptor: testRuntimeDescriptor,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(harness.state.contextCalls, 0);
+  assert.equal(harness.state.queryCalls, 1);
+  assert.equal(harness.state.closeCalls, 0);
+  assert.deepEqual(harness.state.models, []);
+  assert.deepEqual(harness.state.maxThinkingTokens, []);
+
+  releaseTurn();
+  await waitForDone(harness.state.messages, 'turn-context');
+  const contextResult = await waitForDone(harness.state.messages, 'context-queued');
+
+  assert.equal(contextResult.success, true);
+  assert.equal(harness.state.contextCalls, 1);
+  assert.equal(harness.state.queryCalls, 1);
+  assert.equal(harness.state.closeCalls, 0);
+  assert.deepEqual(harness.state.models, []);
+  assert.deepEqual(harness.state.maxThinkingTokens, []);
+  assert.deepEqual(harness.state.permissionModes, []);
+});
+
 test('daemon ignores a stale abort requestId and leaves the newer query untouched', async () => {
   let releaseSecondTurn;
   const secondTurn = new Promise((resolve) => { releaseSecondTurn = resolve; });
@@ -374,6 +419,9 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
     closeCalls: 0,
     exitCalls: 0,
     contextCalls: 0,
+    permissionModes: [],
+    models: [],
+    maxThinkingTokens: [],
     toolDecision: undefined,
   };
   let lineHandler = null;
@@ -433,9 +481,9 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
               state.contextCalls += 1;
               return { used: 10, size: 100 };
             },
-            async setPermissionMode() {},
-            async setModel() {},
-            async setMaxThinkingTokens() {},
+            async setPermissionMode(mode) { state.permissionModes.push(mode); },
+            async setModel(model) { state.models.push(model); },
+            async setMaxThinkingTokens(tokens) { state.maxThinkingTokens.push(tokens); },
           };
         },
       },

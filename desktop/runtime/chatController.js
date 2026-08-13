@@ -28,6 +28,16 @@ function normalizeError(error) {
   return error instanceof Error ? error.message : String(error || 'Unknown error');
 }
 
+function createRuntimeProfile(options = {}) {
+  const profile = {};
+  for (const key of ['model', 'mode', 'reasoning', 'agent', 'streaming', 'alwaysThinking']) {
+    if (Object.prototype.hasOwnProperty.call(options, key) && options[key] !== undefined) {
+      profile[key] = options[key];
+    }
+  }
+  return profile;
+}
+
 export function createDesktopChatController({ runtime, sessions, localConfig, workspaceFiles }) {
   let currentSessionId = null;
   let latestChatRequest = 0;
@@ -41,6 +51,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   let activeQuestionRequest = null;
   const sessionMessages = new Map();
   const fileEditHistory = new Map();
+  const runtimeProfiles = new Map();
 
   function emitSafe(emit, payload) {
     try {
@@ -79,6 +90,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   function forgetSessionState(sessionId) {
     sessionMessages.delete(sessionId);
     fileEditHistory.delete(sessionId);
+    runtimeProfiles.delete(sessionId);
     ownedQueries.delete(sessionId);
     runtime.removeSessionDaemon(sessionId);
   }
@@ -350,8 +362,11 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       clientOptions,
       loadAgent: (name) => localConfig.getAgent(name, workspaceFiles.getWorkspace().cwd),
     });
-    const modelForUsage = clientOptions?.model && clientOptions.model !== 'default'
-      ? clientOptions.model
+    const rawModelId = typeof clientOptions?.model === 'string' ? clientOptions.model : 'default';
+    const runtimeProfile = createRuntimeProfile({ ...clientOptions, model: rawModelId });
+    if (querySessionId) runtimeProfiles.set(querySessionId, runtimeProfile);
+    const modelForUsage = rawModelId && rawModelId !== 'default'
+      ? rawModelId
       : 'claude-sonnet-4-6';
     const queryOpts = buildClaudeQueryOptions({
       cwd: workspaceFiles.getWorkspace().cwd,
@@ -371,6 +386,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         title: promptTitle(prompt),
         prompt,
         options: queryOpts,
+        rawModelId,
         onPermissionRequest: (request) => canUseTool(request.toolName, request.input, request.options),
         onPlanApproval: (request) => requestPlanApprovalFromRenderer(emit, request, querySessionId),
       });
@@ -402,6 +418,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
               }
               latestRequestBySession.set(querySessionId, requestOrder);
               if (requestOrder === latestChatRequest) currentSessionId = querySessionId;
+              runtimeProfiles.set(querySessionId, runtimeProfile);
               runtime.adoptSessionDaemon({
                 fromSessionId: query.daemonSessionId,
                 toSessionId: querySessionId,
@@ -523,13 +540,37 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     }
   }
 
-  async function getContextUsage({ sessionId = null, model = 'default' } = {}) {
+  async function getContextUsage({
+    sessionId = null,
+    model,
+    mode,
+    reasoning,
+    agent,
+    streaming,
+    alwaysThinking,
+  } = {}) {
     const workspace = workspaceFiles.getWorkspace();
     const { currentEnv, providerMode } = await localConfig.getProviders();
     const queryEnv = { ...process.env, ...(currentEnv || {}) };
+    const storedProfile = sessionId ? runtimeProfiles.get(sessionId) || {} : {};
+    const requestedProfile = createRuntimeProfile({
+      model,
+      mode,
+      reasoning,
+      agent,
+      streaming,
+      alwaysThinking,
+    });
+    const profile = { ...storedProfile, ...requestedProfile };
+    const rawModelId = typeof profile.model === 'string' && profile.model.trim()
+      ? profile.model
+      : 'default';
+    if (sessionId && Object.keys(requestedProfile).length > 0) {
+      runtimeProfiles.set(sessionId, { ...profile, model: rawModelId });
+    }
     const clientOptions = await buildClaudeClientOptions({
       cwd: workspace.cwd,
-      clientOptions: { model },
+      clientOptions: { ...profile, model: rawModelId },
       loadAgent: (name) => localConfig.getAgent(name, workspace.cwd),
     });
     const queryOptions = buildClaudeQueryOptions({
@@ -543,6 +584,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       sessionId,
       title: 'Context usage',
       options: queryOptions,
+      rawModelId,
     });
   }
 
@@ -683,6 +725,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     latestChatRequest += 1;
     sessionMessages.clear();
     fileEditHistory.clear();
+    runtimeProfiles.clear();
     runtime.shutdown();
   }
 
@@ -695,6 +738,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     latestChatRequest += 1;
     sessionMessages.clear();
     fileEditHistory.clear();
+    runtimeProfiles.clear();
   }
 
   async function abortSession(sessionId) {

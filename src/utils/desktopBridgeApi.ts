@@ -1,3 +1,15 @@
+import type { PermissionMode } from '../types';
+
+export interface ContextUsageRequest {
+  sessionId?: string | null;
+  model?: string;
+  mode?: PermissionMode;
+  reasoning?: string;
+  agent?: string;
+  streaming?: boolean;
+  alwaysThinking?: boolean;
+}
+
 interface ProviderItem {
   id: string;
   name: string;
@@ -237,7 +249,7 @@ export async function getUsageStatistics(args: { scope?: 'current' | 'all'; date
   return await requireDesktopApi().getUsageStatistics(args);
 }
 
-export async function getContextUsage(args: { sessionId?: string | null; model?: string } = {}) {
+export async function getContextUsage(args: ContextUsageRequest = {}) {
   return await requireDesktopApi().getContextUsage(args);
 }
 

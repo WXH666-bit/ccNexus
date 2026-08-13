@@ -153,6 +153,7 @@ export function createDesktopRuntime(options = {}) {
     try {
       acquisition = disposableRuntime.queryClaude({
         ...args,
+        rawModelId: args.rawModelId || args.options?.model || '',
         options: {
           ...(args.options || {}),
           persistSession: false,

@@ -347,8 +347,8 @@ export class DaemonBridge extends EventEmitter {
     return this.sendCommand('status', {}, { countsAsActive: false });
   }
 
-  async getContextUsage(options = {}) {
-    const messages = await this.sendCommand('context_usage', { options });
+  async getContextUsage(request = {}) {
+    const messages = await this.sendCommand('context_usage', request);
     const response = messages[messages.length - 1];
     if (!response || response.result === undefined) {
       throw new Error('Context usage response was empty');
