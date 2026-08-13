@@ -100,6 +100,87 @@ test('desktop context usage follows ccgui persistent runtime control request', a
   assert.equal(captured.options.settings.env.CLAUDE_CODE_DISABLE_1M_CONTEXT, '');
 });
 
+test('desktop abort reports completion only after daemon cleanup resolves', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  let releaseTurn;
+  let releaseInterrupt;
+  let interruptStarted = false;
+  let channelRegistered = false;
+  const turnGate = new Promise(resolve => { releaseTurn = resolve; });
+  const interruptGate = new Promise(resolve => { releaseInterrupt = resolve; });
+
+  async function* blockedQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'abort-session' };
+    await turnGate;
+  }
+
+  const stream = blockedQuery();
+  stream.daemonSessionId = 'abort-session';
+  stream.interrupt = async () => {
+    interruptStarted = true;
+    await interruptGate;
+  };
+  stream.close = () => {};
+
+  const runtime = {
+    queryClaude: async () => stream,
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => { channelRegistered = true; },
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const sessions = {
+    loadSession: async () => ({ messages: [] }),
+    saveSession: async session => session,
+    appendMessage: async () => {},
+    deleteSession: async () => {},
+  };
+  const controller = createDesktopChatController({
+    runtime,
+    sessions,
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+  const chatTask = controller.handle({
+    type: 'chat',
+    sessionId: 'abort-session',
+    text: 'long turn',
+    options: { model: 'default' },
+  }, () => {});
+
+  const registrationStartedAt = Date.now();
+  while (!channelRegistered && Date.now() - registrationStartedAt < 1000) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(channelRegistered, true);
+
+  const abortEvents = [];
+  const abortTask = controller.handle({
+    type: 'abort',
+    sessionId: 'abort-session',
+  }, event => abortEvents.push(event));
+  const interruptStartedAt = Date.now();
+  while (!interruptStarted && Date.now() - interruptStartedAt < 1000) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(interruptStarted, true);
+  assert.equal(abortEvents.some(event => event.reason === 'abort-complete'), false);
+
+  releaseInterrupt();
+  await abortTask;
+  assert.deepEqual(abortEvents, [{
+    type: 'status',
+    status: 'idle',
+    reason: 'abort-complete',
+    sessionId: 'abort-session',
+  }]);
+
+  releaseTurn();
+  await chatTask;
+  controller.dispose();
+});
+
 test('desktop chat controller sends ccgui-style current provider env to the daemon query', async () => {
   const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
   let capturedEnv = null;

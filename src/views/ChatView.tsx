@@ -29,6 +29,14 @@ import {
 } from '../utils/streamWatchdog.js';
 import { estimateMessagesUsedTokens, extractMessagesUsedTokens } from '../utils/contextUsage.js';
 import { getDesktopEventSessionId, normalizeDesktopChatEvent } from '../utils/desktopChatEvents.js';
+import {
+  beginAbortWindow,
+  completeAbortWindow,
+  createQueuedChatMessage,
+  queuedChatMessageToSendArgs,
+  shouldQueueChatMessage,
+  type AbortWindowState,
+} from '../utils/abortWindowState.js';
 import { getContextUsage as loadContextUsage, type ContextUsageRequest } from '../utils/desktopBridgeApi';
 import { getActiveSession, getSessions, loadSession, renameSession, setActiveSession } from '../utils/sessionBridgeApi';
 import { deriveStatusData } from '../utils/statusPanelData';
@@ -78,6 +86,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [stopping, setStopping] = useState<AbortWindowState | null>(null);
   const [permission, setPermission] = useState<PermissionRequest | null>(null);
   const [status, setStatus] = useState<StatusData>({});
   const [pendingModeConfirmation, setPendingModeConfirmation] = useState<PermissionMode | null>(null);
@@ -424,6 +433,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     resetStreamingBlockState(streamingBlocksRef.current);
     streamingMsgRef.current = null;
     setIsStreaming(false);
+    setStopping(null);
     setMessages([]);
     setUsageUsedTokens(undefined);
     setCurrentSession(nextSessionId ? nextSession : null);
@@ -803,6 +813,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
 
       case 'status': {
         if (msg.status === 'idle') {
+          setStopping(current => completeAbortWindow(current, msg));
           finishStreamingMessage();
         }
         break;
@@ -942,23 +953,35 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     }
 
     // If AI is streaming and queue is requested, add to queue
-    if (isStreaming && queue) {
-      const queuedMsg: QueuedMessage = {
+    if (shouldQueueChatMessage({ isStreaming, stopping }) && queue) {
+      const queuedMsg: QueuedMessage = createQueuedChatMessage({
         id: genId(),
         text: text.trim(),
         timestamp: Date.now(),
-      };
+        attachments,
+        reasoningEffort,
+        agent,
+        streaming,
+        alwaysThinking,
+        modelOverride,
+      });
       setMessageQueue(prev => [...prev, queuedMsg]);
       return;
     }
 
     // If AI is streaming but not queued, still add to queue
-    if (isStreaming) {
-      const queuedMsg: QueuedMessage = {
+    if (shouldQueueChatMessage({ isStreaming, stopping })) {
+      const queuedMsg: QueuedMessage = createQueuedChatMessage({
         id: genId(),
         text: text.trim(),
         timestamp: Date.now(),
-      };
+        attachments,
+        reasoningEffort,
+        agent,
+        streaming,
+        alwaysThinking,
+        modelOverride,
+      });
       setMessageQueue(prev => [...prev, queuedMsg]);
       return;
     }
@@ -1001,22 +1024,22 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         alwaysThinking,
       },
     });
-  }, [beginSessionTransition, currentSession, finishStreamingMessage, handleNewSession, handleOpenHistory, isStreaming, mode, model, navigate, reasoning, send, setMode]);
+  }, [beginSessionTransition, currentSession, finishStreamingMessage, handleNewSession, handleOpenHistory, isStreaming, mode, model, navigate, reasoning, send, setMode, stopping]);
 
   // Process message queue when streaming completes
   useEffect(() => {
-    if (!isStreaming && messageQueue.length > 0 && !queueProcessingRef.current) {
+    if (!isStreaming && !stopping && messageQueue.length > 0 && !queueProcessingRef.current) {
       queueProcessingRef.current = true;
       const nextMsg = messageQueue[0];
       setMessageQueue(prev => prev.slice(1));
       
       // Send the queued message
       setTimeout(() => {
-        handleSend(nextMsg.text, [], false);
+        handleSend(...queuedChatMessageToSendArgs(nextMsg));
         queueProcessingRef.current = false;
       }, 100);
     }
-  }, [isStreaming, messageQueue, handleSend]);
+  }, [isStreaming, stopping, messageQueue, handleSend]);
 
   // Queue management
   const removeFromQueue = useCallback((id: string) => {
@@ -1028,7 +1051,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, []);
 
   const handleStop = useCallback(() => {
-    send({ type: 'abort', sessionId: currentSession?.id });
+    const sessionId = currentSession?.id ?? activeSessionIdRef.current ?? null;
+    setStopping(beginAbortWindow(sessionId));
+    send({ type: 'abort', sessionId });
     finishStreamingMessage();
   }, [send, currentSession, finishStreamingMessage]);
 

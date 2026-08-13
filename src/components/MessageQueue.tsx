@@ -1,11 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { ListOrdered, X } from 'lucide-react';
+import type { QueuedChatMessage } from '../utils/abortWindowState.js';
 
-interface QueuedMessage {
-  id: string;
-  text: string;
-  timestamp: number;
-}
+type QueuedMessage = QueuedChatMessage;
 
 interface MessageQueueProps {
   queue: QueuedMessage[];

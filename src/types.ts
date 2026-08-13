@@ -140,7 +140,7 @@ export type DesktopChatEvent =
   | { type: 'tool_progress'; sessionId?: string; toolName?: string; tool_name?: string; toolUseId?: string; tool_use_id?: string; elapsed?: number; status?: 'running' | 'completed' | 'error' }
   | { type: 'tool_use_summary'; sessionId?: string; summary?: string; precedingIds?: string[] }
   | { type: 'permission_request'; sessionId?: string; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
-  | { type: 'status'; sessionId?: string; status: 'thinking' | 'idle' }
+  | { type: 'status'; sessionId?: string; status: 'thinking' | 'idle'; reason?: 'abort-complete' }
   | { type: 'sdk_event'; sdkType?: string; sessionId?: string }
   | { type: 'error'; sessionId?: string; message: string; invalidSessionId?: string }
   | { type: 'result'; subtype: string; duration?: number; cost?: number; turns?: number; is_error?: boolean; sessionId?: string }

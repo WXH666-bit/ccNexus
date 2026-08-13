@@ -757,16 +757,6 @@ async function runQueryNow(id, params = {}) {
 }
 
 function enqueueDataPlaneRequest(method, id, params = {}) {
-  if (method === 'query' && activeRequest && activeRequest.state !== 'running') {
-    const busyRequestId = activeRequestId || activeRequest.id;
-    writeRawLine({
-      id,
-      done: true,
-      success: false,
-      error: `Daemon is busy with ${busyRequestId}`,
-    });
-    return;
-  }
   if (daemonShuttingDown) {
     failRequest(id, new Error('Daemon shutting down'), 'DAEMON_SHUTTING_DOWN');
     return;

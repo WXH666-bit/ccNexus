@@ -689,7 +689,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       case 'abort': {
         const sessionId = message.sessionId || currentSessionId;
         await stopOwnedQuery(sessionId);
-        emitSafe(emit, { type: 'status', status: 'idle', sessionId });
+        emitSafe(emit, { type: 'status', status: 'idle', reason: 'abort-complete', sessionId });
         break;
       }
 

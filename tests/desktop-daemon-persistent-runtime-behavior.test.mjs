@@ -1819,37 +1819,6 @@ test('daemon ignores a stale abort requestId and leaves the newer query untouche
   assert.equal(secondDone.success, true);
 });
 
-test('daemon keeps the active busy guard while matching abort cleanup overlaps query completion', async () => {
-  let releaseTurn;
-  let releaseInterrupt;
-  const turnGate = new Promise((resolve) => { releaseTurn = resolve; });
-  const interruptGate = new Promise((resolve) => { releaseInterrupt = resolve; });
-  const harness = createDaemonHarness({ turnGates: [turnGate], interruptGate });
-
-  harness.send({
-    id: 'turn-abort',
-    method: 'query',
-    params: { prompt: 'abort', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
-  });
-  await waitForCondition(() => harness.state.turnCount === 1);
-  harness.send({ id: 'abort-active', method: 'abort', params: { requestId: 'turn-abort' } });
-  await waitForCondition(() => harness.state.interruptCalls === 1);
-
-  releaseTurn();
-  await waitForDone(harness.state.messages, 'turn-abort');
-  harness.send({
-    id: 'turn-after-abort',
-    method: 'query',
-    params: { prompt: 'must stay busy', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
-  });
-  const busy = await waitForDone(harness.state.messages, 'turn-after-abort');
-  assert.equal(busy.success, false);
-  assert.match(busy.error, /busy/i);
-
-  releaseInterrupt();
-  await waitForDone(harness.state.messages, 'abort-active');
-});
-
 test('daemon does not start queued context while active abort cleanup is still pending', async () => {
   let releaseTurn;
   let releaseInterrupt;
@@ -1893,7 +1862,56 @@ test('daemon does not start queued context while active abort cleanup is still p
   assert.deepEqual(harness.state.dataPlaneStarts, ['query', 'context_usage']);
 });
 
-test('daemon keeps the active busy guard while shutdown cleanup overlaps query completion', async () => {
+test('daemon queues a query received during abort cleanup and starts it after cleanup', async () => {
+  let releaseTurn;
+  let releaseInterrupt;
+  const turnGate = new Promise(resolve => { releaseTurn = resolve; });
+  const interruptGate = new Promise(resolve => { releaseInterrupt = resolve; });
+  const harness = createDaemonHarness({
+    turnGates: [turnGate, Promise.resolve()],
+    interruptGate,
+  });
+
+  harness.send({
+    id: 'abort-window-turn',
+    method: 'query',
+    params: { prompt: 'abort me', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  await waitForCondition(() => harness.state.turnCount === 1);
+  harness.send({
+    id: 'abort-window-command',
+    method: 'abort',
+    params: { requestId: 'abort-window-turn' },
+  });
+  await waitForCondition(() => harness.state.interruptCalls === 1);
+
+  releaseTurn();
+  await waitForDone(harness.state.messages, 'abort-window-turn');
+  harness.send({
+    id: 'abort-window-next-query',
+    method: 'query',
+    params: {
+      prompt: 'run after cleanup',
+      options: { cwd: 'D:/ccNexus', model: 'sonnet', resume: 'session-1' },
+    },
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  assert.equal(
+    harness.state.messages.some(message => message.id === 'abort-window-next-query' && message.done),
+    false,
+  );
+  assert.equal(harness.state.turnCount, 1);
+
+  releaseInterrupt();
+  await waitForDone(harness.state.messages, 'abort-window-command');
+  const nextQuery = await waitForDone(harness.state.messages, 'abort-window-next-query');
+  assert.equal(nextQuery.success, true);
+  assert.equal(harness.state.turnCount, 2);
+  assert.deepEqual(harness.state.dataPlaneStarts, ['query', 'query']);
+});
+
+test('daemon rejects a query with a structured shutdown error while cleanup overlaps completion', async () => {
   let releaseTurn;
   let releaseInterrupt;
   const turnGate = new Promise((resolve) => { releaseTurn = resolve; });
@@ -1916,9 +1934,10 @@ test('daemon keeps the active busy guard while shutdown cleanup overlaps query c
     method: 'query',
     params: { prompt: 'must stay busy', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
   });
-  const busy = await waitForDone(harness.state.messages, 'turn-after-shutdown');
-  assert.equal(busy.success, false);
-  assert.match(busy.error, /busy/i);
+  const rejected = await waitForDone(harness.state.messages, 'turn-after-shutdown');
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.code, 'DAEMON_SHUTTING_DOWN');
+  assert.match(rejected.error, /shutting down/i);
 
   releaseInterrupt();
   await waitForDone(harness.state.messages, 'shutdown-1');
