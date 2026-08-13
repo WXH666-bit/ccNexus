@@ -1,8 +1,10 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DaemonBridge } from './daemonBridge.js';
 import { createDisposableQuery } from './disposableQuery.js';
 import { DesktopProcessRegistry } from './processRegistry.js';
+import { createRuntimeDescriptor } from '../../server/runtimeIdentity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultDaemonScript = path.resolve(__dirname, '../daemon/ccnexus-daemon.js');
@@ -37,6 +39,7 @@ export function createDesktopRuntime(options = {}) {
   let runtimeCwd = options.cwd || process.cwd();
   const registry = new DesktopProcessRegistry(options);
   const bridges = new Map();
+  const makeUuid = typeof options.randomUUID === 'function' ? options.randomUUID : randomUUID;
 
   function createDaemonBridge(extraOptions = {}) {
     const { env: extraEnv, ...restOptions } = extraOptions;
@@ -62,6 +65,8 @@ export function createDesktopRuntime(options = {}) {
       env: {
         CCNEXUS_SESSION_ID: sessionId,
       },
+      runtimeSessionEpoch: makeUuid(),
+      bridgeIdentity: makeUuid(),
     });
     bridges.set(sessionId, bridge);
     bridge.start().catch((err) => {
@@ -74,6 +79,18 @@ export function createDesktopRuntime(options = {}) {
   function ensureSessionDaemon(args = {}) {
     const bridge = args.bridge || ensureBridge(args.sessionId);
     return registry.ensureSessionDaemon({ ...args, bridge });
+  }
+
+  function buildRuntimeRequest(bridge, queryOptions, rawModelId = '') {
+    return {
+      options: queryOptions,
+      runtimeDescriptor: createRuntimeDescriptor({
+        rawModelId: rawModelId || queryOptions?.model || queryOptions?.env?.ANTHROPIC_MODEL || '',
+        options: queryOptions,
+        runtimeSessionEpoch: bridge.runtimeSessionEpoch,
+        workspaceIdentity: queryOptions?.cwd || runtimeCwd,
+      }),
+    };
   }
 
   function adoptSessionDaemon({ fromSessionId, toSessionId, title }) {
@@ -91,6 +108,7 @@ export function createDesktopRuntime(options = {}) {
     title,
     prompt,
     options: queryOptions = {},
+    rawModelId = '',
     onPermissionRequest,
     onPlanApproval,
   }) {
@@ -99,7 +117,7 @@ export function createDesktopRuntime(options = {}) {
     const bridge = daemon.bridge;
     const stream = await bridge.streamCommand('query', {
       prompt,
-      options: queryOptions,
+      ...buildRuntimeRequest(bridge, queryOptions, rawModelId),
     }, {
       onPermissionRequest,
       onPlanApproval,
@@ -159,11 +177,16 @@ export function createDesktopRuntime(options = {}) {
     }
   }
 
-  async function getContextUsage({ sessionId, title = 'Context usage', options: queryOptions = {} } = {}) {
+  async function getContextUsage({
+    sessionId,
+    title = 'Context usage',
+    options: queryOptions = {},
+    rawModelId = '',
+  } = {}) {
     const daemonSessionId = sessionId || `context-${Date.now()}`;
     const daemon = ensureSessionDaemon({ sessionId: daemonSessionId, title });
     if (!daemon?.bridge) throw new Error('Unable to establish the Claude runtime');
-    return daemon.bridge.getContextUsage(queryOptions);
+    return daemon.bridge.getContextUsage(buildRuntimeRequest(daemon.bridge, queryOptions, rawModelId));
   }
 
   async function setPermissionMode({ sessionId, mode } = {}) {

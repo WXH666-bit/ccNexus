@@ -5,6 +5,10 @@ import {
   createPreToolUseHook,
   normalizePermissionMode,
 } from './permissionMode.js';
+import {
+  buildRuntimeSignature,
+  hasSameContextModel,
+} from '../../server/runtimeIdentity.js';
 
 const require = createRequire(import.meta.url);
 const { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');
@@ -194,29 +198,6 @@ function requestPlanApproval(request = {}) {
   });
 }
 
-function runtimeSignature(options = {}) {
-  const settingsEnv = options.settings?.env || {};
-  const modelEnv = options.env || {};
-  return JSON.stringify({
-    cwd: options.cwd || '',
-    additionalDirectories: options.additionalDirectories || [],
-    systemPromptAppend: options.systemPrompt?.append || '',
-    streamingEnabled: options.includePartialMessages !== false,
-    runtimeSessionEpoch: options.runtimeSessionEpoch || '',
-    model: options.model || '',
-    effort: options.effort || '',
-    includePartialMessages: options.includePartialMessages !== false,
-    contextWindow1M: (options.model || '').toLowerCase().includes('[1m]')
-      || settingsEnv.CLAUDE_CODE_DISABLE_1M_CONTEXT === '',
-    bypassPermissions: options.permissionMode === 'bypassPermissions',
-    modelRouting: modelEnv.ANTHROPIC_MODEL || '',
-    persistSession: options.persistSession !== false,
-    strictMcpConfig: options.strictMcpConfig === true,
-    mcpServers: options.mcpServers ?? null,
-    isolatedDenyAllTools: options.isolatedDenyAllTools === true,
-  });
-}
-
 function buildUserMessage(prompt, sessionId) {
   return {
     type: 'user',
@@ -337,8 +318,27 @@ function startPerpetualReader(currentRuntime) {
   })();
 }
 
-async function ensureRuntime(options = {}) {
-  const signature = runtimeSignature(options);
+function assertRuntimeDescriptor(runtimeDescriptor = {}) {
+  if (!runtimeDescriptor || typeof runtimeDescriptor !== 'object') {
+    throw new Error('Runtime descriptor is required');
+  }
+  if (typeof runtimeDescriptor.runtimeSessionEpoch !== 'string'
+      || !runtimeDescriptor.runtimeSessionEpoch.trim()) {
+    throw new Error('Runtime session epoch is required');
+  }
+}
+
+function assertRuntimeOwnership(currentRuntime, runtimeDescriptor) {
+  assertRuntimeDescriptor(runtimeDescriptor);
+  if (currentRuntime
+      && currentRuntime.descriptor?.runtimeSessionEpoch !== runtimeDescriptor.runtimeSessionEpoch) {
+    throw new Error('Runtime ownership mismatch for session epoch');
+  }
+}
+
+async function ensureRuntime(options = {}, runtimeDescriptor = {}) {
+  assertRuntimeOwnership(runtime, runtimeDescriptor);
+  const signature = buildRuntimeSignature(options, runtimeDescriptor);
   const requestedSessionId = options.resume || '';
   const sessionConflict = runtime
     && requestedSessionId
@@ -387,7 +387,8 @@ async function ensureRuntime(options = {}) {
     closed: false,
     inputStream,
     query,
-    signature,
+      signature,
+    descriptor: { ...runtimeDescriptor },
     sessionId: options.resume || '',
     currentPermissionMode: initialPermissionMode,
     currentModel: options.model || null,
@@ -419,8 +420,8 @@ async function runQuery(id, params = {}) {
   activeRequestId = id;
   let currentRuntime = null;
   try {
-    const { prompt, options = {} } = params;
-    currentRuntime = await ensureRuntime(options);
+    const { prompt, options = {}, runtimeDescriptor = {} } = params;
+    currentRuntime = await ensureRuntime(options, runtimeDescriptor);
     activeQuery = currentRuntime.query;
     beginRuntimeTurn(currentRuntime);
     currentRuntime.turnSink = createTurnSink();
@@ -524,7 +525,7 @@ async function runContextUsage(id, params = {}) {
   const previousRequestId = activeRequestId;
   if (!activeRequestId) activeRequestId = id;
   try {
-    const currentRuntime = await ensureRuntime(params.options || {});
+    const currentRuntime = await ensureRuntime(params.options || {}, params.runtimeDescriptor || {});
     if (!currentRuntime || currentRuntime.closed || typeof currentRuntime.query?.getContextUsage !== 'function') {
       throw new Error('getContextUsage is not available on the current runtime');
     }

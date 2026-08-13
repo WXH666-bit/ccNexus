@@ -70,6 +70,8 @@ export class DaemonBridge extends EventEmitter {
     const electronNodeEnv = options.electronRunAsNode ? { ELECTRON_RUN_AS_NODE: '1' } : {};
     this.env = { ...process.env, ...electronNodeEnv, ...(options.env || {}) };
     this.provider = options.provider || 'claude';
+    this.runtimeSessionEpoch = options.runtimeSessionEpoch || '';
+    this.bridgeIdentity = options.bridgeIdentity || '';
 
     this.daemonProcess = null;
     this.pendingRequests = new Map();

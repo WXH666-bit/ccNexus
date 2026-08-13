@@ -3,13 +3,28 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { createPreToolUseHook, normalizePermissionMode } from '../desktop/daemon/permissionMode.js';
+import { buildRuntimeSignature, hasSameContextModel } from '../server/runtimeIdentity.js';
 
 const daemonSource = readFileSync(new URL('../desktop/daemon/ccnexus-daemon.js', import.meta.url), 'utf8')
   .replace(/\r\n/g, '\n')
   .replace(
-    "import { createInterface } from 'node:readline';\nimport { createRequire } from 'node:module';\nimport { randomUUID } from 'node:crypto';\nimport {\n  createPreToolUseHook,\n  normalizePermissionMode,\n} from './permissionMode.js';\n\nconst require = createRequire(import.meta.url);\nconst { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');",
-    "const { createInterface, sdkQuery, randomUUID, createPreToolUseHook, normalizePermissionMode } = globalThis.__daemonDeps;",
+    "import { createInterface } from 'node:readline';\nimport { createRequire } from 'node:module';\nimport { randomUUID } from 'node:crypto';\nimport {\n  createPreToolUseHook,\n  normalizePermissionMode,\n} from './permissionMode.js';\nimport {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';\n\nconst require = createRequire(import.meta.url);\nconst { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');",
+    "const { createInterface, sdkQuery, randomUUID, createPreToolUseHook, normalizePermissionMode, buildRuntimeSignature, hasSameContextModel } = globalThis.__daemonDeps;",
+  )
+  .replace(
+    "import {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';",
+    '',
   );
+
+const testRuntimeDescriptor = {
+  rawModelId: 'claude-sonnet-4-6',
+  sdkModelName: 'sonnet',
+  resolvedModelId: 'backend-sonnet',
+  contextWindow1M: false,
+  runtimeSessionEpoch: 'epoch-test',
+  workspaceIdentity: 'D:/ccNexus',
+  providerGeneration: '',
+};
 
 function createFakeQuery(inputStream, state, options = {}) {
   state.queryCalls += 1;
@@ -105,6 +120,8 @@ test('desktop daemon reuses one SDK query across consecutive turns in the same s
         randomUUID: () => 'test-plan-id',
         createPreToolUseHook,
         normalizePermissionMode,
+        buildRuntimeSignature,
+        hasSameContextModel,
         createInterface() {
           return {
             on(event, handler) {
@@ -149,7 +166,11 @@ test('desktop daemon reuses one SDK query across consecutive turns in the same s
   lineHandler(JSON.stringify({
     id: 'turn-1',
     method: 'query',
-    params: { prompt: 'hello', options: { cwd: 'D:/ccNexus', model: 'deepseek-v4-pro' } },
+    params: {
+      prompt: 'hello',
+      options: { cwd: 'D:/ccNexus', model: 'deepseek-v4-pro' },
+      runtimeDescriptor: testRuntimeDescriptor,
+    },
   }));
   await waitForDone(messages, 'turn-1');
 
@@ -165,6 +186,7 @@ test('desktop daemon reuses one SDK query across consecutive turns in the same s
         permissionMode: 'plan',
         resume: 'session-1',
       },
+      runtimeDescriptor: testRuntimeDescriptor,
     },
   }));
   const planRequest = await waitForMessage(messages, message => (
@@ -190,6 +212,44 @@ test('desktop daemon reuses one SDK query across consecutive turns in the same s
   assert.equal(state.queryCalls, 1);
   assert.equal(state.closed, 0);
   assert.deepEqual(state.permissionModes, ['plan', 'auto', 'acceptEdits']);
+});
+
+test('daemon rejects a context request from a stale runtime epoch', async () => {
+  const harness = createDaemonHarness({ turnGates: [Promise.resolve()] });
+  const descriptor = {
+    rawModelId: 'claude-sonnet-4-6[1m]',
+    sdkModelName: 'sonnet',
+    resolvedModelId: 'backend-sonnet[1m]',
+    contextWindow1M: true,
+    runtimeSessionEpoch: 'epoch-live',
+    workspaceIdentity: 'D:/ccNexus',
+    providerGeneration: '',
+  };
+
+  harness.send({
+    id: 'turn-live',
+    method: 'query',
+    params: {
+      prompt: 'hello',
+      options: { cwd: 'D:/ccNexus', model: 'sonnet' },
+      runtimeDescriptor: descriptor,
+    },
+  });
+  await waitForDone(harness.state.messages, 'turn-live');
+
+  harness.send({
+    id: 'context-stale',
+    method: 'context_usage',
+    params: {
+      options: { cwd: 'D:/ccNexus', model: 'sonnet' },
+      runtimeDescriptor: { ...descriptor, runtimeSessionEpoch: 'epoch-stale' },
+    },
+  });
+  const stale = await waitForDone(harness.state.messages, 'context-stale');
+
+  assert.equal(stale.success, false);
+  assert.match(stale.error, /epoch|ownership/i);
+  assert.equal(harness.state.contextCalls, 0);
 });
 
 test('daemon ignores a stale abort requestId and leaves the newer query untouched', async () => {
@@ -313,6 +373,7 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
     interruptCalls: 0,
     closeCalls: 0,
     exitCalls: 0,
+    contextCalls: 0,
     toolDecision: undefined,
   };
   let lineHandler = null;
@@ -327,6 +388,8 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
         randomUUID: () => 'test-plan-id',
         createPreToolUseHook,
         normalizePermissionMode,
+        buildRuntimeSignature,
+        hasSameContextModel,
         createInterface() {
           return {
             on(event, handler) {
@@ -366,6 +429,10 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
             async close() {
               state.closeCalls += 1;
             },
+            async getContextUsage() {
+              state.contextCalls += 1;
+              return { used: 10, size: 100 };
+            },
             async setPermissionMode() {},
             async setModel() {},
             async setMaxThinkingTokens() {},
@@ -395,7 +462,11 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
   return {
     state,
     send(command) {
-      lineHandler(JSON.stringify(command));
+      const params = command.params || {};
+      const needsDescriptor = command.method === 'query' || command.method === 'context_usage';
+      lineHandler(JSON.stringify(needsDescriptor && !params.runtimeDescriptor
+        ? { ...command, params: { ...params, runtimeDescriptor: testRuntimeDescriptor } }
+        : command));
     },
   };
 }

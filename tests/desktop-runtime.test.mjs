@@ -28,6 +28,26 @@ test('desktop runtime starts one inspectable daemon process for a session', asyn
   assert.equal(bridge.getProcessForInspection(), null);
 });
 
+test('desktop runtime assigns a non-empty epoch to each session daemon generation', async () => {
+  const runtime = createDesktopRuntime({ cwd: process.cwd(), provider: 'claude' });
+  const first = runtime.ensureSessionDaemon({
+    sessionId: 'epoch-session-a',
+    title: 'Epoch A',
+  });
+  const second = runtime.ensureSessionDaemon({
+    sessionId: 'epoch-session-b',
+    title: 'Epoch B',
+  });
+
+  assert.equal(typeof first.bridge.runtimeSessionEpoch, 'string');
+  assert.ok(first.bridge.runtimeSessionEpoch.length > 0);
+  assert.equal(typeof second.bridge.runtimeSessionEpoch, 'string');
+  assert.ok(second.bridge.runtimeSessionEpoch.length > 0);
+  assert.notEqual(first.bridge.runtimeSessionEpoch, second.bridge.runtimeSessionEpoch);
+
+  await runtime.shutdown();
+});
+
 test('daemon bridge handles a closed stdin pipe during shutdown without surfacing EPIPE', async () => {
   const bridge = new DaemonBridge({ daemonScript: 'unused' });
   bridge.daemonProcess = {

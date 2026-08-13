@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const daemon = readFileSync(new URL('../desktop/daemon/ccnexus-daemon.js', import.meta.url), 'utf8');
+const runtimeIdentity = readFileSync(new URL('../server/runtimeIdentity.js', import.meta.url), 'utf8');
 
 test('desktop daemon keeps one SDK query runtime open and feeds turns through an async input stream', () => {
   assert.match(daemon, /class AsyncStream/);
@@ -27,22 +28,22 @@ test('desktop daemon promotes the SDK runtime to the returned session id without
 test('desktop daemon follows ccgui runtime signature rules for cache-preserving controls', () => {
   assert.doesNotMatch(daemon, /permissionMode:\s*options\.permissionMode/);
   assert.doesNotMatch(daemon, /maxThinkingTokens:\s*options\.maxThinkingTokens/);
-  assert.match(daemon, /bypassPermissions:\s*options\.permissionMode === 'bypassPermissions'/);
-  assert.match(daemon, /contextWindow1M:[\s\S]*CLAUDE_CODE_DISABLE_1M_CONTEXT/);
+  assert.match(runtimeIdentity, /bypassPermissions:\s*options\.permissionMode === 'bypassPermissions'/);
+  assert.match(runtimeIdentity, /contextWindow1M:\s*descriptor\.contextWindow1M === true/);
   assert.match(daemon, /setPermissionMode/);
   assert.match(daemon, /setMaxThinkingTokens/);
 });
 
 test('desktop daemon includes ccgui cache prefix inputs in runtime identity', () => {
-  assert.match(daemon, /additionalDirectories/);
-  assert.match(daemon, /systemPromptAppend/);
-  assert.match(daemon, /streamingEnabled/);
-  assert.match(daemon, /runtimeSessionEpoch/);
+  assert.match(runtimeIdentity, /additionalDirectories/);
+  assert.match(runtimeIdentity, /systemPromptAppend/);
+  assert.match(runtimeIdentity, /streamingEnabled/);
+  assert.match(runtimeIdentity, /runtimeSessionEpoch/);
 });
 
 test('desktop daemon keeps prompt-enhancement persistence and MCP isolation in runtime identity', () => {
-  assert.match(daemon, /persistSession/);
-  assert.match(daemon, /strictMcpConfig/);
-  assert.match(daemon, /mcpServers:\s+options\.mcpServers/);
+  assert.match(runtimeIdentity, /persistSession/);
+  assert.match(runtimeIdentity, /strictMcpConfig/);
+  assert.match(runtimeIdentity, /mcpFingerprint/);
   assert.match(daemon, /await closeRuntime\(\)/);
 });
