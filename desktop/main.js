@@ -72,7 +72,6 @@ const desktopSessions = new DesktopSessionService({
   promptEnhancementUsage: promptEnhancementUsageStore,
 });
 const sessionController = createDesktopSessionController({
-  runtime,
   sessions: desktopSessions,
 });
 const chatController = createDesktopChatController({

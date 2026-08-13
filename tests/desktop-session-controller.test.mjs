@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDesktopSessionController } from '../desktop/runtime/sessionController.js';
 
-test('loading a desktop session keeps a ccgui-style daemon visible for that chat', async () => {
-  const ensuredDaemons = [];
+test('loading a desktop session stays read-only and does not start a daemon', async () => {
   const messages = [
     {
       role: 'user',
@@ -13,8 +12,8 @@ test('loading a desktop session keeps a ccgui-style daemon visible for that chat
 
   const controller = createDesktopSessionController({
     runtime: {
-      ensureSessionDaemon(args) {
-        ensuredDaemons.push(args);
+      ensureSessionDaemon() {
+        assert.fail('history loading must not start a daemon');
       },
     },
     sessions: {
@@ -25,8 +24,18 @@ test('loading a desktop session keeps a ccgui-style daemon visible for that chat
   const history = await controller.loadSession('session-1');
 
   assert.equal(history.sessionId, 'session-1');
-  assert.deepEqual(ensuredDaemons, [{
-    sessionId: 'session-1',
-    title: 'build a vivo style static page',
-  }]);
+});
+
+test('history loading works without a runtime dependency', async () => {
+  const controller = createDesktopSessionController({
+    sessions: {
+      loadSession: async sessionId => ({ type: 'session_history', sessionId, messages: [] }),
+    },
+  });
+
+  assert.deepEqual(await controller.loadSession('session-2'), {
+    type: 'session_history',
+    sessionId: 'session-2',
+    messages: [],
+  });
 });
