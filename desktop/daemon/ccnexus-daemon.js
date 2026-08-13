@@ -245,24 +245,33 @@ async function closeRuntime() {
 }
 
 async function applyDynamicControls(currentRuntime, options = {}) {
-  if (!currentRuntime || currentRuntime.closed) return;
+  if (!currentRuntime || currentRuntime.closed) return { requiresRebuild: false };
 
   const targetPermissionMode = normalizePermissionMode(options.permissionMode || 'default');
   await setRuntimePermissionMode(currentRuntime, targetPermissionMode);
 
-  const targetModel = options.model || null;
-  if (currentRuntime.currentModel !== targetModel
-      && typeof currentRuntime.query?.setModel === 'function') {
-    await currentRuntime.query.setModel(targetModel || undefined);
-    currentRuntime.currentModel = targetModel;
+  const targetMaxThinkingTokens = options.maxThinkingTokens ?? null;
+  if (currentRuntime.currentMaxThinkingTokens === targetMaxThinkingTokens) {
+    return { requiresRebuild: false };
   }
 
-  const targetMaxThinkingTokens = options.maxThinkingTokens ?? null;
-  if (currentRuntime.currentMaxThinkingTokens !== targetMaxThinkingTokens
-      && typeof currentRuntime.query?.setMaxThinkingTokens === 'function') {
+  if (typeof currentRuntime.query?.setMaxThinkingTokens !== 'function') {
+    console.error('[ccnexus-daemon] maxThinkingTokens cannot be changed live; rebuilding runtime');
+    return { requiresRebuild: true };
+  }
+
+  try {
     await currentRuntime.query.setMaxThinkingTokens(targetMaxThinkingTokens);
     currentRuntime.currentMaxThinkingTokens = targetMaxThinkingTokens;
+  } catch (error) {
+    console.error(
+      '[ccnexus-daemon] maxThinkingTokens live update failed; rebuilding runtime:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return { requiresRebuild: true };
   }
+
+  return { requiresRebuild: false };
 }
 
 async function setRuntimePermissionMode(targetRuntime, mode) {
@@ -366,9 +375,12 @@ async function ensureRuntime(options = {}, runtimeDescriptor = {}) {
     await closeRuntime();
   }
   if (runtime) {
-    await applyDynamicControls(runtime, options);
-    touchRuntime(runtime);
-    return runtime;
+    const controlResult = await applyDynamicControls(runtime, options);
+    if (!controlResult.requiresRebuild) {
+      touchRuntime(runtime);
+      return runtime;
+    }
+    await closeRuntime();
   }
 
   const inputStream = new AsyncStream();

@@ -32,6 +32,7 @@ test('desktop daemon follows ccgui runtime signature rules for cache-preserving 
   assert.match(runtimeIdentity, /contextWindow1M:\s*descriptor\.contextWindow1M === true/);
   assert.match(daemon, /setPermissionMode/);
   assert.match(daemon, /setMaxThinkingTokens/);
+  assert.doesNotMatch(daemon, /query\.setModel/);
 });
 
 test('desktop daemon includes ccgui cache prefix inputs in runtime identity', () => {

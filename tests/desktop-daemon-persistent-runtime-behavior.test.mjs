@@ -297,6 +297,94 @@ test('daemon queues context usage behind an active turn and reuses the current r
   assert.deepEqual(harness.state.permissionModes, []);
 });
 
+test('daemon rebuilds instead of live-setModel when the model route changes', async () => {
+  const harness = createDaemonHarness({ turnGates: [Promise.resolve(), Promise.resolve()] });
+  const firstOptions = { cwd: 'D:/ccNexus', model: 'sonnet', env: { ANTHROPIC_MODEL: 'backend-a' } };
+  const secondOptions = { ...firstOptions, env: { ANTHROPIC_MODEL: 'backend-b' }, resume: 'session-1' };
+
+  harness.send({
+    id: 'route-a',
+    method: 'query',
+    params: {
+      prompt: 'first',
+      options: firstOptions,
+      runtimeDescriptor: { ...testRuntimeDescriptor, resolvedModelId: 'backend-a' },
+    },
+  });
+  await waitForDone(harness.state.messages, 'route-a');
+
+  harness.send({
+    id: 'route-b',
+    method: 'query',
+    params: {
+      prompt: 'second',
+      options: secondOptions,
+      runtimeDescriptor: { ...testRuntimeDescriptor, resolvedModelId: 'backend-b' },
+    },
+  });
+  await waitForDone(harness.state.messages, 'route-b');
+
+  assert.equal(harness.state.queryCalls, 2);
+  assert.equal(harness.state.closeCalls, 1);
+  assert.deepEqual(harness.state.models, []);
+});
+
+test('daemon rebuilds and logs when live thinking controls are unavailable', async () => {
+  const harness = createDaemonHarness({
+    turnGates: [Promise.resolve(), Promise.resolve()],
+    maxThinkingTokensSupported: false,
+  });
+  const firstOptions = { cwd: 'D:/ccNexus', model: 'sonnet', maxThinkingTokens: 4000 };
+  const secondOptions = { ...firstOptions, maxThinkingTokens: 8000, resume: 'session-1' };
+
+  harness.send({
+    id: 'thinking-a',
+    method: 'query',
+    params: { prompt: 'first', options: firstOptions },
+  });
+  await waitForDone(harness.state.messages, 'thinking-a');
+
+  harness.send({
+    id: 'thinking-b',
+    method: 'query',
+    params: { prompt: 'second', options: secondOptions },
+  });
+  await waitForDone(harness.state.messages, 'thinking-b');
+
+  assert.equal(harness.state.queryCalls, 2);
+  assert.equal(harness.state.closeCalls, 1);
+  assert.equal(harness.state.maxThinkingTokens.length, 0);
+  assert.equal(harness.state.consoleErrors.length, 1);
+  assert.match(harness.state.consoleErrors[0], /maxThinkingTokens/i);
+});
+
+test('daemon rebuilds and logs when live thinking controls throw', async () => {
+  const harness = createDaemonHarness({
+    turnGates: [Promise.resolve(), Promise.resolve()],
+    maxThinkingTokensThrows: true,
+  });
+  const firstOptions = { cwd: 'D:/ccNexus', model: 'sonnet', maxThinkingTokens: 4000 };
+  const secondOptions = { ...firstOptions, maxThinkingTokens: 8000, resume: 'session-1' };
+
+  harness.send({
+    id: 'throw-a',
+    method: 'query',
+    params: { prompt: 'first', options: firstOptions },
+  });
+  await waitForDone(harness.state.messages, 'throw-a');
+  harness.send({
+    id: 'throw-b',
+    method: 'query',
+    params: { prompt: 'second', options: secondOptions },
+  });
+  await waitForDone(harness.state.messages, 'throw-b');
+
+  assert.equal(harness.state.queryCalls, 2);
+  assert.equal(harness.state.closeCalls, 1);
+  assert.equal(harness.state.consoleErrors.length, 1);
+  assert.match(harness.state.consoleErrors[0], /rejected|maxThinkingTokens/i);
+});
+
 test('daemon ignores a stale abort requestId and leaves the newer query untouched', async () => {
   let releaseSecondTurn;
   const secondTurn = new Promise((resolve) => { releaseSecondTurn = resolve; });
@@ -410,7 +498,13 @@ test('daemon enforces serialized deny-all-tools policy for isolated prompt enhan
   assert.equal(harness.state.toolDecision?.message, 'Prompt enhancement cannot use tools');
 });
 
-function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool = false } = {}) {
+function createDaemonHarness({
+  turnGates = [],
+  interruptGate = null,
+  invokeTool = false,
+  maxThinkingTokensSupported = true,
+  maxThinkingTokensThrows = false,
+} = {}) {
   const state = {
     messages: [],
     queryCalls: 0,
@@ -422,12 +516,15 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
     permissionModes: [],
     models: [],
     maxThinkingTokens: [],
+    consoleErrors: [],
     toolDecision: undefined,
   };
   let lineHandler = null;
 
   const context = {
-    console,
+    console: {
+      error(...args) { state.consoleErrors.push(args.map(String).join(' ')); },
+    },
     setTimeout,
     clearTimeout,
     Promise,
@@ -483,7 +580,12 @@ function createDaemonHarness({ turnGates = [], interruptGate = null, invokeTool 
             },
             async setPermissionMode(mode) { state.permissionModes.push(mode); },
             async setModel(model) { state.models.push(model); },
-            async setMaxThinkingTokens(tokens) { state.maxThinkingTokens.push(tokens); },
+            ...(maxThinkingTokensSupported ? {
+              async setMaxThinkingTokens(tokens) {
+                if (maxThinkingTokensThrows) throw new Error('thinking control rejected');
+                state.maxThinkingTokens.push(tokens);
+              },
+            } : {}),
           };
         },
       },
