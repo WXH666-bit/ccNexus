@@ -158,6 +158,7 @@ export type DesktopChatEvent =
       allowedPrompts: { tool: string; prompt: string }[];
     }
   | { type: 'mode_changed'; sessionId?: string; mode: PermissionMode; source?: string }
+  | { type: 'runtime_lifecycle'; sessionId?: string; classification: 'cold' | 'warm'; reason?: string }
   | {
       type: 'ask_user_question';
       sessionId?: string;

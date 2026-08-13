@@ -4,12 +4,21 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { createPreToolUseHook, normalizePermissionMode } from '../desktop/daemon/permissionMode.js';
 import { buildRuntimeSignature, hasSameContextModel } from '../server/runtimeIdentity.js';
+import {
+  RUNTIME_CLEANUP_INTERVAL_MS,
+  getRuntimeRetirementReason,
+  isRuntimeRetirementBlocked,
+} from '../desktop/runtime/runtimeLifecyclePolicy.js';
 
 const daemonSource = readFileSync(new URL('../desktop/daemon/ccnexus-daemon.js', import.meta.url), 'utf8')
   .replace(/\r\n/g, '\n')
   .replace(
+    "import {\n  RUNTIME_CLEANUP_INTERVAL_MS,\n  getRuntimeRetirementReason,\n  isRuntimeRetirementBlocked,\n} from '../runtime/runtimeLifecyclePolicy.js';\n",
+    '',
+  )
+  .replace(
     "import { createInterface } from 'node:readline';\nimport { createRequire } from 'node:module';\nimport { randomUUID } from 'node:crypto';\nimport {\n  createPreToolUseHook,\n  normalizePermissionMode,\n} from './permissionMode.js';\nimport {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';\n\nconst require = createRequire(import.meta.url);\nconst { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');",
-    "const { createInterface, sdkQuery, randomUUID, createPreToolUseHook, normalizePermissionMode, buildRuntimeSignature, hasSameContextModel } = globalThis.__daemonDeps;",
+    "const { createInterface, sdkQuery, randomUUID, createPreToolUseHook, normalizePermissionMode, buildRuntimeSignature, hasSameContextModel, RUNTIME_CLEANUP_INTERVAL_MS, getRuntimeRetirementReason, isRuntimeRetirementBlocked } = globalThis.__daemonDeps;",
   )
   .replace(
     "import {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';",
@@ -385,6 +394,70 @@ test('daemon rebuilds and logs when live thinking controls throw', async () => {
   assert.match(harness.state.consoleErrors[0], /rejected|maxThinkingTokens/i);
 });
 
+test('daemon retires immediately when idle retirement is requested', async () => {
+  const harness = createDaemonHarness();
+
+  harness.send({ id: 'retire-idle', method: 'retire', params: { reason: 'idle_timeout' } });
+  const response = await waitForDone(harness.state.messages, 'retire-idle');
+
+  assert.equal(response.success, true);
+  assert.equal(response.result.retiring, true);
+  await waitForCondition(() => harness.state.exitCalls === 1);
+  assert.equal(harness.state.closeCalls, 0);
+});
+
+test('daemon status exposes lifecycle timestamps, epoch, and control blockers', async () => {
+  const harness = createDaemonHarness({ turnGates: [Promise.resolve()] });
+  harness.send({
+    id: 'status-turn',
+    method: 'query',
+    params: { prompt: 'status', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  await waitForDone(harness.state.messages, 'status-turn');
+
+  harness.send({ id: 'status-1', method: 'status' });
+  const status = await waitForDone(harness.state.messages, 'status-1');
+  assert.equal(typeof status.result.daemonStartedAt, 'number');
+  assert.equal(typeof status.result.daemonLastUsedAt, 'number');
+  assert.equal(status.result.runtime.closed, false);
+  assert.equal(typeof status.result.runtime.createdAt, 'number');
+  assert.equal(typeof status.result.runtime.lastUsedAt, 'number');
+  assert.equal(status.result.runtime.activeTurnCount, 0);
+  assert.equal(status.result.runtime.runtimeSessionEpoch, 'epoch-test');
+  assert.equal(status.result.pendingControlCount, 0);
+});
+
+test('daemon defers retirement until the active turn and queued context finish', async () => {
+  let releaseTurn;
+  const turnGate = new Promise((resolve) => { releaseTurn = resolve; });
+  const harness = createDaemonHarness({ turnGates: [turnGate] });
+
+  harness.send({
+    id: 'retire-turn',
+    method: 'query',
+    params: { prompt: 'work', options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  await waitForCondition(() => harness.state.turnCount === 1);
+  harness.send({
+    id: 'retire-context',
+    method: 'context_usage',
+    params: { options: { cwd: 'D:/ccNexus', model: 'sonnet' } },
+  });
+  harness.send({ id: 'retire-request', method: 'retire', params: { reason: 'absolute_lifetime' } });
+
+  const retirement = await waitForDone(harness.state.messages, 'retire-request');
+  assert.equal(retirement.result.deferred, true);
+  assert.equal(harness.state.exitCalls, 0);
+  assert.equal(harness.state.contextCalls, 0);
+
+  releaseTurn();
+  await waitForDone(harness.state.messages, 'retire-turn');
+  await waitForDone(harness.state.messages, 'retire-context');
+  await waitForCondition(() => harness.state.exitCalls === 1);
+  assert.equal(harness.state.contextCalls, 1);
+  assert.equal(harness.state.closeCalls, 1);
+});
+
 test('daemon ignores a stale abort requestId and leaves the newer query untouched', async () => {
   let releaseSecondTurn;
   const secondTurn = new Promise((resolve) => { releaseSecondTurn = resolve; });
@@ -535,6 +608,9 @@ function createDaemonHarness({
         normalizePermissionMode,
         buildRuntimeSignature,
         hasSameContextModel,
+        RUNTIME_CLEANUP_INTERVAL_MS,
+        getRuntimeRetirementReason,
+        isRuntimeRetirementBlocked,
         createInterface() {
           return {
             on(event, handler) {

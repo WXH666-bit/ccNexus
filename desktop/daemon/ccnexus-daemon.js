@@ -9,6 +9,11 @@ import {
   buildRuntimeSignature,
   hasSameContextModel,
 } from '../../server/runtimeIdentity.js';
+import {
+  RUNTIME_CLEANUP_INTERVAL_MS,
+  getRuntimeRetirementReason,
+  isRuntimeRetirementBlocked,
+} from '../runtime/runtimeLifecyclePolicy.js';
 
 const require = createRequire(import.meta.url);
 const { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');
@@ -19,6 +24,12 @@ let activeQuery = null;
 let runtime = null;
 let contextUsageRunning = false;
 const pendingContextUsage = [];
+const daemonStartedAt = Date.now();
+let daemonLastUsedAt = daemonStartedAt;
+let retirementReason = null;
+let retirementInProgress = false;
+let retirementTimer = null;
+let retireAfterTurn = false;
 let permissionRequestCounter = 0;
 const pendingPermissions = new Map();
 const pendingPlanApprovals = new Map();
@@ -136,6 +147,67 @@ function reply(id, payload) {
   });
 }
 
+function touchDaemon() {
+  daemonLastUsedAt = Date.now();
+}
+
+function isRetirementBlocked() {
+  return isRuntimeRetirementBlocked({
+    activeRequestId,
+    activeTurnCount: runtime?.activeTurnCount || 0,
+    contextUsageRunning,
+    pendingContextUsage: pendingContextUsage.length,
+    pendingPermissions: pendingPermissions.size,
+    pendingPlanApprovals: pendingPlanApprovals.size,
+  });
+}
+
+function failRequest(id, error, code = 'DAEMON_REQUEST_FAILED') {
+  writeRawLine({
+    id,
+    done: true,
+    success: false,
+    code,
+    error: error instanceof Error ? error.message : String(error || 'Daemon request failed'),
+  });
+}
+
+async function finishRetirement() {
+  if (!retireAfterTurn || retirementInProgress || isRetirementBlocked()) return;
+  retirementInProgress = true;
+  stopRetirementMonitor();
+  await closeRuntime();
+  sendDaemonEvent('retiring', { reason: retirementReason || 'requested' });
+  process.exit(0);
+}
+
+function scheduleRetirement(reason) {
+  if (retirementInProgress) return;
+  retireAfterTurn = true;
+  retirementReason = reason || retirementReason || 'requested';
+  void finishRetirement();
+}
+
+function checkRetirementEligibility() {
+  const reason = getRuntimeRetirementReason({
+    startedAt: daemonStartedAt,
+    lastUsedAt: daemonLastUsedAt,
+  });
+  if (reason) scheduleRetirement(reason);
+}
+
+function startRetirementMonitor() {
+  if (typeof setInterval !== 'function') return;
+  retirementTimer = setInterval(checkRetirementEligibility, RUNTIME_CLEANUP_INTERVAL_MS);
+  retirementTimer.unref?.();
+}
+
+function stopRetirementMonitor() {
+  if (!retirementTimer) return;
+  clearInterval(retirementTimer);
+  retirementTimer = null;
+}
+
 async function canUseTool(toolName, input, options) {
   const requestId = `perm-${activeRequestId}-${++permissionRequestCounter}`;
   writeRawLine({
@@ -225,6 +297,7 @@ function endRuntimeTurn(currentRuntime) {
 function touchRuntime(currentRuntime) {
   if (!currentRuntime || currentRuntime.closed) return;
   currentRuntime.lastUsedAt = Date.now();
+  touchDaemon();
 }
 
 async function disposeRuntime(targetRuntime = runtime) {
@@ -340,12 +413,7 @@ function assertRuntimeDescriptor(runtimeDescriptor = {}) {
 }
 
 function failContextUsageRequest(id, error) {
-  writeRawLine({
-    id,
-    done: true,
-    success: false,
-    error: error instanceof Error ? error.message : String(error || 'Context usage request failed'),
-  });
+  failRequest(id, error, 'CONTEXT_USAGE_FAILED');
 }
 
 function failPendingContextUsage(error) {
@@ -435,6 +503,10 @@ async function ensureRuntime(options = {}, runtimeDescriptor = {}) {
 }
 
 async function runQuery(id, params = {}) {
+  if (retireAfterTurn || retirementInProgress) {
+    failRequest(id, new Error('Daemon is retiring'), 'DAEMON_RETIRING');
+    return;
+  }
   if (activeRequestId || contextUsageRunning) {
     const busyRequestId = activeRequestId || 'context_usage';
     writeRawLine({
@@ -449,6 +521,7 @@ async function runQuery(id, params = {}) {
   const request = { id, state: 'running' };
   activeRequest = request;
   activeRequestId = id;
+  touchDaemon();
   let currentRuntime = null;
   try {
     const { prompt, options = {}, runtimeDescriptor = {} } = params;
@@ -499,6 +572,7 @@ async function runQuery(id, params = {}) {
       activeRequest = null;
       activeRequestId = null;
     }
+    touchDaemon();
     void drainContextUsageQueue();
   }
 }
@@ -512,6 +586,7 @@ async function runAbort(id, params = {}) {
   }
 
   request.state = 'aborting';
+  touchDaemon();
   for (const [requestId, resolve] of pendingPermissions.entries()) {
     pendingPermissions.delete(requestId);
     resolve({ behavior: 'deny', message: 'Request aborted' });
@@ -531,6 +606,7 @@ async function runShutdown(id) {
   const request = activeRequest;
   const targetRequestId = activeRequestId;
   if (request) request.state = 'shutting-down';
+  stopRetirementMonitor();
   settleAllPlanApprovals('Daemon shutting down');
   failPendingContextUsage(new Error('Daemon shutting down'));
   try { await activeQuery?.interrupt?.(); } catch { /* ignore */ }
@@ -573,7 +649,10 @@ async function runContextUsageNow(id, params = {}) {
 async function drainContextUsageQueue() {
   if (contextUsageRunning || activeRequestId) return;
   const request = pendingContextUsage.shift();
-  if (!request) return;
+  if (!request) {
+    void finishRetirement();
+    return;
+  }
 
   contextUsageRunning = true;
   try {
@@ -585,8 +664,31 @@ async function drainContextUsageQueue() {
 }
 
 function runContextUsage(id, params = {}) {
+  if (retirementInProgress || (retireAfterTurn && !activeRequestId)) {
+    failContextUsageRequest(id, new Error('Daemon is retiring'));
+    return;
+  }
+  touchDaemon();
   pendingContextUsage.push({ id, params });
   void drainContextUsageQueue();
+}
+
+async function runRetire(id, params = {}) {
+  if (retirementInProgress) {
+    reply(id, { result: { retiring: true, deferred: false, reason: retirementReason || 'requested' } });
+    return;
+  }
+
+  scheduleRetirement(params.reason || 'requested');
+  const deferred = isRetirementBlocked();
+  reply(id, {
+    result: {
+      retiring: true,
+      deferred,
+      reason: retirementReason,
+    },
+  });
+  if (!deferred) void finishRetirement();
 }
 
 async function runSetPermissionMode(id, params = {}) {
@@ -606,6 +708,7 @@ async function runSetPermissionMode(id, params = {}) {
     const applied = Boolean(runtime && !runtime.closed);
     if (applied) {
       await setRuntimePermissionMode(runtime, mode);
+      touchDaemon();
     } else {
       modeState.current = mode;
     }
@@ -628,6 +731,7 @@ async function runSetPermissionMode(id, params = {}) {
 
 sendDaemonEvent('starting');
 sendDaemonEvent('ready');
+startRetirementMonitor();
 
 const rl = createInterface({ input: process.stdin });
 rl.on('line', (line) => {
@@ -645,6 +749,7 @@ rl.on('line', (line) => {
     const resolve = pendingPermissions.get(requestId);
     if (resolve) {
       pendingPermissions.delete(requestId);
+      touchDaemon();
       resolve(decision || { behavior: 'deny', message: 'No permission decision received' });
     }
     return;
@@ -657,6 +762,7 @@ rl.on('line', (line) => {
       targetMode,
       feedback,
     });
+    touchDaemon();
     return;
   }
 
@@ -666,11 +772,30 @@ rl.on('line', (line) => {
   }
 
   if (method === 'status') {
+    const pendingControlCount = pendingContextUsage.length
+      + (contextUsageRunning ? 1 : 0)
+      + pendingPermissions.size
+      + pendingPlanApprovals.size;
     reply(id, {
       result: {
         pid: process.pid,
         activeRequestId,
         uptimeMs: Math.floor(process.uptime() * 1000),
+        daemonStartedAt,
+        daemonLastUsedAt,
+        runtime: runtime ? {
+          closed: runtime.closed,
+          createdAt: runtime.createdAt,
+          lastUsedAt: runtime.lastUsedAt,
+          activeTurnCount: runtime.activeTurnCount || 0,
+          runtimeSessionEpoch: runtime.descriptor?.runtimeSessionEpoch || '',
+        } : null,
+        pendingControlCount,
+        pendingContextUsage: pendingContextUsage.length,
+        contextUsageRunning,
+        retireAfterTurn,
+        retirementInProgress,
+        retirementReason,
       },
     });
     return;
@@ -683,6 +808,11 @@ rl.on('line', (line) => {
 
   if (method === 'shutdown') {
     void runShutdown(id);
+    return;
+  }
+
+  if (method === 'retire') {
+    void runRetire(id, command.params);
     return;
   }
 
@@ -712,14 +842,18 @@ rl.on('line', (line) => {
 });
 
 rl.on('close', () => {
+  stopRetirementMonitor();
   void closeRuntime().finally(() => process.exit(0));
 });
 process.stdin.on('end', () => {
+  stopRetirementMonitor();
   void closeRuntime().finally(() => process.exit(0));
 });
 process.on('SIGTERM', () => {
+  stopRetirementMonitor();
   void closeRuntime().finally(() => process.exit(0));
 });
 process.on('SIGINT', () => {
+  stopRetirementMonitor();
   void closeRuntime().finally(() => process.exit(0));
 });

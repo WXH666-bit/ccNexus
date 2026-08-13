@@ -79,6 +79,7 @@ test('returns enhanced prompt text and latest usage from a short-lived query', a
   assert.equal(calls.length, 1);
   assert.equal(calls[0].sessionId, 'prompt-enhancement:req-1');
   assert.equal(calls[0].title, 'Prompt enhancement');
+  assert.equal(calls[0].rawModelId, 'claude-sonnet-4-6');
   assert.match(calls[0].prompt, /make this prompt better/);
   assert.match(calls[0].prompt, /Keep error handling and examples/);
   assert.equal(calls[0].options.cwd, workspace.cwd);

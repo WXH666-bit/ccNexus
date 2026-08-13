@@ -390,6 +390,14 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         onPermissionRequest: (request) => canUseTool(request.toolName, request.input, request.options),
         onPlanApproval: (request) => requestPlanApprovalFromRenderer(emit, request, querySessionId),
       });
+      if (query.runtimeClassification) {
+        emitSafe(emit, {
+          type: 'runtime_lifecycle',
+          classification: query.runtimeClassification,
+          reason: query.runtimeRetirementReason || undefined,
+          sessionId: querySessionId,
+        });
+      }
 
       const assistantTurn = createAssistantTurn();
       let lastAssistantId = null;

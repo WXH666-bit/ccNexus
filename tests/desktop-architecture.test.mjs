@@ -75,6 +75,7 @@ test('daemon bridge mirrors ccgui NDJSON lifecycle over a child process', () => 
   assert.match(bridge, /spawn\(/);
   assert.match(bridge, /method:\s*'heartbeat'/);
   assert.match(bridge, /method:\s*'shutdown'/);
+  assert.match(bridge, /sendCommand\('retire'/);
   assert.match(bridge, /pendingRequests/);
   assert.match(bridge, /activeRequestCount/);
   assert.match(bridge, /getProcessForInspection/);
@@ -89,6 +90,7 @@ test('daemon process implements ready, heartbeat, status, abort and shutdown pro
   assert.match(daemon, /method === 'status'/);
   assert.match(daemon, /method === 'abort'/);
   assert.match(daemon, /method === 'shutdown'/);
+  assert.match(daemon, /method === 'retire'/);
 });
 
 test('desktop chat controller delegates process management to desktop runtime registry', () => {

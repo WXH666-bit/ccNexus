@@ -17,6 +17,12 @@ function hasExited(child) {
     || (child.signalCode !== null && child.signalCode !== undefined);
 }
 
+function createDaemonError(message, code) {
+  const error = new Error(message || 'Daemon command failed');
+  if (code) error.code = code;
+  return error;
+}
+
 function waitForChildExit(child, timeoutMs) {
   if (hasExited(child) || typeof child.once !== 'function') return Promise.resolve();
 
@@ -80,6 +86,9 @@ export class DaemonBridge extends EventEmitter {
     this.readyPromise = null;
     this.readyResolve = null;
     this.readyReject = null;
+    this.exitPromise = Promise.resolve();
+    this.exitResolve = null;
+    this.lifecycleState = 'stopped';
     this.shutdownPromise = null;
     this.shutdownRequestTimeoutMs = options.shutdownRequestTimeoutMs ?? DEFAULT_SHUTDOWN_REQUEST_TIMEOUT_MS;
     this.shutdownGraceTimeoutMs = options.shutdownGraceTimeoutMs ?? DEFAULT_SHUTDOWN_GRACE_TIMEOUT_MS;
@@ -93,6 +102,10 @@ export class DaemonBridge extends EventEmitter {
       this.readyResolve = resolve;
       this.readyReject = reject;
     });
+    this.exitPromise = new Promise((resolve) => {
+      this.exitResolve = resolve;
+    });
+    this.lifecycleState = 'starting';
 
     this.daemonProcess = spawn(this.nodePath, [this.daemonScript], {
       cwd: this.cwd,
@@ -113,7 +126,10 @@ export class DaemonBridge extends EventEmitter {
     });
 
     this.daemonProcess.on('exit', (code, signal) => {
+      this.lifecycleState = 'stopped';
       this.emit('exit', { code, signal });
+      this.exitResolve?.({ code, signal });
+      this.exitResolve = null;
       this.readyReject?.(new Error(`Daemon exited with code ${code ?? signal}`));
       this.readyResolve = null;
       this.readyReject = null;
@@ -155,7 +171,13 @@ export class DaemonBridge extends EventEmitter {
     }
 
     if (message.type === 'daemon' && message.event === 'ready') {
+      this.lifecycleState = 'running';
       this.readyResolve?.(message);
+      return;
+    }
+
+    if (message.type === 'daemon') {
+      this.emit('daemon_event', message);
       return;
     }
 
@@ -174,7 +196,7 @@ export class DaemonBridge extends EventEmitter {
         this.pendingRequests.delete(message.id);
         if (pending.countsAsActive) this.activeRequestCount = Math.max(0, this.activeRequestCount - 1);
         if (message.success === false) {
-          pending.reject(new Error(message.error || 'Daemon command failed'));
+          pending.reject(createDaemonError(message.error || 'Daemon command failed', message.code));
         } else {
           pending.resolve(pending.messages);
         }
@@ -302,7 +324,9 @@ export class DaemonBridge extends EventEmitter {
       }
 
       if (message.done) {
-        finish(message.success === false ? new Error(message.error || 'Daemon command failed') : null);
+        finish(message.success === false
+          ? createDaemonError(message.error || 'Daemon command failed', message.code)
+          : null);
         return;
       }
 
@@ -344,16 +368,39 @@ export class DaemonBridge extends EventEmitter {
   }
 
   status() {
-    return this.sendCommand('status', {}, { countsAsActive: false });
+    return this.sendCommand('status', {}, { countsAsActive: false }).then((messages) => {
+      const response = messages[messages.length - 1];
+      if (!response || response.result === undefined) {
+        throw new Error('Daemon status response was empty');
+      }
+      return response.result;
+    });
   }
 
   async getContextUsage(request = {}) {
-    const messages = await this.sendCommand('context_usage', request);
+    const params = request && Object.prototype.hasOwnProperty.call(request, 'options')
+      ? request
+      : { options: request };
+    const messages = await this.sendCommand('context_usage', params);
     const response = messages[messages.length - 1];
     if (!response || response.result === undefined) {
       throw new Error('Context usage response was empty');
     }
     return response.result;
+  }
+
+  async retire(reason = 'lifecycle') {
+    const messages = await this.sendCommand('retire', { reason }, { countsAsActive: false });
+    const response = messages[messages.length - 1];
+    if (!response || response.result === undefined) {
+      throw new Error('Daemon retirement response was empty');
+    }
+    this.lifecycleState = 'retiring';
+    return response.result;
+  }
+
+  waitForExit() {
+    return this.exitPromise || Promise.resolve();
   }
 
   async setPermissionMode(mode) {

@@ -56,6 +56,7 @@
       "server/permissionPolicy.js",
       "server/protocol.js",
       "server/queryOptions.js",
+      "server/runtimeIdentity.js",
       "server/sessionRecovery.js",
       "server/claudeProjectPaths.js",
       "server/systemPrompt.js",

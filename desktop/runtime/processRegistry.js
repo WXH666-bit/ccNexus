@@ -36,6 +36,7 @@ export class DesktopProcessRegistry {
       provider: this.provider,
       pid: processRef?.pid || process.pid,
       alive: true,
+      state: bridge?.lifecycleState || 'starting',
       startedAt: Date.now(),
       sessionId,
       tabName: `AI${this.nextDaemonTabIndex++}`,
@@ -47,9 +48,24 @@ export class DesktopProcessRegistry {
     return daemon;
   }
 
-  removeSessionDaemon(sessionId) {
-    if (!sessionId) return;
+  removeSessionDaemon(sessionId, bridge = null) {
+    if (!sessionId) return false;
+    const existing = this.sessionDaemons.get(sessionId);
+    if (!existing || (bridge && existing.bridge !== bridge)) return false;
     this.sessionDaemons.delete(sessionId);
+    return true;
+  }
+
+  setDaemonState({ sessionId, bridge, state }) {
+    const daemon = this.sessionDaemons.get(sessionId);
+    if (!daemon || (bridge && daemon.bridge !== bridge)) return false;
+    daemon.state = state;
+    daemon.alive = !['stopped', 'stopping'].includes(state);
+    return true;
+  }
+
+  getSessionDaemon(sessionId) {
+    return sessionId ? this.sessionDaemons.get(sessionId) || null : null;
   }
 
   adoptSessionDaemon({ fromSessionId, toSessionId, title }) {
@@ -104,6 +120,7 @@ export class DesktopProcessRegistry {
       processes.push({
         ...daemon,
         bridge: undefined,
+        lifecycleState: daemon.state,
         pid,
         alive: processRef ? !processRef.killed : daemon.alive,
         uptime: uptimeMs,

@@ -152,6 +152,7 @@ export function createPromptEnhancementService({
         title: QUERY_TITLE,
         prompt: buildPromptEnhancementInput({ text: normalizedText, localResult }),
         options,
+        rawModelId: model,
         signal: active.abortController.signal,
       }));
       active.queryPromise = queryPromise;
