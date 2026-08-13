@@ -114,6 +114,8 @@ export interface ChatMessage {
   cost?: number;
   duration?: number;
   turns?: number;
+  runtimeClassification?: 'cold' | 'warm';
+  runtimeRetirementReason?: string;
 }
 
 // ─── Session ─────────────────────────────────────────────────────
@@ -132,8 +134,8 @@ export type DesktopChatEvent =
   | { type: 'session'; sessionId: string; title?: string; updatedAt?: number }
   | { type: 'system'; subtype?: string; sessionId?: string }
   | { type: 'stream_event'; event: unknown; sessionId?: string; uuid?: string }
-  | { type: 'assistant'; sessionId?: string; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; session_id?: string; cost?: number; duration?: number; turns?: number } }
-  | { type: 'usage_update'; sessionId?: string; percentage: number; totalTokens: number; limit: number; usedTokens: number; maxTokens: number }
+  | { type: 'assistant'; sessionId?: string; message: { id: string; content: ContentBlock[]; model?: string; usage?: UsageStats; sessionId?: string; session_id?: string; cost?: number; duration?: number; turns?: number; runtimeClassification?: 'cold' | 'warm'; runtimeRetirementReason?: string } }
+  | { type: 'usage_update'; sessionId?: string; percentage: number; totalTokens: number; limit: number; usedTokens: number; maxTokens: number; runtimeClassification?: 'cold' | 'warm'; runtimeRetirementReason?: string }
   | { type: 'tool_result'; sessionId?: string; uuid?: string; tool_use_id?: string; toolUseId?: string; content: string; is_error?: boolean }
   | { type: 'tool_progress'; sessionId?: string; toolName?: string; tool_name?: string; toolUseId?: string; tool_use_id?: string; elapsed?: number; status?: 'running' | 'completed' | 'error' }
   | { type: 'tool_use_summary'; sessionId?: string; summary?: string; precedingIds?: string[] }

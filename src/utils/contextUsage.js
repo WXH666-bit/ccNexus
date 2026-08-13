@@ -125,7 +125,14 @@ export function extractUsageFromSdkEvent(event) {
   return isCompleteUsage(event.message?.usage) ? event.message.usage : null;
 }
 
-export function createUsageUpdate({ usage, provider = 'claude', model, sessionId }) {
+export function createUsageUpdate({
+  usage,
+  provider = 'claude',
+  model,
+  sessionId,
+  runtimeClassification,
+  runtimeRetirementReason,
+}) {
   const usedTokens = extractUsedTokens(usage, provider);
   const maxTokens = getModelContextLimit(model);
   return {
@@ -136,5 +143,7 @@ export function createUsageUpdate({ usage, provider = 'claude', model, sessionId
     limit: maxTokens,
     usedTokens,
     maxTokens,
+    ...(runtimeClassification ? { runtimeClassification } : {}),
+    ...(runtimeRetirementReason ? { runtimeRetirementReason } : {}),
   };
 }

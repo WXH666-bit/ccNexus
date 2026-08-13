@@ -23,6 +23,29 @@ function createDaemonError(message, code) {
   return error;
 }
 
+function normalizeRetirementReason(reason) {
+  if (reason === 'idle_timeout') return 'idle';
+  if (reason === 'absolute_lifetime') return 'absolute-lifetime';
+  if (reason === 'lifecycle') return 'requested';
+  if (reason === undefined) return 'requested';
+  return reason;
+}
+
+function readRuntimeMetadata(message) {
+  if (!message || message.type !== 'runtime_metadata') return null;
+  return normalizeRuntimeMetadata(message);
+}
+
+function normalizeRuntimeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  if (metadata.classification !== 'cold' && metadata.classification !== 'warm') return null;
+  return {
+    classification: metadata.classification,
+    generationId: metadata.generationId,
+    ...(metadata.creationReason ? { creationReason: metadata.creationReason } : {}),
+  };
+}
+
 function waitForChildExit(child, timeoutMs) {
   if (hasExited(child) || typeof child.once !== 'function') return Promise.resolve();
 
@@ -252,6 +275,7 @@ export class DaemonBridge extends EventEmitter {
     const waiters = [];
     let finished = false;
     let failure = null;
+    let runtimeMetadata = null;
 
     const push = (value) => {
       const waiter = waiters.shift();
@@ -330,6 +354,12 @@ export class DaemonBridge extends EventEmitter {
         return;
       }
 
+      const metadata = readRuntimeMetadata(message);
+      if (metadata) {
+        runtimeMetadata = metadata;
+        return;
+      }
+
       if (message.type === 'sdk_event') {
         push(message.event);
         return;
@@ -347,6 +377,21 @@ export class DaemonBridge extends EventEmitter {
 
     return {
       requestId: id,
+      get runtimeMetadata() {
+        return runtimeMetadata || undefined;
+      },
+      get runtimeLifecycle() {
+        return runtimeMetadata || undefined;
+      },
+      get runtimeClassification() {
+        return runtimeMetadata?.classification;
+      },
+      get runtimeGenerationId() {
+        return runtimeMetadata?.generationId;
+      },
+      get runtimeCreationReason() {
+        return runtimeMetadata?.creationReason;
+      },
       interrupt: () => this.abort(id),
       close: () => this.abort(id),
       [Symbol.asyncIterator]() {
@@ -386,16 +431,27 @@ export class DaemonBridge extends EventEmitter {
     if (!response || response.result === undefined) {
       throw new Error('Context usage response was empty');
     }
-    return response.result;
+    const metadataMessage = messages.find(message => message?.type === 'runtime_metadata');
+    const runtimeMetadata = readRuntimeMetadata(metadataMessage)
+      || normalizeRuntimeMetadata(response.runtimeMetadata);
+    if (!runtimeMetadata || !response.result || typeof response.result !== 'object' || Array.isArray(response.result)) {
+      return response.result;
+    }
+    return {
+      ...response.result,
+      runtimeMetadata,
+    };
   }
 
-  async retire(reason = 'lifecycle') {
-    const messages = await this.sendCommand('retire', { reason }, { countsAsActive: false });
+  async retire(reason = 'requested', observation) {
+    const params = { reason: normalizeRetirementReason(reason) };
+    if (observation !== undefined) params.observation = observation;
+    const messages = await this.sendCommand('retire', params, { countsAsActive: false });
     const response = messages[messages.length - 1];
     if (!response || response.result === undefined) {
       throw new Error('Daemon retirement response was empty');
     }
-    this.lifecycleState = 'retiring';
+    if (response.result?.accepted === true) this.lifecycleState = 'retiring';
     return response.result;
   }
 

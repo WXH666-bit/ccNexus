@@ -58,6 +58,10 @@ interface UsageStatisticsData {
   dailyUsage: UsageDay[];
   todayUsage: UsageToday;
   byModel: UsageModel[];
+  runtimeLifecycle?: {
+    coldRequests: number;
+    warmRequests: number;
+  };
   lastUpdated?: number;
   weeklyComparison?: {
     currentWeek: { sessions: number; cost: number; tokens: number };
@@ -333,7 +337,11 @@ export default function UsageStatistics() {
                 <div className="stat-card"><h4>总费用</h4><div className="stat-value">{formatCost(selectedUsage.cost)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.cost)} 较上周</span></div></div>
                 <div className="stat-card"><h4>总会话</h4><div className="stat-value">{selectedUsage.sessions}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.sessions)} 较上周</span></div></div>
                 <div className="stat-card"><h4>总 Tokens</h4><div className="stat-value">{formatTokens(selectedUsage.totalTokens)}</div><div className="stat-detail"><span>{trend(statistics.weeklyComparison?.trends.tokens)} 较上周</span></div></div>
-                <div className="stat-card"><h4>正常对话缓存命中率</h4><div className="stat-value">{cacheHitRate.toFixed(1)}%</div><div className="stat-detail"><span>{formatTokens(conversationUsage.cacheReadTokens)} 缓存读取</span></div></div>
+              <div className="stat-card"><h4>正常对话缓存命中率</h4><div className="stat-value">{cacheHitRate.toFixed(1)}%</div><div className="stat-detail"><span>{formatTokens(conversationUsage.cacheReadTokens)} 缓存读取</span></div></div>
+              </div>
+              <div className="usage-runtime-lifecycle" aria-label="Runtime 生命周期统计">
+                <span>Runtime 请求：冷启动 {formatExactTokens(statistics.runtimeLifecycle?.coldRequests || 0)}</span>
+                <span>热复用 {formatExactTokens(statistics.runtimeLifecycle?.warmRequests || 0)}</span>
               </div>
               <div className="usage-token-breakdown">
                 {([

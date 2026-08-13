@@ -63,3 +63,20 @@ test('context model comparison includes route, 1M, and epoch', () => {
   assert.equal(hasSameContextModel(base, { ...base, resolvedModelId: 'backend-b' }), false);
   assert.equal(hasSameContextModel(base, { ...base, runtimeSessionEpoch: 'epoch-2' }), false);
 });
+
+test('runtime signature keeps 1M and standard context runtimes distinct', () => {
+  const standard = createRuntimeDescriptor({
+    rawModelId: 'claude-sonnet-4-6',
+    options: { model: 'sonnet' },
+  });
+  const oneMillion = createRuntimeDescriptor({
+    rawModelId: 'claude-sonnet-4-6[1m]',
+    options: { model: 'sonnet' },
+  });
+
+  const standardSignature = buildRuntimeSignature({ cwd: 'D:/repo' }, standard);
+  const oneMillionSignature = buildRuntimeSignature({ cwd: 'D:/repo' }, oneMillion);
+
+  assert.notEqual(standardSignature, oneMillionSignature);
+  assert.match(oneMillionSignature, /"contextWindow1M":true/);
+});

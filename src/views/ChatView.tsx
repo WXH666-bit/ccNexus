@@ -91,6 +91,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const [contextUsage, setContextUsage] = useState<ContextUsageData | null>(null);
   const [contextUsageLoading, setContextUsageLoading] = useState(false);
   const [contextUsageError, setContextUsageError] = useState('');
+  const [runtimeLifecycle, setRuntimeLifecycle] = useState<{ classification: 'cold' | 'warm'; reason?: string } | null>(null);
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [fileOpenRequest, setFileOpenRequest] = useState<{ path: string; requestId: number } | null>(null);
 
@@ -436,6 +437,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     setStatus({});
     setMessageQueue([]);
     setStatus({});
+    setRuntimeLifecycle(null);
   }, []);
 
   const applySessionHistory = useCallback((history: { sessionId: string; messages: ChatMessage[] }) => {
@@ -727,6 +729,8 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
           sessionId: msg.message.sessionId ?? msg.sessionId,
           model: msg.message.model,
           usage: msg.message.usage,
+          runtimeClassification: msg.message.runtimeClassification,
+          runtimeRetirementReason: msg.message.runtimeRetirementReason,
           isStreaming: false,
           cost: msg.message.cost,
           duration: msg.message.duration,
@@ -810,6 +814,14 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         if (usageSessionId && activeSessionId && usageSessionId !== activeSessionId) break;
         setUsageUsedTokens(msg.usedTokens);
         writeStoredContextUsage(usageSessionId, msg.usedTokens);
+        break;
+      }
+
+      case 'runtime_lifecycle': {
+        const lifecycleSessionId = msg.sessionId ?? currentSession?.id ?? urlSessionId;
+        const activeLifecycleSessionId = activeSessionIdRef.current ?? currentSession?.id ?? urlSessionId;
+        if (lifecycleSessionId && activeLifecycleSessionId && lifecycleSessionId !== activeLifecycleSessionId) break;
+        setRuntimeLifecycle({ classification: msg.classification, reason: msg.reason });
         break;
       }
 

@@ -224,7 +224,7 @@ async function switchWorkspace(nextPath) {
   const workspace = await workspaceFiles.setWorkspace(nextPath);
   if (workspace.cwd !== previousWorkspace.cwd) {
     chatController.resetForWorkspaceChange();
-    runtime.setCwd(workspace.cwd);
+    await runtime.setCwd(workspace.cwd);
     desktopSessions.setCwd(workspace.cwd);
   }
   return workspace;
@@ -338,7 +338,7 @@ ipcMain.handle('desktop:switch-provider', async (event, args = {}) => {
   const result = await localConfig.switchProvider(args.providerId);
   const changed = before.currentProviderId !== result.provider?.id;
   if (changed) {
-    chatController.resetForProviderChange();
+    await chatController.resetForProviderChange();
     if (!event.sender.isDestroyed()) {
       event.sender.send('desktop:chat-message', { type: 'status', status: 'idle' });
     }
@@ -526,7 +526,7 @@ app.whenReady().then(async () => {
   currentAppearance = appearance;
   currentWindowPreferences = await windowPreferences.load();
   const workspace = await workspaceFiles.restoreWorkspace();
-  runtime.setCwd(workspace.cwd);
+  await runtime.setCwd(workspace.cwd);
   desktopSessions.setCwd(workspace.cwd);
   await createTray();
   createMainWindow(appearance.theme);

@@ -15,6 +15,8 @@ export interface UsageUpdatePayload {
   limit: number;
   usedTokens: number;
   maxTokens: number;
+  runtimeClassification?: 'cold' | 'warm';
+  runtimeRetirementReason?: string;
 }
 
 export function getModelContextLimit(model: string | undefined | null): number;
@@ -28,4 +30,6 @@ export function createUsageUpdate(options: {
   provider?: string;
   model?: string;
   sessionId?: string;
+  runtimeClassification?: 'cold' | 'warm';
+  runtimeRetirementReason?: string;
 }): UsageUpdatePayload;

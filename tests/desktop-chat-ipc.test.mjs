@@ -213,6 +213,337 @@ test('desktop chat passes the raw model id separately from SDK options', async (
   assert.equal(capturedRawModelId, 'claude-sonnet-4-6[1m]');
 });
 
+test('desktop chat reports runtime lifecycle metadata with usage and assistant output', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  const emitted = [];
+  let lifecycleRecord = null;
+
+  async function* successfulQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'lifecycle-session' };
+    yield {
+      type: 'assistant',
+      uuid: 'lifecycle-assistant',
+      session_id: 'lifecycle-session',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'cold response' }],
+        usage: {
+          input_tokens: 100,
+          output_tokens: 10,
+          cache_creation_input_tokens: 20,
+          cache_read_input_tokens: 0,
+        },
+      },
+    };
+    yield { type: 'result', session_id: 'lifecycle-session', subtype: 'success', is_error: false };
+  }
+
+  const runtime = {
+    queryClaude: async () => {
+      const stream = successfulQuery();
+      stream.daemonSessionId = 'pending-lifecycle';
+      stream.runtimeClassification = 'cold';
+      stream.runtimeRetirementReason = 'idle';
+      stream.close = () => {};
+      return stream;
+    },
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const sessions = {
+    loadSession: async () => ({ messages: [] }),
+    saveSession: async () => {},
+    appendMessage: async () => {},
+    recordRuntimeLifecycle: async record => { lifecycleRecord = record; },
+    deleteSession: async () => {},
+  };
+  const controller = createDesktopChatController({
+    runtime,
+    sessions,
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  await controller.handle({ type: 'chat', text: 'cold', options: { model: 'default' } }, event => emitted.push(event));
+
+  const lifecycle = emitted.find(event => event.type === 'runtime_lifecycle');
+  const usage = emitted.find(event => event.type === 'usage_update');
+  const assistant = emitted.find(event => event.type === 'assistant');
+  assert.deepEqual(lifecycle, {
+    type: 'runtime_lifecycle',
+    classification: 'cold',
+    reason: 'idle',
+    sessionId: 'lifecycle-session',
+  });
+  assert.equal(usage.runtimeClassification, 'cold');
+  assert.equal(usage.runtimeRetirementReason, 'idle');
+  assert.equal(assistant.message.runtimeClassification, 'cold');
+  assert.equal(assistant.message.runtimeRetirementReason, 'idle');
+  assert.equal(lifecycleRecord.classification, 'cold');
+  assert.equal(lifecycleRecord.reason, 'idle');
+  assert.equal(lifecycleRecord.sessionId, 'lifecycle-session');
+});
+
+test('desktop chat keys lifecycle persistence by inner assistant API id without changing renderer id', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  const emitted = [];
+  let lifecycleRecord = null;
+
+  async function* successfulQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'stable-api-id-session' };
+    yield {
+      type: 'assistant',
+      uuid: 'outer-final',
+      session_id: 'stable-api-id-session',
+      message: {
+        id: 'api-shared',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'stable lifecycle identity' }],
+        usage: {
+          input_tokens: 12,
+          output_tokens: 3,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 4,
+        },
+      },
+    };
+    yield { type: 'result', session_id: 'stable-api-id-session', subtype: 'success', is_error: false };
+  }
+
+  const runtime = {
+    queryClaude: async () => {
+      const stream = successfulQuery();
+      stream.daemonSessionId = 'pending-stable-api-id';
+      stream.runtimeClassification = 'cold';
+      stream.close = () => {};
+      return stream;
+    },
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const controller = createDesktopChatController({
+    runtime,
+    sessions: {
+      loadSession: async () => ({ messages: [] }),
+      saveSession: async () => {},
+      appendMessage: async () => {},
+      recordRuntimeLifecycle: async record => { lifecycleRecord = record; },
+      deleteSession: async () => {},
+    },
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  await controller.handle(
+    { type: 'chat', text: 'preserve both identities', options: { model: 'default' } },
+    event => emitted.push(event),
+  );
+
+  const assistant = emitted.find(event => event.type === 'assistant');
+  assert.equal(lifecycleRecord.messageId, 'api-shared');
+  assert.equal(assistant.message.id, 'outer-final');
+});
+
+test('desktop chat captures transport lifecycle metadata when the first SDK event arrives', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  const emitted = [];
+  let lifecycleRecord = null;
+
+  async function* successfulQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'transport-lifecycle-session' };
+    yield {
+      type: 'assistant',
+      uuid: 'transport-assistant',
+      session_id: 'transport-lifecycle-session',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'transport metadata' }],
+        usage: {
+          input_tokens: 20,
+          output_tokens: 5,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    };
+    yield { type: 'result', session_id: 'transport-lifecycle-session', subtype: 'success', is_error: false };
+  }
+
+  const stream = successfulQuery();
+  stream.daemonSessionId = 'pending-transport-lifecycle';
+  stream.runtimeMetadata = {
+    classification: 'cold',
+    generationId: 17,
+    creationReason: 'identity-change',
+    runtimeRetirementReason: 'idle',
+  };
+  stream.close = () => {};
+  const controller = createDesktopChatController({
+    runtime: {
+      queryClaude: async () => stream,
+      adoptSessionDaemon: () => {},
+      ensureSessionDaemon: () => {},
+      registerChannel: () => {},
+      unregisterChannel: () => {},
+      removeSessionDaemon: () => {},
+    },
+    sessions: {
+      loadSession: async () => ({ messages: [] }),
+      saveSession: async () => {},
+      appendMessage: async () => {},
+      recordRuntimeLifecycle: async record => { lifecycleRecord = record; },
+      deleteSession: async () => {},
+    },
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  await controller.handle({ type: 'chat', text: 'transport metadata', options: { model: 'default' } }, event => {
+    emitted.push(event);
+  });
+
+  assert.deepEqual(emitted.find(event => event.type === 'runtime_lifecycle'), {
+    type: 'runtime_lifecycle',
+    classification: 'cold',
+    generationId: 17,
+    creationReason: 'identity-change',
+    reason: 'idle',
+    sessionId: 'transport-lifecycle-session',
+  });
+  assert.equal(lifecycleRecord.generationId, 17);
+  assert.equal(lifecycleRecord.creationReason, 'identity-change');
+  assert.equal(lifecycleRecord.reason, 'idle');
+});
+
+test('desktop chat refreshes lifecycle metadata from a replacement before the first SDK event', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  const emitted = [];
+  let replacementReady = false;
+  let lifecycleRecord = null;
+  const stream = {
+    daemonSessionId: 'pending-replacement-lifecycle',
+    get runtimeMetadata() {
+      return replacementReady
+        ? { classification: 'cold', generationId: 22, creationReason: 'identity-change' }
+        : { classification: 'cold', generationId: 21, creationReason: 'initial' };
+    },
+    close() {},
+    [Symbol.asyncIterator]() {
+      const events = [
+        { type: 'system', subtype: 'init', session_id: 'replacement-lifecycle-session' },
+        {
+          type: 'assistant',
+          uuid: 'replacement-lifecycle-assistant',
+          session_id: 'replacement-lifecycle-session',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'replacement lifecycle' }],
+            usage: {
+              input_tokens: 20,
+              output_tokens: 5,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+            },
+          },
+        },
+        { type: 'result', session_id: 'replacement-lifecycle-session', subtype: 'success', is_error: false },
+      ];
+      return {
+        async next() {
+          replacementReady = true;
+          if (events.length === 0) return { done: true, value: undefined };
+          return { done: false, value: events.shift() };
+        },
+      };
+    },
+  };
+  const controller = createDesktopChatController({
+    runtime: {
+      queryClaude: async () => stream,
+      adoptSessionDaemon: () => {},
+      ensureSessionDaemon: () => {},
+      registerChannel: () => {},
+      unregisterChannel: () => {},
+      removeSessionDaemon: () => {},
+    },
+    sessions: {
+      loadSession: async () => ({ messages: [] }),
+      saveSession: async () => {},
+      appendMessage: async () => {},
+      recordRuntimeLifecycle: async record => { lifecycleRecord = record; },
+      deleteSession: async () => {},
+    },
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  await controller.handle({ type: 'chat', text: 'replacement lifecycle', options: { model: 'default' } }, event => {
+    emitted.push(event);
+  });
+
+  const lifecycle = emitted.find(event => event.type === 'runtime_lifecycle');
+  assert.equal(lifecycle.generationId, 22);
+  assert.equal(lifecycle.creationReason, 'identity-change');
+  assert.equal(lifecycleRecord.generationId, 22);
+  assert.equal(lifecycleRecord.creationReason, 'identity-change');
+});
+
+test('runtime lifecycle persistence failure does not make a completed chat fail', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  const emitted = [];
+
+  async function* successfulQuery() {
+    yield { type: 'system', subtype: 'init', session_id: 'lifecycle-persistence-failure' };
+    yield {
+      type: 'assistant',
+      uuid: 'assistant-persistence-failure',
+      session_id: 'lifecycle-persistence-failure',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '仍然完成' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    };
+    yield { type: 'result', session_id: 'lifecycle-persistence-failure', is_error: false };
+  }
+
+  const stream = successfulQuery();
+  stream.daemonSessionId = 'pending-lifecycle-persistence-failure';
+  stream.runtimeClassification = 'cold';
+  stream.close = () => {};
+  const controller = createDesktopChatController({
+    runtime: {
+      queryClaude: async () => stream,
+      adoptSessionDaemon: () => {},
+      ensureSessionDaemon: () => {},
+      registerChannel: () => {},
+      unregisterChannel: () => {},
+      removeSessionDaemon: () => {},
+    },
+    sessions: {
+      loadSession: async () => ({ messages: [] }),
+      saveSession: async () => {},
+      appendMessage: async () => {},
+      recordRuntimeLifecycle: async () => { throw new Error('sidecar unavailable'); },
+      deleteSession: async () => {},
+    },
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+
+  await controller.handle({ type: 'chat', text: '完成', options: { model: 'default' } }, event => emitted.push(event));
+
+  assert.ok(emitted.some(event => event.type === 'assistant'));
+  assert.ok(emitted.some(event => event.type === 'result' && event.is_error === false));
+  assert.equal(emitted.some(event => event.type === 'error'), false);
+});
+
 test('chat input keeps ccgui local command handling in the session view', () => {
   assert.match(chatInputSource, /onContextUsage/);
   assert.match(chatViewSource, /NEW_SESSION_COMMANDS/);
@@ -220,6 +551,12 @@ test('chat input keeps ccgui local command handling in the session view', () => 
   assert.match(chatViewSource, /command === '\/plan'/);
   assert.match(chatViewSource, /handleNewSession/);
   assert.match(chatViewSource, /handleOpenHistory/);
+});
+
+test('chat view consumes runtime lifecycle metadata instead of dropping it', () => {
+  assert.match(chatViewSource, /case 'runtime_lifecycle'/);
+  assert.match(chatViewSource, /runtimeClassification/);
+  assert.match(chatViewSource, /runtimeRetirementReason/);
 });
 
 test('desktop chat persists one user and one assistant message per turn', async () => {

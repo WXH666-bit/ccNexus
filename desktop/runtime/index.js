@@ -39,6 +39,183 @@ function awaitWithAbort(promise, signal) {
   });
 }
 
+function buildRetirementObservation(status = {}) {
+  const runtime = status.runtime || null;
+  return {
+    runtimeGeneration: runtime?.runtimeGeneration ?? null,
+    runtimeSessionEpoch: runtime?.runtimeSessionEpoch ?? null,
+    runtimeCreatedAt: runtime?.createdAt ?? null,
+    runtimeLastUsedAt: runtime?.lastUsedAt ?? null,
+    daemonLastUsedAt: status.daemonLastUsedAt ?? null,
+  };
+}
+
+function createLazyRetriableStream({ stream, iterator, onRetiring, getRuntimeMetadata }) {
+  let started = false;
+  let deliveredEvent = false;
+  let retryUsed = false;
+  let currentStream = stream;
+  let currentIterator = iterator;
+  let nextTail = Promise.resolve();
+  let cancelled = false;
+  let closed = false;
+  let terminationMode = null;
+  let terminationArgs = [];
+  let terminationPromise = null;
+  let iteratorReturnPromise = null;
+  let resolveCancellation;
+  const cancellationPromise = new Promise((resolve) => {
+    resolveCancellation = resolve;
+  });
+  const terminatedStreams = new Set();
+
+  const readRuntimeMetadata = () => {
+    const metadata = typeof getRuntimeMetadata === 'function'
+      ? getRuntimeMetadata(currentStream)
+      : currentStream?.runtimeMetadata;
+    return metadata || undefined;
+  };
+
+  const terminateStream = (targetStream, mode = terminationMode, args = terminationArgs) => {
+    if (!targetStream || !mode || terminatedStreams.has(targetStream)) return Promise.resolve();
+    terminatedStreams.add(targetStream);
+    const control = targetStream[mode];
+    if (typeof control !== 'function') return Promise.resolve();
+    try {
+      return Promise.resolve(control.apply(targetStream, args)).catch(() => {});
+    } catch {
+      return Promise.resolve();
+    }
+  };
+
+  const terminate = (mode, args = []) => {
+    if (terminationPromise) return terminationPromise;
+    cancelled = true;
+    closed = mode === 'close';
+    terminationMode = mode;
+    terminationArgs = args;
+    resolveCancellation?.();
+    terminationPromise = terminateStream(currentStream, mode, args);
+    return terminationPromise;
+  };
+
+  const readNext = async () => {
+    while (true) {
+      if (cancelled) return { done: true, value: undefined };
+      try {
+        const result = await currentIterator.next();
+        if (cancelled) return { done: true, value: undefined };
+        if (!result.done) deliveredEvent = true;
+        return result;
+      } catch (error) {
+        if (cancelled) return { done: true, value: undefined };
+        if (deliveredEvent || retryUsed || error?.code !== 'DAEMON_RETIRING') throw error;
+        retryUsed = true;
+        let replacement;
+        try {
+          replacement = await onRetiring({
+            currentStream,
+            cancellationPromise,
+            isCancelled: () => cancelled,
+            terminationMode,
+            terminationArgs,
+            terminateStream: (targetStream) => terminateStream(targetStream),
+          });
+        } catch (retryError) {
+          if (cancelled) return { done: true, value: undefined };
+          throw retryError;
+        }
+        if (!replacement) return { done: true, value: undefined };
+        currentStream = replacement.stream;
+        currentIterator = replacement.iterator || replacement.stream[Symbol.asyncIterator]();
+        if (cancelled) {
+          await terminateStream(currentStream);
+          return { done: true, value: undefined };
+        }
+      }
+    }
+  };
+
+  const enqueue = (operation) => {
+    const result = nextTail.then(operation, operation);
+    nextTail = result.catch(() => {});
+    return result;
+  };
+
+  return {
+    ...stream,
+    get runtimeMetadata() {
+      return readRuntimeMetadata();
+    },
+    get runtimeLifecycle() {
+      return readRuntimeMetadata();
+    },
+    get runtimeClassification() {
+      return readRuntimeMetadata()?.classification;
+    },
+    get runtimeGenerationId() {
+      return readRuntimeMetadata()?.generationId;
+    },
+    get runtimeGeneration() {
+      return readRuntimeMetadata()?.generationId;
+    },
+    get runtimeCreationReason() {
+      return readRuntimeMetadata()?.creationReason;
+    },
+    get runtimeRetirementReason() {
+      const metadata = readRuntimeMetadata();
+      return metadata ? (metadata.runtimeRetirementReason || null) : undefined;
+    },
+    get cancelled() {
+      return cancelled;
+    },
+    get closed() {
+      return closed;
+    },
+    [Symbol.asyncIterator]() {
+      if (started) throw new Error('Stream can only be iterated once');
+      started = true;
+      return {
+        next() {
+          return enqueue(readNext);
+        },
+        return(value) {
+          if (iteratorReturnPromise) return iteratorReturnPromise;
+          const iteratorAtReturn = currentIterator;
+          const termination = terminate('close');
+          iteratorReturnPromise = Promise.resolve(termination).then(() => {
+            try {
+              const returned = iteratorAtReturn.return?.(value);
+              Promise.resolve(returned).catch(() => {});
+            } catch {
+              // The stream has already been terminated through its control surface.
+            }
+            return { done: true, value };
+          });
+          return iteratorReturnPromise;
+        },
+        throw(error) {
+          return enqueue(async () => {
+            if (typeof currentIterator.throw === 'function') return currentIterator.throw(error);
+            throw error;
+          });
+        },
+      };
+    },
+    interrupt(...args) {
+      return terminate('interrupt', args);
+    },
+    close(...args) {
+      return terminate('close', args);
+    },
+  };
+}
+
+function setStreamMetadata(stream, daemonSessionId, daemon) {
+  stream.daemonSessionId = daemonSessionId;
+  stream.process = daemon.bridge.getProcessForInspection();
+}
+
 export function createDesktopRuntime(options = {}) {
   let runtimeCwd = options.cwd || process.cwd();
   const registry = new DesktopProcessRegistry(options);
@@ -55,6 +232,7 @@ export function createDesktopRuntime(options = {}) {
     : bridgeOptions => new DaemonBridge(bridgeOptions);
   let lifecycleTimer = null;
   let shuttingDown = false;
+  let shutdownPromise = null;
 
   function startLifecycleTimer() {
     if (lifecycleTimer || bridges.size === 0 || typeof setIntervalFn !== 'function') return;
@@ -72,6 +250,46 @@ export function createDesktopRuntime(options = {}) {
     lifecycleTimer = null;
   }
 
+  function findBridgeOwner(bridge) {
+    for (const [sessionId, candidate] of bridges.entries()) {
+      if (candidate === bridge) return sessionId;
+    }
+    return null;
+  }
+
+  function rememberBridgeOwner(bridge, sessionId) {
+    if (bridge && sessionId) {
+      bridge.sessionId = sessionId;
+      bridge.lastOwnerSessionId = sessionId;
+    }
+  }
+
+  function clearRetiringEntryForBridge(bridge) {
+    for (const [sessionId, entry] of retiringBySession.entries()) {
+      if (entry?.bridge === bridge) retiringBySession.delete(sessionId);
+    }
+  }
+
+  function clearRetirementStateForBridge(bridge) {
+    clearRetiringEntryForBridge(bridge);
+    for (const [sessionId, entry] of retiredSessions.entries()) {
+      if (entry?.bridge === bridge) retiredSessions.delete(sessionId);
+    }
+  }
+
+  function rememberRetirementReason(sessionId, bridge, reason) {
+    if (!sessionId || !bridge) return;
+    const currentBridge = bridges.get(sessionId);
+    const currentEntry = retiredSessions.get(sessionId);
+    if ((currentBridge && currentBridge !== bridge)
+      || (currentEntry && currentEntry.bridge !== bridge)) return;
+    retiredSessions.set(sessionId, { bridge, reason, retiredAt: clock() });
+  }
+
+  function consumeRetirementReason(entry, sessionId) {
+    if (entry && retiredSessions.get(sessionId) === entry) retiredSessions.delete(sessionId);
+  }
+
   function clearBridgeRecord(sessionId, bridge) {
     if (!sessionId || bridges.get(sessionId) !== bridge) return false;
     bridges.delete(sessionId);
@@ -80,25 +298,21 @@ export function createDesktopRuntime(options = {}) {
   }
 
   function handleBridgeExit(bridge) {
-    const sessionId = bridge.sessionId;
+    const sessionId = findBridgeOwner(bridge) || bridge.sessionId || bridge.lastOwnerSessionId;
+    rememberBridgeOwner(bridge, sessionId);
     clearBridgeRecord(sessionId, bridge);
-    const retiring = retiringBySession.get(sessionId);
-    if (retiring?.bridge === bridge) retiringBySession.delete(sessionId);
+    clearRetiringEntryForBridge(bridge);
     if (bridges.size === 0) stopLifecycleTimer();
   }
 
   function installBridgeLifecycle(bridge, sessionId) {
-    bridge.sessionId = sessionId;
-    bridge.hasServedRequest = false;
+    rememberBridgeOwner(bridge, sessionId);
     bridge.once?.('exit', () => handleBridgeExit(bridge));
     bridge.on?.('daemon_event', (event) => {
       const currentSessionId = bridge.sessionId;
       if (event?.event !== 'retiring' || bridges.get(currentSessionId) !== bridge) return;
       bridge.lifecycleState = 'retiring';
-      retiredSessions.set(currentSessionId, {
-        reason: event.reason || 'lifecycle',
-        retiredAt: clock(),
-      });
+      rememberRetirementReason(currentSessionId, bridge, event.reason || 'lifecycle');
       registry.setDaemonState({ sessionId: currentSessionId, bridge, state: 'retiring' });
     });
     return bridge;
@@ -211,7 +425,10 @@ export function createDesktopRuntime(options = {}) {
       let bridge = bridges.get(sessionId);
       if (bridge && ['retiring', 'stopping', 'stopped'].includes(bridge.lifecycleState)) {
         await bridge.waitForExit?.().catch?.(() => {});
-        if (bridges.get(sessionId) === bridge) clearBridgeRecord(sessionId, bridge);
+        if (bridges.get(sessionId) === bridge) {
+          clearBridgeRecord(sessionId, bridge);
+          clearRetiringEntryForBridge(bridge);
+        }
         bridge = null;
       }
       if (!bridge) bridge = ensureBridge(sessionId);
@@ -219,43 +436,68 @@ export function createDesktopRuntime(options = {}) {
       await startBridge(bridge, sessionId);
       if (['retiring', 'stopping', 'stopped'].includes(bridge.lifecycleState)) {
         await bridge.waitForExit?.().catch?.(() => {});
-        if (bridges.get(sessionId) === bridge) clearBridgeRecord(sessionId, bridge);
+        if (bridges.get(sessionId) === bridge) {
+          clearBridgeRecord(sessionId, bridge);
+          clearRetiringEntryForBridge(bridge);
+        }
         bridge = ensureBridge(sessionId);
         if (!bridge) throw new Error('Unable to establish the Claude runtime');
         await startBridge(bridge, sessionId);
       }
       const daemon = registry.ensureSessionDaemon({ sessionId, title, bridge });
+      const retirementEntry = retiredSessions.get(sessionId) || null;
       return {
         ...daemon,
         bridge,
-        runtimeClassification: bridge.hasServedRequest ? 'warm' : 'cold',
-        retirementReason: retiredSessions.get(sessionId)?.reason || null,
+        retirementEntry,
       };
     });
   }
 
-  async function scheduleBridgeRetirement(sessionId, bridge, reason) {
+  async function scheduleBridgeRetirement(sessionId, bridge, reason, observation) {
     return withSessionTransition(sessionId, async () => {
       if (bridges.get(sessionId) !== bridge) return null;
       if (['retiring', 'stopping', 'stopped'].includes(bridge.lifecycleState)) return null;
 
-      bridge.lifecycleState = 'retiring';
-      retiredSessions.set(sessionId, { reason, retiredAt: clock() });
-      registry.setDaemonState({ sessionId, bridge, state: 'retiring' });
-      const exitPromise = Promise.resolve(bridge.waitForExit?.() || undefined);
-      retiringBySession.set(sessionId, { bridge, promise: exitPromise });
+      let result;
       try {
-        const result = await bridge.retire(reason);
-        return result;
+        result = await bridge.retire(reason, observation);
       } catch (error) {
-        if (retiringBySession.get(sessionId)?.bridge === bridge) retiringBySession.delete(sessionId);
-        if (retiredSessions.get(sessionId)?.reason === reason) retiredSessions.delete(sessionId);
-        if (bridges.get(sessionId) === bridge) {
+        const ownerSessionId = findBridgeOwner(bridge);
+        clearRetirementStateForBridge(bridge);
+        if (ownerSessionId === sessionId) {
           bridge.lifecycleState = 'running';
-          registry.setDaemonState({ sessionId, bridge, state: 'running' });
+          registry.setDaemonState({ sessionId: ownerSessionId, bridge, state: 'running' });
         }
         throw error;
       }
+
+      if (result?.accepted !== true) {
+        const ownerSessionId = findBridgeOwner(bridge);
+        clearRetirementStateForBridge(bridge);
+        if (ownerSessionId === sessionId) {
+          bridge.lifecycleState = 'running';
+          registry.setDaemonState({ sessionId: ownerSessionId, bridge, state: 'running' });
+        }
+        return result;
+      }
+
+      const ownerSessionId = findBridgeOwner(bridge);
+      if (ownerSessionId === null || bridge.lifecycleState === 'stopped') {
+        rememberRetirementReason(
+          bridge.lastOwnerSessionId || sessionId,
+          bridge,
+          result.reason || reason,
+        );
+        return result;
+      }
+      const retirementReason = result.reason || reason;
+      bridge.lifecycleState = 'retiring';
+      rememberRetirementReason(ownerSessionId, bridge, retirementReason);
+      registry.setDaemonState({ sessionId: ownerSessionId, bridge, state: 'retiring' });
+      const exitPromise = Promise.resolve(bridge.waitForExit?.() || undefined);
+      retiringBySession.set(ownerSessionId, { bridge, promise: exitPromise });
+      return result;
     });
   }
 
@@ -275,7 +517,22 @@ export function createDesktopRuntime(options = {}) {
       const decision = decideRuntimeRetirement(status, now);
       if (decision.action === 'retire-now' || decision.action === 'retire-after-turn') {
         try {
-          await scheduleBridgeRetirement(sessionId, bridge, decision.reason);
+          const retirement = await scheduleBridgeRetirement(
+            sessionId,
+            bridge,
+            decision.reason,
+            buildRetirementObservation(status),
+          );
+          if (retirement?.accepted !== true) {
+            return {
+              sessionId,
+              bridge,
+              action: 'keep',
+              reason: decision.reason,
+              refusalReason: retirement?.refusalReason || 'not-eligible',
+              retirement,
+            };
+          }
         } catch (error) {
           return { sessionId, bridge, action: 'keep', error };
         }
@@ -291,16 +548,18 @@ export function createDesktopRuntime(options = {}) {
     if (bridge) {
       bridges.delete(fromSessionId);
       bridges.set(toSessionId, bridge);
-      bridge.sessionId = toSessionId;
+      rememberBridgeOwner(bridge, toSessionId);
     }
     const retiring = retiringBySession.get(fromSessionId);
-    if (retiring) {
+    if (retiring?.bridge === bridge) {
       retiringBySession.delete(fromSessionId);
+      retiringBySession.delete(toSessionId);
       retiringBySession.set(toSessionId, retiring);
     }
     const retired = retiredSessions.get(fromSessionId);
-    if (retired) {
+    if (retired?.bridge === bridge) {
       retiredSessions.delete(fromSessionId);
+      retiredSessions.delete(toSessionId);
       retiredSessions.set(toSessionId, retired);
     }
     return registry.adoptSessionDaemon({ fromSessionId, toSessionId, title });
@@ -316,32 +575,93 @@ export function createDesktopRuntime(options = {}) {
     onPlanApproval,
   }) {
     const daemonSessionId = sessionId || `pending-${Date.now()}`;
-    let stream;
-    let daemon;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      daemon = await acquireSessionDaemon({ sessionId: daemonSessionId, title });
-      const bridge = daemon.bridge;
-      try {
-        stream = await bridge.streamCommand('query', {
+    let daemon = await acquireSessionDaemon({ sessionId: daemonSessionId, title });
+    let bridge = daemon.bridge;
+    const candidateStream = await bridge.streamCommand('query', {
+      prompt,
+      ...buildRuntimeRequest(bridge, queryOptions, rawModelId),
+    }, {
+      onPermissionRequest,
+      onPlanApproval,
+    });
+    let retirementReasonConsumed = false;
+    let confirmedRetirementReason;
+    const getRuntimeMetadata = (candidate) => {
+      const metadata = candidate?.runtimeMetadata;
+      if (!metadata) return undefined;
+      if (metadata.classification === 'cold' && !retirementReasonConsumed) {
+        retirementReasonConsumed = true;
+        if (daemon.retirementEntry) {
+          confirmedRetirementReason = daemon.retirementEntry.reason;
+          consumeRetirementReason(daemon.retirementEntry, daemonSessionId);
+        }
+      }
+      return confirmedRetirementReason
+        ? { ...metadata, runtimeRetirementReason: confirmedRetirementReason }
+        : metadata;
+    };
+
+    const stream = createLazyRetriableStream({
+      stream: candidateStream,
+      iterator: candidateStream[Symbol.asyncIterator](),
+      getRuntimeMetadata,
+      onRetiring: async ({
+        cancellationPromise,
+        isCancelled,
+        terminationMode,
+        terminationArgs,
+        terminateStream,
+      }) => {
+        try {
+          await Promise.race([
+            Promise.resolve(bridge.waitForExit?.()),
+            cancellationPromise,
+          ]);
+        } catch (error) {
+          if (isCancelled()) return null;
+          throw error;
+        }
+        if (isCancelled()) return null;
+
+        const acquisition = acquireSessionDaemon({ sessionId: daemonSessionId, title });
+        daemon = await Promise.race([
+          acquisition,
+          cancellationPromise.then(() => null),
+        ]);
+        if (!daemon || isCancelled()) {
+          return null;
+        }
+        bridge = daemon.bridge;
+
+        const replacementAcquisition = bridge.streamCommand('query', {
           prompt,
           ...buildRuntimeRequest(bridge, queryOptions, rawModelId),
         }, {
           onPermissionRequest,
           onPlanApproval,
         });
-        bridge.hasServedRequest = true;
-        if (daemon.runtimeClassification === 'cold') retiredSessions.delete(daemonSessionId);
-        break;
-      } catch (error) {
-        if (error?.code !== 'DAEMON_RETIRING' || attempt > 0) throw error;
-        await bridge.waitForExit?.();
-      }
-    }
-
-    stream.daemonSessionId = daemonSessionId;
-    stream.process = daemon.bridge.getProcessForInspection();
-    stream.runtimeClassification = daemon.runtimeClassification || 'warm';
-    stream.runtimeRetirementReason = daemon.retirementReason || null;
+        const replacementStream = await Promise.race([
+          replacementAcquisition,
+          cancellationPromise.then(() => null),
+        ]);
+        if (!replacementStream || isCancelled()) {
+          replacementAcquisition.then((candidateStream) => {
+            if (isCancelled()) void terminateStream(candidateStream);
+          }).catch(() => {});
+          return null;
+        }
+        setStreamMetadata(stream, daemonSessionId, daemon);
+        if (isCancelled()) {
+          await terminateStream(replacementStream);
+          return null;
+        }
+        return {
+          stream: replacementStream,
+          iterator: replacementStream[Symbol.asyncIterator](),
+        };
+      },
+    });
+    setStreamMetadata(stream, daemonSessionId, daemon);
     return stream;
   }
 
@@ -410,9 +730,23 @@ export function createDesktopRuntime(options = {}) {
           queryOptions,
           rawModelId,
         ));
-        daemon.bridge.hasServedRequest = true;
-        if (daemon.runtimeClassification === 'cold') retiredSessions.delete(daemonSessionId);
-        return result;
+        if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+        const { runtimeMetadata, ...contextResult } = result;
+        if (!runtimeMetadata) return contextResult;
+        let runtimeRetirementReason;
+        if (runtimeMetadata.classification === 'cold' && daemon.retirementEntry) {
+          runtimeRetirementReason = daemon.retirementEntry.reason;
+          consumeRetirementReason(daemon.retirementEntry, daemonSessionId);
+        }
+        return {
+          ...contextResult,
+          runtimeClassification: runtimeMetadata.classification,
+          runtimeGenerationId: runtimeMetadata.generationId,
+          ...(runtimeMetadata.creationReason
+            ? { runtimeCreationReason: runtimeMetadata.creationReason }
+            : {}),
+          ...(runtimeRetirementReason ? { runtimeRetirementReason } : {}),
+        };
       } catch (error) {
         if (error?.code !== 'DAEMON_RETIRING' || attempt > 0) throw error;
         await daemon.bridge.waitForExit?.();
@@ -449,8 +783,8 @@ export function createDesktopRuntime(options = {}) {
       bridges.delete(sessionId);
       registry.removeSessionDaemon(sessionId, bridge);
       if (bridges.size === 0) stopLifecycleTimer();
+      clearRetirementStateForBridge(bridge);
     }
-    retiringBySession.delete(sessionId);
   }
 
   function stopProcess(args) {
@@ -460,7 +794,7 @@ export function createDesktopRuntime(options = {}) {
       const bridge = bridges.get(owned.sessionId);
       if (bridge) bridge.lifecycleState = 'stopping';
       bridges.delete(owned.sessionId);
-      retiringBySession.delete(owned.sessionId);
+      if (bridge) clearRetirementStateForBridge(bridge);
       if (bridges.size === 0) stopLifecycleTimer();
     }
     return result;
@@ -481,23 +815,34 @@ export function createDesktopRuntime(options = {}) {
   }
 
   async function shutdown() {
-    shuttingDown = true;
-    stopLifecycleTimer();
-    const shuttingDownBridges = new Map(bridges);
-    await registry.shutdown();
-    bridges.clear();
-    retiringBySession.clear();
-    retiredSessions.clear();
-    transitionTails.clear();
-    for (const [sessionId, bridge] of shuttingDownBridges) {
-      if (bridges.get(sessionId) === bridge) bridges.delete(sessionId);
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      shuttingDown = true;
+      try {
+        stopLifecycleTimer();
+        const shuttingDownBridges = new Map(bridges);
+        await registry.shutdown();
+        bridges.clear();
+        retiringBySession.clear();
+        retiredSessions.clear();
+        transitionTails.clear();
+        for (const [sessionId, bridge] of shuttingDownBridges) {
+          if (bridges.get(sessionId) === bridge) bridges.delete(sessionId);
+        }
+      } finally {
+        shuttingDown = false;
+      }
+    })();
+    try {
+      return await shutdownPromise;
+    } finally {
+      shutdownPromise = null;
     }
-    shuttingDown = false;
   }
 
-  function setCwd(nextCwd) {
+  async function setCwd(nextCwd) {
     if (!nextCwd || nextCwd === runtimeCwd) return runtimeCwd;
-    void shutdown();
+    await shutdown();
     runtimeCwd = nextCwd;
     registry.setCwd(nextCwd);
     return runtimeCwd;

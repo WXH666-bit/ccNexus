@@ -9,14 +9,33 @@ export function streamEvent(event, sessionId, uuid) {
   return { type: 'stream_event', event, sessionId, uuid };
 }
 
-export function assistantEvent({ id, content, sessionId, model, usage, cost, duration, turns }) {
+export function assistantEvent({
+  id,
+  content,
+  sessionId,
+  model,
+  usage,
+  cost,
+  duration,
+  turns,
+  runtimeClassification,
+  runtimeRetirementReason,
+}) {
   const message = {
     id,
     content,
     sessionId,
   };
 
-  for (const [key, value] of Object.entries({ model, usage, cost, duration, turns })) {
+  for (const [key, value] of Object.entries({
+    model,
+    usage,
+    cost,
+    duration,
+    turns,
+    runtimeClassification,
+    runtimeRetirementReason,
+  })) {
     if (value !== undefined) message[key] = value;
   }
 

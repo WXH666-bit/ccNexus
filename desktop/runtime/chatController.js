@@ -38,6 +38,19 @@ function createRuntimeProfile(options = {}) {
   return profile;
 }
 
+function readRuntimeLifecycle(query) {
+  const metadata = query?.runtimeMetadata || query?.runtimeLifecycle || null;
+  const classification = metadata?.classification || query?.runtimeClassification;
+  if (classification !== 'cold' && classification !== 'warm') return null;
+  const lifecycle = {
+    classification,
+    reason: metadata?.runtimeRetirementReason || query?.runtimeRetirementReason || null,
+  };
+  if (metadata && metadata.generationId !== undefined) lifecycle.generationId = metadata.generationId;
+  if (metadata && metadata.creationReason) lifecycle.creationReason = metadata.creationReason;
+  return lifecycle;
+}
+
 export function createDesktopChatController({ runtime, sessions, localConfig, workspaceFiles }) {
   let currentSessionId = null;
   let latestChatRequest = 0;
@@ -380,6 +393,23 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     emitSafe(emit, { type: 'status', status: 'thinking', sessionId: querySessionId });
 
     let query;
+    let runtimeLifecycle = null;
+    let runtimeLifecycleReported = false;
+    const reportRuntimeLifecycle = (sessionId) => {
+      if (runtimeLifecycleReported || !runtimeLifecycle || !sessionId) return;
+      runtimeLifecycleReported = true;
+      const lifecycleEvent = {
+        type: 'runtime_lifecycle',
+        classification: runtimeLifecycle.classification,
+        sessionId,
+      };
+      if (runtimeLifecycle.generationId !== undefined) {
+        lifecycleEvent.generationId = runtimeLifecycle.generationId;
+      }
+      if (runtimeLifecycle.creationReason) lifecycleEvent.creationReason = runtimeLifecycle.creationReason;
+      if (runtimeLifecycle.reason) lifecycleEvent.reason = runtimeLifecycle.reason;
+      emitSafe(emit, lifecycleEvent);
+    };
     try {
       query = await runtime.queryClaude({
         sessionId: querySessionId || `pending-${requestOrder}`,
@@ -390,19 +420,17 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         onPermissionRequest: (request) => canUseTool(request.toolName, request.input, request.options),
         onPlanApproval: (request) => requestPlanApprovalFromRenderer(emit, request, querySessionId),
       });
-      if (query.runtimeClassification) {
-        emitSafe(emit, {
-          type: 'runtime_lifecycle',
-          classification: query.runtimeClassification,
-          reason: query.runtimeRetirementReason || undefined,
-          sessionId: querySessionId,
-        });
-      }
+      runtimeLifecycle = readRuntimeLifecycle(query);
 
       const assistantTurn = createAssistantTurn();
       let lastAssistantId = null;
+      let lastAssistantApiId = null;
 
       queryEvents: for await (const event of query) {
+        const observedLifecycle = readRuntimeLifecycle(query);
+        if (observedLifecycle && !runtimeLifecycleReported) runtimeLifecycle = observedLifecycle;
+        if (!runtimeLifecycle) runtimeLifecycle = observedLifecycle;
+        reportRuntimeLifecycle(event.session_id || querySessionId);
         const usage = extractUsageFromSdkEvent(event);
         if (usage) {
           assistantTurn.addUsage(usage);
@@ -411,6 +439,8 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
             provider: 'claude',
             model: modelForUsage,
             sessionId: event.session_id || querySessionId,
+            runtimeClassification: runtimeLifecycle?.classification,
+            runtimeRetirementReason: runtimeLifecycle?.reason || undefined,
           }));
         }
 
@@ -443,6 +473,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
                 await workspaceFiles.setActiveSessionId(querySessionId).catch(() => {});
               }
               emitSafe(emit, sessionEvent(querySessionId, savedSession));
+              reportRuntimeLifecycle(querySessionId);
               await recordUserMessage(querySessionId, prompt);
             }
             emitSafe(emit, { type: 'system', subtype: event.subtype, sessionId: event.session_id || querySessionId });
@@ -457,6 +488,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
           case 'assistant':
             assistantTurn.add(event.message);
             lastAssistantId = event.uuid || lastAssistantId;
+            if (typeof event.message?.id === 'string' && event.message.id.trim()) {
+              lastAssistantApiId = event.message.id.trim();
+            }
             break;
 
           case 'user':
@@ -472,16 +506,54 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
 
           case 'result': {
             const finalSessionId = event.session_id || querySessionId;
+            reportRuntimeLifecycle(finalSessionId);
             const finalAssistant = event.is_error ? null : assistantTurn.complete({
               id: lastAssistantId || `msg-${Date.now()}`,
               sessionId: finalSessionId,
             });
             if (finalAssistant) {
+              if (runtimeLifecycle) {
+                finalAssistant.runtimeClassification = runtimeLifecycle.classification;
+                if (runtimeLifecycle.reason) {
+                  finalAssistant.runtimeRetirementReason = runtimeLifecycle.reason;
+                }
+                if (runtimeLifecycle.generationId !== undefined) {
+                  finalAssistant.runtimeGenerationId = runtimeLifecycle.generationId;
+                }
+                if (runtimeLifecycle.creationReason) {
+                  finalAssistant.runtimeCreationReason = runtimeLifecycle.creationReason;
+                }
+              }
               await recordAssistantMessage(finalSessionId, finalAssistant);
               for (const block of finalAssistant.content) {
                 await rememberEditableFile(finalSessionId, block);
               }
               emitSafe(emit, assistantEvent(finalAssistant));
+              if (runtimeLifecycle && finalSessionId && typeof sessions.recordRuntimeLifecycle === 'function') {
+                const lifecycleRecord = {
+                  sessionId: finalSessionId,
+                  messageId: lastAssistantApiId || finalAssistant.id,
+                  timestamp: Date.now(),
+                  cwd: workspaceFiles.getWorkspace().cwd,
+                  model: modelForUsage,
+                  usage: finalAssistant.usage,
+                  classification: runtimeLifecycle.classification,
+                  reason: runtimeLifecycle.reason || undefined,
+                  ...(runtimeLifecycle.generationId !== undefined
+                    ? { generationId: runtimeLifecycle.generationId }
+                    : {}),
+                  ...(runtimeLifecycle.creationReason
+                    ? { creationReason: runtimeLifecycle.creationReason }
+                    : {}),
+                };
+                try {
+                  Promise.resolve(sessions.recordRuntimeLifecycle(lifecycleRecord)).catch((error) => {
+                    console.error('[desktop-chat] runtime lifecycle persistence failed:', error.message);
+                  });
+                } catch (error) {
+                  console.error('[desktop-chat] runtime lifecycle persistence failed:', error.message);
+                }
+              }
             }
             emitSafe(emit, {
               type: 'result',
@@ -727,14 +799,14 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   // A persistent SDK runtime keeps the provider environment it was created
   // with. ccgui tears down that runtime before switching providers so the next
   // turn starts with fresh credentials, model routing, and cache state.
-  function resetForProviderChange() {
+  async function resetForProviderChange() {
     dispose();
     currentSessionId = null;
     latestChatRequest += 1;
     sessionMessages.clear();
     fileEditHistory.clear();
     runtimeProfiles.clear();
-    runtime.shutdown();
+    await runtime.shutdown();
   }
 
   // A workspace owns its Claude project history and daemon cwd. Match ccgui's

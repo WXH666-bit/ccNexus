@@ -13,6 +13,11 @@ const MAX_SUBAGENT_JSONL_LINES = 50_000;
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const USAGE_SCOPE_CURRENT = 'current';
 const USAGE_SCOPE_ALL = 'all';
+const RUNTIME_LIFECYCLE_FILE = 'runtime-lifecycle.json';
+const RUNTIME_LIFECYCLE_JSONL_FILE = 'runtime-lifecycle.jsonl';
+const MAX_RUNTIME_LIFECYCLE_RECORDS = 50_000;
+const RUNTIME_LIFECYCLE_COMPACT_THRESHOLD = 55_000;
+const RUNTIME_LIFECYCLE_MATCH_WINDOW_MS = 15 * 60 * 1000;
 
 function sessionFile(directory, sessionId) {
   if (typeof sessionId !== 'string' || sessionId === '_index' || !SESSION_ID_PATTERN.test(sessionId)) {
@@ -161,6 +166,250 @@ function pricingForModel(model) {
   return CLAUDE_PRICING.find(([prefix]) => normalized.startsWith(prefix))?.[1] || DEFAULT_CLAUDE_PRICING;
 }
 
+function usageFingerprint(usage) {
+  if (!usage || typeof usage !== 'object') return '';
+  return [
+    tokenValue(usage.input_tokens),
+    tokenValue(usage.output_tokens),
+    tokenValue(usage.cache_creation_input_tokens),
+    tokenValue(usage.cache_read_input_tokens),
+  ].join(':');
+}
+
+function normalizeRuntimeLifecycle(record) {
+  if (!record || typeof record !== 'object') return null;
+  if (typeof record.sessionId !== 'string' || !record.sessionId.trim()) return null;
+  if (record.classification !== 'cold' && record.classification !== 'warm') return null;
+  const timestamp = typeof record.timestamp === 'number'
+    ? record.timestamp
+    : Date.parse(record.timestamp || '');
+  if (!Number.isFinite(timestamp)) return null;
+  const usage = record.usage && typeof record.usage === 'object'
+    ? {
+      input_tokens: tokenValue(record.usage.input_tokens),
+      output_tokens: tokenValue(record.usage.output_tokens),
+      cache_creation_input_tokens: tokenValue(record.usage.cache_creation_input_tokens),
+      cache_read_input_tokens: tokenValue(record.usage.cache_read_input_tokens),
+    }
+    : null;
+  if (!usage || !usageFingerprint(usage)) return null;
+  return {
+    sessionId: record.sessionId.trim(),
+    cwd: normalizeWorkspacePath(record.cwd),
+    timestamp,
+    model: typeof record.model === 'string' ? record.model.trim() : '',
+    usage,
+    classification: record.classification,
+    ...(typeof record.reason === 'string' && record.reason.trim()
+      ? { reason: record.reason.trim().slice(0, 120) }
+      : {}),
+    ...(typeof record.messageId === 'string' && record.messageId.trim()
+      ? { messageId: record.messageId.trim() }
+      : {}),
+  };
+}
+
+function usableMessageId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function runtimeLifecycleRecordKey(record) {
+  const messageId = usableMessageId(record.messageId);
+  const scope = normalizeWorkspacePath(record.cwd);
+  if (messageId) {
+    return `message\u0000${scope}\u0000${record.sessionId}\u0000${messageId}`;
+  }
+  return `legacy\u0000${scope}\u0000${record.sessionId}\u0000${record.timestamp}\u0000${usageFingerprint(record.usage)}`;
+}
+
+function normalizeRuntimeLifecycleJsonl(raw) {
+  const records = [];
+  for (const line of String(raw || '').split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const normalized = normalizeRuntimeLifecycle(JSON.parse(line));
+      if (normalized) records.push(normalized);
+    } catch {
+      // A malformed line must not hide valid records before or after it.
+    }
+  }
+  return records;
+}
+
+function normalizeRuntimeLifecycleArray(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return { valid: false, records: [] };
+    return {
+      valid: true,
+      records: parsed.map(normalizeRuntimeLifecycle).filter(Boolean),
+    };
+  } catch {
+    return { valid: false, records: [] };
+  }
+}
+
+function serializeRuntimeLifecycleJsonl(records) {
+  return records.length > 0
+    ? `${records.map(record => JSON.stringify(record)).join('\n')}\n`
+    : '';
+}
+
+function lifecycleIndexKey(workspacePath, sessionId, messageId) {
+  return `${normalizeWorkspacePath(workspacePath)}\u0000${sessionId}\u0000${messageId}`;
+}
+
+function lifecycleUnscopedIndexKey(sessionId, messageId) {
+  return `${sessionId}\u0000${messageId}`;
+}
+
+function addLifecycleIndexEntry(index, key, entry) {
+  const entries = index.get(key);
+  if (entries) entries.push(entry);
+  else index.set(key, [entry]);
+}
+
+function buildRuntimeLifecycleIndices(records, { scope, cwd }) {
+  const exactByWorkspace = new Map();
+  const exactUnscoped = new Map();
+  const fallbackByWorkspace = new Map();
+  const fallbackUnscoped = new Map();
+
+  records.forEach((record, index) => {
+    if (scope === USAGE_SCOPE_CURRENT && record.cwd !== cwd) return;
+    const entry = { record, index };
+    const messageId = usableMessageId(record.messageId);
+    if (messageId) {
+      addLifecycleIndexEntry(
+        exactByWorkspace,
+        lifecycleIndexKey(record.cwd, record.sessionId, messageId),
+        entry,
+      );
+      addLifecycleIndexEntry(
+        exactUnscoped,
+        lifecycleUnscopedIndexKey(record.sessionId, messageId),
+        entry,
+      );
+      return;
+    }
+
+    const fingerprint = usageFingerprint(record.usage);
+    addLifecycleIndexEntry(
+      fallbackByWorkspace,
+      lifecycleIndexKey(record.cwd, record.sessionId, fingerprint),
+      entry,
+    );
+    addLifecycleIndexEntry(
+      fallbackUnscoped,
+      lifecycleUnscopedIndexKey(record.sessionId, fingerprint),
+      entry,
+    );
+  });
+
+  return { exactByWorkspace, exactUnscoped, fallbackByWorkspace, fallbackUnscoped };
+}
+
+function messageLifecycleIds(message) {
+  return [
+    message?.messageId,
+    message?.id,
+    message?.uuid,
+    message?.usageMessageId,
+  ]
+    .map(usableMessageId)
+    .filter((value, index, values) => value && values.indexOf(value) === index);
+}
+
+function uniqueUnscopedCandidates(candidates, workspaceKey = null) {
+  if (!candidates || candidates.length === 0) return [];
+  const scoped = workspaceKey
+    ? candidates.filter(({ record }) => encodeClaudeProjectPath(record.cwd) === workspaceKey)
+    : candidates;
+  if (workspaceKey) return scoped;
+  const workspacePaths = new Set(scoped.map(({ record }) => record.cwd));
+  return workspacePaths.size === 1 ? scoped : [];
+}
+
+function takeExactLifecycleRecord({ indices, sessionId, messageId, workspacePath, workspaceKey, consumed }) {
+  if (!messageId) return null;
+  const scopedCandidates = workspacePath
+    ? indices.exactByWorkspace.get(lifecycleIndexKey(workspacePath, sessionId, messageId))
+    : null;
+  const candidates = scopedCandidates || uniqueUnscopedCandidates(
+    indices.exactUnscoped.get(lifecycleUnscopedIndexKey(sessionId, messageId)),
+    workspaceKey,
+  );
+  const matched = candidates?.find(candidate => !consumed.has(candidate.index));
+  if (!matched) return null;
+  consumed.add(matched.index);
+  return matched.record;
+}
+
+function takeFallbackLifecycleRecord({ indices, sessionId, message, workspacePath, workspaceKey, consumed }) {
+  const fingerprint = usageFingerprint(message?.usage);
+  const scopedCandidates = workspacePath
+    ? indices.fallbackByWorkspace.get(lifecycleIndexKey(workspacePath, sessionId, fingerprint))
+    : null;
+  const candidates = scopedCandidates || uniqueUnscopedCandidates(
+    indices.fallbackUnscoped.get(lifecycleUnscopedIndexKey(sessionId, fingerprint)),
+    workspaceKey,
+  );
+  if (!candidates) return null;
+
+  const timestamp = messageTimestamp(message, 0);
+  let matched = null;
+  let matchedDistance = Infinity;
+  for (const candidate of candidates) {
+    if (consumed.has(candidate.index)) continue;
+    const distance = Math.abs(candidate.record.timestamp - timestamp);
+    if (distance > RUNTIME_LIFECYCLE_MATCH_WINDOW_MS || distance >= matchedDistance) continue;
+    matched = candidate;
+    matchedDistance = distance;
+  }
+  if (!matched) return null;
+  consumed.add(matched.index);
+  return matched.record;
+}
+
+function lifecycleForMessage({ indices, sessionId, message, workspacePath, workspaceKey, consumed }) {
+  let exact = null;
+  for (const messageId of messageLifecycleIds(message)) {
+    exact = takeExactLifecycleRecord({
+      indices,
+      sessionId,
+      messageId,
+      workspacePath,
+      workspaceKey,
+      consumed,
+    });
+    if (exact) break;
+  }
+  const matched = exact || takeFallbackLifecycleRecord({
+    indices,
+    sessionId,
+    message,
+    workspacePath,
+    workspaceKey,
+    consumed,
+  });
+  return matched
+    ? {
+      classification: matched.classification,
+      ...(matched.reason ? { reason: matched.reason } : {}),
+    }
+    : null;
+}
+
+function lifecycleFromMessage(message) {
+  if (message?.runtimeClassification !== 'cold' && message?.runtimeClassification !== 'warm') return null;
+  return {
+    classification: message.runtimeClassification,
+    ...(typeof message.runtimeRetirementReason === 'string' && message.runtimeRetirementReason.trim()
+      ? { reason: message.runtimeRetirementReason.trim() }
+      : {}),
+  };
+}
+
 function usageCost(usage, model) {
   const pricing = pricingForModel(model);
   const requestTokens = usage.inputTokens + usage.outputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
@@ -184,11 +433,123 @@ export class DesktopSessionService {
     this.homeDir = homeDir;
     this.cwd = normalizeWorkspacePath(cwd);
     this.sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
+    this.runtimeLifecycleFile = path.join(homeDir, '.ccnexus', RUNTIME_LIFECYCLE_FILE);
+    this.runtimeLifecycleJsonlFile = path.join(homeDir, '.ccnexus', RUNTIME_LIFECYCLE_JSONL_FILE);
+    this.runtimeLifecycleWriteTail = Promise.resolve();
+    this.runtimeLifecycleRecordKeys = new Set();
+    this.runtimeLifecycleRecordCount = 0;
+    this.runtimeLifecycleStateInitialized = false;
+    this.runtimeLifecycleAppendNeedsBoundary = false;
     this.promptEnhancementUsage = promptEnhancementUsage || createPromptEnhancementUsageStore({ homeDir });
   }
 
   setCwd(nextCwd) {
     this.cwd = normalizeWorkspacePath(nextCwd);
+  }
+
+  async readRuntimeLifecycleSnapshot() {
+    try {
+      const raw = await fs.readFile(this.runtimeLifecycleJsonlFile, 'utf8');
+      return normalizeRuntimeLifecycleJsonl(raw).slice(-MAX_RUNTIME_LIFECYCLE_RECORDS);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    try {
+      const legacy = normalizeRuntimeLifecycleArray(await fs.readFile(this.runtimeLifecycleFile, 'utf8'));
+      return legacy.records.slice(-MAX_RUNTIME_LIFECYCLE_RECORDS);
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  async readRuntimeLifecycle() {
+    await this.runtimeLifecycleWriteTail.catch(() => {});
+    return this.readRuntimeLifecycleSnapshot();
+  }
+
+  async initializeRuntimeLifecycleWriteState() {
+    if (this.runtimeLifecycleStateInitialized) return;
+
+    await fs.mkdir(path.dirname(this.runtimeLifecycleJsonlFile), { recursive: true });
+    let records = [];
+    try {
+      const raw = await fs.readFile(this.runtimeLifecycleJsonlFile, 'utf8');
+      records = normalizeRuntimeLifecycleJsonl(raw);
+      this.runtimeLifecycleAppendNeedsBoundary = raw.length > 0 && !/[\r\n]$/u.test(raw);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+
+      const legacy = normalizeRuntimeLifecycleArray(await fs.readFile(this.runtimeLifecycleFile, 'utf8').catch((readError) => {
+        if (readError.code === 'ENOENT') return '[]';
+        throw readError;
+      }));
+      records = legacy.records;
+      if (legacy.valid) {
+        await fs.writeFile(this.runtimeLifecycleJsonlFile, serializeRuntimeLifecycleJsonl(records), 'utf8');
+        this.runtimeLifecycleAppendNeedsBoundary = false;
+      }
+    }
+
+    this.runtimeLifecycleRecordKeys = new Set(records.map(runtimeLifecycleRecordKey));
+    this.runtimeLifecycleRecordCount = records.length;
+    this.runtimeLifecycleStateInitialized = true;
+  }
+
+  async compactRuntimeLifecycleIfNeeded() {
+    if (this.runtimeLifecycleRecordCount <= RUNTIME_LIFECYCLE_COMPACT_THRESHOLD) return;
+
+    let retained;
+    try {
+      retained = normalizeRuntimeLifecycleJsonl(await fs.readFile(this.runtimeLifecycleJsonlFile, 'utf8'))
+        .slice(-MAX_RUNTIME_LIFECYCLE_RECORDS);
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+
+    const directory = path.dirname(this.runtimeLifecycleJsonlFile);
+    const temporaryFile = path.join(
+      directory,
+      `.${RUNTIME_LIFECYCLE_JSONL_FILE}.${process.pid}.${Date.now()}.tmp`,
+    );
+    try {
+      await fs.writeFile(temporaryFile, serializeRuntimeLifecycleJsonl(retained), 'utf8');
+      await fs.rename(temporaryFile, this.runtimeLifecycleJsonlFile);
+      this.runtimeLifecycleAppendNeedsBoundary = false;
+      this.runtimeLifecycleRecordKeys = new Set(retained.map(runtimeLifecycleRecordKey));
+      this.runtimeLifecycleRecordCount = retained.length;
+    } finally {
+      await fs.unlink(temporaryFile).catch(() => {});
+    }
+  }
+
+  async appendRuntimeLifecycleRecord(normalized) {
+    await this.initializeRuntimeLifecycleWriteState();
+    const key = runtimeLifecycleRecordKey(normalized);
+    if (this.runtimeLifecycleRecordKeys.has(key)) return true;
+
+    await fs.appendFile(
+      this.runtimeLifecycleJsonlFile,
+      `${this.runtimeLifecycleAppendNeedsBoundary ? '\n' : ''}${JSON.stringify(normalized)}\n`,
+      'utf8',
+    );
+    this.runtimeLifecycleAppendNeedsBoundary = false;
+    this.runtimeLifecycleRecordKeys.add(key);
+    this.runtimeLifecycleRecordCount += 1;
+    await this.compactRuntimeLifecycleIfNeeded();
+    return true;
+  }
+
+  async recordRuntimeLifecycle(record) {
+    const normalized = normalizeRuntimeLifecycle(record);
+    if (!normalized) return false;
+    const operation = this.runtimeLifecycleWriteTail
+      .catch(() => {})
+      .then(() => this.appendRuntimeLifecycleRecord(normalized));
+    this.runtimeLifecycleWriteTail = operation;
+    return operation;
   }
 
   async readProjectIndex() {
@@ -443,12 +804,22 @@ export class DesktopSessionService {
     const dateRange = options.dateRange === 'today' || options.dateRange === '7d' || options.dateRange === '30d'
       ? options.dateRange
       : 'all';
+    const lifecycleWriteTail = this.runtimeLifecycleWriteTail;
+    await lifecycleWriteTail.catch(() => {});
     const sessionEntries = scope === USAGE_SCOPE_ALL
       ? await this.listClaudeUsageSessions()
       : (await this.getSessions(options)).sessions.map((session) => ({
         session,
         claudeProjectDir: this.claudeProjectDir(),
+        workspacePath: this.cwd,
       }));
+    const lifecycleRecords = await this.readRuntimeLifecycleSnapshot();
+    const lifecycleIndices = buildRuntimeLifecycleIndices(lifecycleRecords, {
+      scope,
+      cwd: this.cwd,
+    });
+    const consumedLifecycleRecords = new Set();
+    const runtimeLifecycle = { coldRequests: 0, warmRequests: 0 };
     const totalUsage = emptyUsage();
     const sessions = [];
     const daily = new Map();
@@ -470,7 +841,10 @@ export class DesktopSessionService {
     let promptEnhancementCount = 0;
     let promptEnhancementCost = 0;
 
-    for (const { session, claudeProjectDir } of sessionEntries) {
+    for (const { session, claudeProjectDir, workspacePath = null } of sessionEntries) {
+      const workspaceKey = workspacePath
+        ? encodeClaudeProjectPath(workspacePath)
+        : path.basename(claudeProjectDir);
       const history = scope === USAGE_SCOPE_ALL
         ? { messages: await readClaudeSessionMessages({ claudeProjectDir, sessionId: session.id }) }
         : await this.loadSession(session.id);
@@ -499,7 +873,24 @@ export class DesktopSessionService {
           : sessionModel || DEFAULT_CLAUDE_MODEL;
         if (!sessionModel && message.model) sessionModel = messageModel;
         const messageCost = usageCost(usage, messageModel);
-        usageRecords.push({ timestamp, usage, cost: messageCost, model: messageModel });
+        const lifecycle = lifecycleFromMessage(message) || lifecycleForMessage({
+          indices: lifecycleIndices,
+          sessionId: session.id,
+          message,
+          workspacePath,
+          workspaceKey,
+          consumed: consumedLifecycleRecords,
+        });
+        usageRecords.push({
+          timestamp,
+          usage,
+          cost: messageCost,
+          model: messageModel,
+          ...(lifecycle ? {
+            runtimeClassification: lifecycle.classification,
+            ...(lifecycle.reason ? { runtimeRetirementReason: lifecycle.reason } : {}),
+          } : {}),
+        });
       }
 
       const records = cutoffTime > 0
@@ -513,6 +904,8 @@ export class DesktopSessionService {
         sessionTimestamp = sessionTimestamp === 0 ? record.timestamp : Math.min(sessionTimestamp, record.timestamp);
         sessionCost += record.cost;
         addUsage(totalUsage, record.usage);
+        if (record.runtimeClassification === 'cold') runtimeLifecycle.coldRequests += 1;
+        if (record.runtimeClassification === 'warm') runtimeLifecycle.warmRequests += 1;
         const key = dateKey(record.timestamp);
         const day = daily.get(key) || {
           date: key,
@@ -660,6 +1053,7 @@ export class DesktopSessionService {
       projectName: scope === USAGE_SCOPE_ALL ? 'All Projects' : path.basename(this.cwd),
       totalSessions,
       totalUsage,
+      runtimeLifecycle,
       promptEnhancementCount,
       promptEnhancementUsage,
       promptEnhancementCost,
