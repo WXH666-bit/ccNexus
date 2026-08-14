@@ -655,8 +655,10 @@ html, body, #root {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px 24px;
-  scroll-behavior: smooth;
+  overscroll-behavior-y: contain;
+  overflow-anchor: none;
 }
+.message-list.scroll-anchor-enabled { overflow-anchor: auto; }
 .message-list::-webkit-scrollbar { width: 9px; }
 .message-list::-webkit-scrollbar-track { background: transparent; }
 .message-list::-webkit-scrollbar-thumb {
