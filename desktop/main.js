@@ -486,8 +486,16 @@ ipcMain.handle('desktop:export-session', async (_event, args = {}) => {
 });
 
 ipcMain.handle('desktop:delete-session', async (_event, args = {}) => {
+  const broadcast = (payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('desktop:chat-message', payload);
+    }
+  };
   await chatController.abortSession(args.sessionId);
-  return desktopSessions.deleteSession(args.sessionId);
+  const result = await desktopSessions.deleteSession(args.sessionId);
+  broadcast({ type: 'session_deleted', sessionId: args.sessionId });
+  broadcast({ type: 'status', status: 'idle', reason: 'abort-complete', sessionId: args.sessionId });
+  return result;
 });
 
 ipcMain.handle('desktop:get-processes', () => runtime.buildProcessSnapshot());

@@ -7944,3 +7944,33 @@ textarea:focus-visible,
 .assistant-row .message-content > .markdown-body {
   margin: 0;
 }
+
+/* ─── ConfirmDialog (danger variant) ─────────────────────────── */
+.confirm-danger-btn { border-color: var(--accent-red); background: var(--accent-red); color: #fff; }
+.confirm-danger-btn:hover { background: color-mix(in srgb, var(--accent-red) 82%, #000); }
+
+/* ─── History delete error banner ────────────────────────────── */
+.history-delete-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-red);
+  border-radius: var(--radius-sm);
+  background: rgba(244, 67, 54, 0.1);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.history-delete-error button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+}
+.history-delete-error button:hover { color: var(--accent-red); }

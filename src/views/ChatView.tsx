@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ChevronDown, Layers } from 'lucide-react';
 import ChatHeader from '../components/ChatHeader';
@@ -79,6 +79,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const { sessionId: routeParamSessionId } = useParams();
   const urlSessionId = routeSessionId ?? routeParamSessionId;
   const navigate = useNavigate();
+  const location = useLocation();
+  const isChatRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
+  const wasChatRouteRef = useRef(isChatRoute);
   const { send, incomingMessages, connected } = useDesktopChat();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -514,7 +517,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         setCurrentSession(s);
         rememberActiveSession(s.id);
       }
-    } else if (!newSessionNavigationRef.current && sessionList.length > 0) {
+    } else if (newSessionNavigationRef.current) {
+      newSessionNavigationRef.current = false; // 保持空白新会话，不自动选择
+    } else if (sessionList.length > 0) {
       const preferredSession = preferredSessionId
         ? sessionList.find(session => session.id === preferredSessionId)
         : undefined;
@@ -575,6 +580,18 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     void refreshSessions().catch(() => applySessionList([]));
   }, [applySessionList, refreshSessions]);
 
+  // Reconcile against the authoritative session list when the chat route
+  // becomes visible again with no session id. Returning from /history lands on
+  // /chat (no id), where urlSessionId is undefined before and after, so the
+  // URL-change effect never fires and stale state would otherwise persist.
+  useEffect(() => {
+    const wasChatRoute = wasChatRouteRef.current;
+    wasChatRouteRef.current = isChatRoute;
+    if (!wasChatRoute && isChatRoute && !urlSessionId) {
+      void refreshSessions().catch(() => applySessionList([]));
+    }
+  }, [applySessionList, isChatRoute, refreshSessions, urlSessionId]);
+
   // Handle URL session change
   useEffect(() => {
     if (urlSessionId) {
@@ -613,8 +630,6 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       if (requestedHistorySessionRef.current !== urlSessionId) {
         requestSessionHistory(urlSessionId);
       }
-    } else if (newSessionNavigationRef.current) {
-      newSessionNavigationRef.current = false;
     }
   }, [beginSessionTransition, rememberActiveSession, requestSessionHistory, urlSessionId]);
 
@@ -633,11 +648,16 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         || msg.type === 'session_renamed'
         || (msg.type === 'error' && !eventSessionId);
       const establishesSession = msg.type === 'session' && !activeSessionId;
+      // Global unlock events must clear a stuck abort window even when their
+      // session id no longer matches the active session (e.g. the session was
+      // just deleted), so they skip the session boundary filter below.
+      const unlockEvent = (msg.type === 'status' && msg.status === 'idle' && msg.reason === 'abort-complete')
+        || (msg.type === 'error' && msg.invalidSessionId);
 
       // ccgui drops callbacks belonging to the outgoing channel while a new
       // session is loading. Desktop IPC is ordered, but old SDK queries can
       // still unwind later, so apply the same session boundary here.
-      if (!globalEvent && eventSessionId && (!activeSessionId || eventSessionId !== activeSessionId) && !establishesSession) {
+      if (!globalEvent && !unlockEvent && eventSessionId && (!activeSessionId || eventSessionId !== activeSessionId) && !establishesSession) {
         continue;
       }
 

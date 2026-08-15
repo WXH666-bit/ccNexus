@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, CheckSquare, ChevronLeft, Copy, Download, Edit3, MessageSquare, Search, Star, Trash2, X } from 'lucide-react';
 import RefreshIcon from '../components/RefreshIcon';
+import ConfirmDialog from '../components/ConfirmDialog';
 import type { Session } from '../types';
 import { useDesktopChat } from '../hooks/useDesktopChat';
 import { deleteSession, getSessions, loadSession, renameSession, toggleFavoriteSession } from '../utils/sessionBridgeApi';
@@ -19,6 +20,9 @@ export default function HistoryView() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [pendingDelete, setPendingDelete] =
+    useState<{ type: 'single'; id: string } | { type: 'batch' } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deepSearchMatches, setDeepSearchMatches] = useState<Set<string> | null>(null);
   const [deepSearching, setDeepSearching] = useState(false);
   const processedIncomingMessageCountRef = useRef(0);
@@ -66,12 +70,40 @@ export default function HistoryView() {
       || (b.favoritedAt || 0) - (a.favoritedAt || 0)
       || b.updatedAt - a.updatedAt);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('确定删除这个会话吗？')) return;
-    await deleteSession(id);
-    setSessions(prev => prev.filter(s => s.id !== id));
-    const refreshed = await getSessions().catch(() => null);
-    if (refreshed) setSessions(refreshed.sessions);
+  const handleDelete = (id: string) => {
+    setPendingDelete({ type: 'single', id });
+  };
+
+  const performDelete = async () => {
+    const pending = pendingDelete;
+    setPendingDelete(null);
+    setDeleteError(null);
+    if (!pending) return;
+    if (pending.type === 'single') {
+      try {
+        await deleteSession(pending.id);
+      } catch {
+        setDeleteError('删除失败：文件被占用，请稍后重试');
+        return;
+      }
+      setSessions(prev => prev.filter(s => s.id !== pending.id));
+      const refreshed = await getSessions().catch(() => null);
+      if (refreshed) setSessions(refreshed.sessions);
+    } else {
+      const ids = [...selectedIds];
+      const results = await Promise.all(ids.map(async id => ({
+        id,
+        ok: await deleteSession(id).then(() => true).catch(() => false),
+      })));
+      const succeeded = new Set(results.filter(result => result.ok).map(result => result.id));
+      const failedCount = results.length - succeeded.size;
+      setSessions(previous => previous.filter(session => !succeeded.has(session.id)));
+      if (failedCount > 0) {
+        setDeleteError(`删除失败：${failedCount} 个会话文件被占用，请稍后重试`);
+      }
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+    }
   };
 
   const handleDeepSearch = async () => {
@@ -107,13 +139,9 @@ export default function HistoryView() {
       : new Set(filtered.map(session => session.id)));
   };
 
-  const handleBatchDelete = async () => {
-    if (selectedIds.size === 0 || !window.confirm(`确定删除选中的 ${selectedIds.size} 个会话吗？`)) return;
-    const ids = [...selectedIds];
-    await Promise.all(ids.map(id => deleteSession(id).catch(() => null)));
-    setSessions(previous => previous.filter(session => !selectedIds.has(session.id)));
-    setSelectedIds(new Set());
-    setSelectionMode(false);
+  const handleBatchDelete = () => {
+    if (selectedIds.size === 0) return;
+    setPendingDelete({ type: 'batch' });
   };
 
   const handleRename = async (id: string) => {
@@ -212,6 +240,14 @@ export default function HistoryView() {
           )}
         </div>
       </div>
+      {deleteError && (
+        <div className="history-delete-error" role="alert">
+          <span>{deleteError}</span>
+          <button type="button" onClick={() => setDeleteError(null)} aria-label="关闭">
+            <X size={14} />
+          </button>
+        </div>
+      )}
       <div className="history-list">
         {filtered.length === 0 ? (
           <div className="history-empty">
@@ -278,6 +314,18 @@ export default function HistoryView() {
           ))
         )}
       </div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title={pendingDelete.type === 'batch' ? '删除选中会话' : '删除会话'}
+          message={pendingDelete.type === 'batch'
+            ? `确定删除选中的 ${selectedIds.size} 个会话吗？删除后无法恢复。`
+            : '确定删除这个会话吗？删除后无法恢复。'}
+          confirmText="删除"
+          danger
+          onConfirm={() => { void performDelete(); }}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }
