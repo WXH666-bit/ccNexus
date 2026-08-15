@@ -11,8 +11,6 @@ import WelcomeScreen from '../components/WelcomeScreen';
 import RewindDialog from '../components/RewindDialog';
 import PlanApprovalDialog from '../components/PlanApprovalDialog';
 import MessageAnchorRail from '../components/MessageAnchorRail';
-import MessageQueue from '../components/MessageQueue';
-import type { QueuedMessage } from '../components/MessageQueue';
 import FileExplorer from '../components/FileExplorer';
 import GeneratingResponseIndicator from '../components/GeneratingResponseIndicator';
 import ContextUsageDialog, { type ContextUsageData } from '../components/ContextUsageDialog';
@@ -36,6 +34,7 @@ import {
   queuedChatMessageToSendArgs,
   shouldQueueChatMessage,
   type AbortWindowState,
+  type QueuedChatMessage,
 } from '../utils/abortWindowState.js';
 import { getContextUsage as loadContextUsage, type ContextUsageRequest } from '../utils/desktopBridgeApi';
 import { getActiveSession, getSessions, loadSession, renameSession, setActiveSession } from '../utils/sessionBridgeApi';
@@ -129,7 +128,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const [subagentHistories, setSubagentHistories] = useState<Record<string, SubagentHistoryResponse>>({});
 
   // P2: Message queue state
-  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  const [messageQueue, setMessageQueue] = useState<QueuedChatMessage[]>([]);
   const queueProcessingRef = useRef(false);
 
   // Status panel visibility
@@ -974,7 +973,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
 
     // If AI is streaming and queue is requested, add to queue
     if (shouldQueueChatMessage({ isStreaming, stopping }) && queue) {
-      const queuedMsg: QueuedMessage = createQueuedChatMessage({
+      const queuedMsg: QueuedChatMessage = createQueuedChatMessage({
         id: genId(),
         text: text.trim(),
         timestamp: Date.now(),
@@ -991,7 +990,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
 
     // If AI is streaming but not queued, still add to queue
     if (shouldQueueChatMessage({ isStreaming, stopping })) {
-      const queuedMsg: QueuedMessage = createQueuedChatMessage({
+      const queuedMsg: QueuedChatMessage = createQueuedChatMessage({
         id: genId(),
         text: text.trim(),
         timestamp: Date.now(),
@@ -1064,6 +1063,10 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   // Queue management
   const removeFromQueue = useCallback((id: string) => {
     setMessageQueue(prev => prev.filter(m => m.id !== id));
+  }, []);
+
+  const updateQueuedMessage = useCallback((id: string, text: string) => {
+    setMessageQueue(prev => prev.map(m => (m.id === id ? { ...m, text } : m)));
   }, []);
 
   const clearQueue = useCallback(() => {
@@ -1186,11 +1189,6 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
             isStreaming={isStreaming}
           />
         )}
-        <MessageQueue 
-          queue={messageQueue} 
-          onRemove={removeFromQueue} 
-          onClear={clearQueue} 
-        />
         <ChatInputBox
           onSend={handleSend}
           onContextUsage={handleContextUsage}
@@ -1209,6 +1207,10 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
           setShowToolAnchors={setShowToolAnchors}
           onProviderSwitch={handleNewSession}
           usageUsedTokens={usageUsedTokens}
+          queue={messageQueue}
+          onRemoveQueued={removeFromQueue}
+          onUpdateQueued={updateQueuedMessage}
+          onClearQueued={clearQueue}
           sessionKey={currentSession?.id ?? urlSessionId ?? null}
         />
       </div>

@@ -19,6 +19,7 @@ import {
 import { createPromptEnhancementPreview } from '../../utils/promptEnhancer';
 import { useInputHistory } from './useInputHistory';
 import type { PermissionMode } from '../../types';
+import type { QueuedChatMessage } from '../../utils/abortWindowState.js';
 
 interface ChatInputBoxProps {
   onSend: (
@@ -48,6 +49,10 @@ interface ChatInputBoxProps {
   onProviderSwitch?: () => void;
   usageUsedTokens?: number;
   sessionKey?: string | null;
+  queue: QueuedChatMessage[];
+  onRemoveQueued: (id: string) => void;
+  onUpdateQueued: (id: string, text: string) => void;
+  onClearQueued: () => void;
 }
 
 interface FileEntry {
@@ -171,6 +176,10 @@ export default function ChatInputBox({
   onProviderSwitch,
   usageUsedTokens,
   sessionKey,
+  queue,
+  onRemoveQueued,
+  onUpdateQueued,
+  onClearQueued,
 }: ChatInputBoxProps) {
   void TRIGGER_CONFIGS;
   const [text, setText] = useState('');
@@ -426,6 +435,10 @@ export default function ChatInputBox({
         }}
         onPickFiles={addFiles}
         onRemoveAttachment={index => setAttachments(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
+        queue={queue}
+        onRemoveQueued={onRemoveQueued}
+        onUpdateQueued={onUpdateQueued}
+        onClearQueued={onClearQueued}
       />
 
       <InputEditable

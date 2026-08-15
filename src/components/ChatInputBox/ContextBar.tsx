@@ -1,5 +1,7 @@
 import { ChevronDown, ChevronUp, Paperclip, RotateCcw, X } from 'lucide-react';
 import TokenIndicator from './TokenIndicator';
+import QueueOrb from '../QueueOrb';
+import type { QueuedChatMessage } from '../../utils/abortWindowState.js';
 
 interface Attachment {
   type: string;
@@ -16,6 +18,10 @@ interface Props {
   onToggleStatusPanel: () => void;
   onPickFiles: (files: FileList) => void;
   onRemoveAttachment: (index: number) => void;
+  queue: QueuedChatMessage[];
+  onRemoveQueued: (id: string) => void;
+  onUpdateQueued: (id: string, text: string) => void;
+  onClearQueued: () => void;
 }
 
 export default function ContextBar({
@@ -27,6 +33,10 @@ export default function ContextBar({
   onToggleStatusPanel,
   onPickFiles,
   onRemoveAttachment,
+  queue,
+  onRemoveQueued,
+  onUpdateQueued,
+  onClearQueued,
 }: Props) {
   return (
     <div className="context-bar">
@@ -52,31 +62,25 @@ export default function ContextBar({
           />
         </div>
         <div className="context-tool-divider" />
+        <QueueOrb queue={queue} onRemove={onRemoveQueued} onUpdate={onUpdateQueued} onClear={onClearQueued} />
       </div>
 
-      {attachments.length > 0 ? (
-        attachments.map((attachment, index) => (
-          <span key={`${attachment.name}-${index}`} className="context-item attachment-chip">
-            <span className="context-text">{attachment.name}</span>
-            <button
-              type="button"
-              className="context-close-btn"
-              onClick={event => {
-                event.stopPropagation();
-                onRemoveAttachment(index);
-              }}
-              title="移除附件"
-            >
-              <X size={12} />
-            </button>
-          </span>
-        ))
-      ) : (
-        <button type="button" className="context-file-placeholder" title="文件上下文">
-          <span className="context-file-icon" />
-          <span className="placeholder-text">文件上下文</span>
-        </button>
-      )}
+      {attachments.length > 0 && attachments.map((attachment, index) => (
+        <span key={`${attachment.name}-${index}`} className="context-item attachment-chip">
+          <span className="context-text">{attachment.name}</span>
+          <button
+            type="button"
+            className="context-close-btn"
+            onClick={event => {
+              event.stopPropagation();
+              onRemoveAttachment(index);
+            }}
+            title="移除附件"
+          >
+            <X size={12} />
+          </button>
+        </span>
+      ))}
 
       <div className="context-tools-right">
         <button
