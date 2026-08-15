@@ -38,10 +38,52 @@ interface DescribeOptions {
   signal?: AbortSignal;
 }
 
-/** 调用 OpenAI 兼容视觉接口，dataURL 直传，返回文字描述 */
+const VISION_MAX_IMAGE_DIMENSION = 1024;
+
+/** 用 canvas 把大图最长边缩到 VISION_MAX_IMAGE_DIMENSION 内并转 JPEG，减小上传体积与推理耗时。 */
+function downscaleImageDataUrl(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const width = img.naturalWidth;
+        const height = img.naturalHeight;
+        if (!width || !height) {
+          resolve(dataUrl);
+          return;
+        }
+        const scale = Math.min(1, VISION_MAX_IMAGE_DIMENSION / Math.max(width, height));
+        if (scale >= 1) {
+          resolve(dataUrl);
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/** 调用 OpenAI 兼容视觉接口返回文字描述；大图会先降采样到 1024px 内再发送。 */
 export async function describeImage(config: VisionAssistConfig, dataUrl: string, options: DescribeOptions = {}): Promise<string> {
+  // 发送前降采样，避免大图 base64 拖慢上传与推理导致超时。
+  const imageUrl = await downscaleImageDataUrl(dataUrl);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 60_000);
   options.signal?.addEventListener('abort', () => controller.abort());
   try {
     const base = config.baseUrl.trim().replace(/\/+$/, '');
@@ -56,7 +98,7 @@ export async function describeImage(config: VisionAssistConfig, dataUrl: string,
         messages: [{
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: dataUrl } },
+            { type: 'image_url', image_url: { url: imageUrl } },
             { type: 'text', text: config.prompt || DEFAULT_VISION_CONFIG.prompt },
           ],
         }],
@@ -75,7 +117,7 @@ export async function describeImage(config: VisionAssistConfig, dataUrl: string,
     if (!text || typeof text !== 'string') throw new Error('视觉模型返回了空内容');
     return text.trim();
   } catch (error) {
-    if ((error as Error)?.name === 'AbortError') throw new Error('视觉模型响应超时（30 秒）');
+    if ((error as Error)?.name === 'AbortError') throw new Error('视觉模型响应超时（60 秒）');
     throw error instanceof Error ? error : new Error(String(error));
   } finally {
     clearTimeout(timeout);
