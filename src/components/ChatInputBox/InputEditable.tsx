@@ -7,6 +7,7 @@ interface Props {
   onChange: (value: string) => void;
   onSubmit: () => void;
   onPasteImage: (file: File) => void;
+  onDropFiles: (files: FileList) => void;
   editorRef?: RefObject<HTMLDivElement | null>;
   onHistoryKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => boolean;
 }
@@ -18,6 +19,7 @@ export default function InputEditable({
   onChange,
   onSubmit,
   onPasteImage,
+  onDropFiles,
   editorRef,
   onHistoryKeyDown,
 }: Props) {
@@ -82,10 +84,9 @@ export default function InputEditable({
         }}
         onDrop={event => {
           event.preventDefault();
-          const files = Array.from(event.dataTransfer.files);
-          files.forEach(file => {
-            if (file.type.startsWith('image/')) onPasteImage(file);
-          });
+          if (event.dataTransfer.files.length > 0) {
+            onDropFiles(event.dataTransfer.files);
+          }
         }}
         onDragOver={event => event.preventDefault()}
         onContextMenu={event => {

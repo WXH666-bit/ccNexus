@@ -528,6 +528,7 @@ export default function ChatInputBox({
         onPasteImage={file => {
           readImage(file).then(image => setAttachments(prev => [...prev, image])).catch(() => {});
         }}
+        onDropFiles={addFiles}
       />
 
       <CompletionDropdown items={completionItems} onSelect={selectCompletion} />
