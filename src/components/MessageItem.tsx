@@ -63,6 +63,13 @@ function textFromMessage(message: ChatMessage): string {
     .join('\n');
 }
 
+function extensionFromName(fileName?: string): string {
+  if (!fileName) return '';
+  const dot = fileName.lastIndexOf('.');
+  if (dot <= 0 || dot === fileName.length - 1) return '';
+  return fileName.slice(dot + 1).toLowerCase();
+}
+
 function ToolCard({
   block,
   result,
@@ -318,8 +325,8 @@ export default function MessageItem({
 
           if (block.type === 'attachment') {
             return (
-              <div key={idx} className="message-attachment-chip" title={block.fileName || 'Attachment'}>
-                <span className="message-attachment-chip-ext">{block.mediaType || 'file'}</span>
+              <div key={idx} className="message-attachment-chip" title={block.path || block.fileName || 'Attachment'}>
+                <span className="message-attachment-chip-ext">{extensionFromName(block.fileName) || block.mediaType || 'file'}</span>
                 <span className="message-attachment-chip-name">{block.fileName || 'Attachment'}</span>
               </div>
             );

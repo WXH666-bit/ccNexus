@@ -58,6 +58,7 @@ export interface AttachmentBlock {
   type: 'attachment';
   fileName?: string;
   mediaType?: string;
+  path?: string;
 }
 
 export interface TaskNotificationBlock {

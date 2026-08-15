@@ -122,6 +122,7 @@ interface CcNexusDesktopApi {
     size: number;
     mtimeMs: number;
   }>;
+  getPathForFile: (file: File) => string;
   scanFiles: (options?: { q?: string; limit?: number }) => Promise<{ files: string[] }>;
   getProviders: () => Promise<{
     providers: Array<{

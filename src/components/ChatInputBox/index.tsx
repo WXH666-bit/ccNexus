@@ -13,6 +13,7 @@ import {
   getAgents,
   getCommands,
   getFileTree,
+  getPathForFile,
   getPrompts,
   setSelectedAgent as persistSelectedAgent,
   type ContextUsageRequest,
@@ -26,7 +27,7 @@ import { buildDescriptionBlock, describeImage, isVisionActive, loadVisionConfig 
 interface ChatInputBoxProps {
   onSend: (
     text: string,
-    attachments: { type: string; data: string; described?: boolean }[],
+    attachments: { type: string; data: string; described?: boolean; name?: string; mediaType?: string }[],
     queue?: boolean,
     reasoningEffort?: string,
     agent?: string,
@@ -190,7 +191,7 @@ export default function ChatInputBox({
   const [agents, setAgents] = useState<AgentEntry[]>([]);
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);
   const [commands, setCommands] = useState<CommandEntry[]>([]);
-  const [attachments, setAttachments] = useState<{ type: string; name: string; data: string }[]>([]);
+  const [attachments, setAttachments] = useState<{ type: string; name: string; data: string; mediaType?: string }[]>([]);
   const [selectedAgent, setSelectedAgentState] = useState(() => localStorage.getItem('selectedAgent') || '');
   const [streaming, setStreamingState] = useState(() => localStorage.getItem('streaming') !== 'false');
   const [alwaysThinking, setAlwaysThinkingState] = useState(() => localStorage.getItem('alwaysThinking') === 'true');
@@ -376,8 +377,18 @@ export default function ChatInputBox({
 
   const addFiles = useCallback((fileList: FileList) => {
     Array.from(fileList).forEach(file => {
-      if (!file.type.startsWith('image/')) return;
-      readImage(file).then(image => setAttachments(prev => [...prev, image])).catch(() => {});
+      if (file.type.startsWith('image/')) {
+        readImage(file).then(image => setAttachments(prev => [...prev, image])).catch(() => {});
+        return;
+      }
+      const filePath = getPathForFile(file);
+      if (!filePath) return; // web/dev 模式拿不到路径，忽略非图片
+      setAttachments(prev => [...prev, {
+        type: 'file',
+        name: file.name || 'file',
+        data: filePath,
+        mediaType: file.type || undefined,
+      }]);
     });
   }, []);
 
@@ -387,25 +398,34 @@ export default function ChatInputBox({
     if (visionState.status === 'working') return;
 
     let finalText = trimmed;
-    let sendAttachments: { type: string; name: string; data: string; described?: boolean }[] = attachments;
+    let sendAttachments: { type: string; name: string; data: string; described?: boolean; mediaType?: string }[] = attachments;
     const config = loadVisionConfig();
 
-    if (isVisionActive(config) && attachments.length > 0) {
-      setVisionState({ status: 'working', done: 0, total: attachments.length, message: '' });
-      try {
-        const descriptions: string[] = [];
-        for (let i = 0; i < attachments.length; i += 1) {
-          const description = await describeImage(config, attachments[i].data);
-          descriptions.push(description);
-          setVisionState({ status: 'working', done: i + 1, total: attachments.length, message: '' });
+    if (isVisionActive(config)) {
+      const imageAttachments = attachments.filter(a => a.type === 'image');
+      if (imageAttachments.length > 0) {
+        setVisionState({ status: 'working', done: 0, total: imageAttachments.length, message: '' });
+        try {
+          const descriptions: string[] = [];
+          for (let i = 0; i < imageAttachments.length; i += 1) {
+            const description = await describeImage(config, imageAttachments[i].data);
+            descriptions.push(description);
+            setVisionState({ status: 'working', done: i + 1, total: imageAttachments.length, message: '' });
+          }
+          finalText = `${finalText}\n\n${buildDescriptionBlock(imageAttachments.map(a => a.name || ''), descriptions)}`;
+          sendAttachments = sendAttachments.map(a => (a.type === 'image' ? { ...a, described: true } : a));
+          setVisionState({ status: 'idle', done: 0, total: 0, message: '' });
+        } catch (error) {
+          setVisionState({ status: 'error', done: 0, total: imageAttachments.length, message: error instanceof Error ? error.message : String(error) });
+          return;
         }
-        finalText = `${trimmed}\n\n${buildDescriptionBlock(attachments.map(a => a.name || ''), descriptions)}`;
-        sendAttachments = attachments.map(a => ({ ...a, described: true }));
-        setVisionState({ status: 'idle', done: 0, total: 0, message: '' });
-      } catch (error) {
-        setVisionState({ status: 'error', done: 0, total: attachments.length, message: error instanceof Error ? error.message : String(error) });
-        return;
       }
+    }
+
+    const fileAttachments = sendAttachments.filter(a => a.type === 'file');
+    if (fileAttachments.length > 0) {
+      finalText = `${finalText}\n\n${fileAttachments.map(a => `[文件 ${a.name}]\n${a.data}`).join('\n\n')}`;
+      sendAttachments = sendAttachments.map(a => (a.type === 'file' ? { ...a, described: true } : a));
     }
 
     recordInputHistory(text);
@@ -423,7 +443,7 @@ export default function ChatInputBox({
     }
     onSend(
       finalText,
-      sendAttachments.map(attachment => ({ type: attachment.type, data: attachment.data, described: attachment.described })),
+      sendAttachments.map(attachment => ({ type: attachment.type, data: attachment.data, described: attachment.described, name: attachment.name, mediaType: attachment.mediaType })),
       queue,
       reasoning,
       selectedAgent,

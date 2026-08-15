@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('ccNexusDesktop', {
   getRuntimeInfo: () => ipcRenderer.invoke('desktop:get-runtime-info'),
@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   setActiveSession: (sessionId) => ipcRenderer.invoke('desktop:set-active-session', { sessionId }),
   listFiles: (options) => ipcRenderer.invoke('desktop:list-files', options),
   readFile: (path) => ipcRenderer.invoke('desktop:read-file', { path }),
+  getPathForFile: (file) => {
+    try { return webUtils.getPathForFile(file); } catch { return ''; }
+  },
   saveFile: (file) => ipcRenderer.invoke('desktop:save-file', file),
   scanFiles: (options) => ipcRenderer.invoke('desktop:scan-files', options),
   getProviders: () => ipcRenderer.invoke('desktop:get-providers'),

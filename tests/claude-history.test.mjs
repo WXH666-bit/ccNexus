@@ -202,3 +202,21 @@ test('history conversion mirrors ccgui task notification blocks', () => {
     { type: 'task_notification', icon: '●', summary: 'Subtask finished', status: 'completed' },
   ]);
 });
+
+test('history conversion collapses described image and file reference blocks to header lines', () => {
+  const message = convertClaudeHistoryEntry({
+    type: 'user',
+    uuid: 'attachment-reference',
+    timestamp: '2026-07-27T01:00:08.000Z',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'text', text: '看图看文件\n\n[图片 1 · shot.png]\n这是截图描述\n\n[文件 report.pdf]\nD:\\docs\\report.pdf' },
+      ],
+    },
+  }, 'session-1');
+
+  assert.deepEqual(message.content, [
+    { type: 'text', text: '看图看文件\n\n[图片 1 · shot.png]\n[文件 report.pdf]' },
+  ]);
+});

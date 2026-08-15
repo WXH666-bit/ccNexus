@@ -132,7 +132,7 @@ export async function testVisionConnection(config: VisionAssistConfig): Promise<
 }
 
 // 段头格式 `[图片 N · name]` 被 server/claudeHistory.js 的
-// DESCRIBED_IMAGE_BLOCK_HEADER_REGEX 依赖，修改格式需两侧同步。
+// ATTACHMENT_BLOCK_HEADER_REGEX 依赖，修改格式需两侧同步。
 /** 把多张图的描述拼成附加文本块 */
 export function buildDescriptionBlock(names: string[], descriptions: string[]): string {
   return names.map((name, i) => `[图片 ${i + 1}${name ? ` · ${name}` : ''}]\n${descriptions[i]}`).join('\n\n');

@@ -28,14 +28,15 @@ const FILTERED_NORMALIZE_TAGS = [
   '<local-command-stderr>',
 ];
 
-// 段头格式必须与 src/utils/visionAssist.ts 的 buildDescriptionBlock 保持同步。
-const DESCRIBED_IMAGE_BLOCK_HEADER_REGEX = /^\[图片 \d+(?: · [^\]]+)?\]$/;
+// 段头格式必须与 src/utils/visionAssist.ts 的 buildDescriptionBlock
+// 以及 src/components/ChatInputBox/index.tsx 的文件块拼接保持同步。
+const ATTACHMENT_BLOCK_HEADER_REGEX = /^\[(?:图片 \d+(?: · [^\]]+)?|文件 [^\]]+)\]$/;
 
-function collapseDescribedImageBlocks(text) {
+function collapseAttachmentReferenceBlocks(text) {
   const kept = [];
   let inDescribedBlock = false;
   for (const line of text.split('\n')) {
-    if (DESCRIBED_IMAGE_BLOCK_HEADER_REGEX.test(line.trim())) {
+    if (ATTACHMENT_BLOCK_HEADER_REGEX.test(line.trim())) {
       inDescribedBlock = true;
       kept.push(line.trim());
       continue;
@@ -109,7 +110,7 @@ function normalizeTextBlock(text, isUserMessage) {
     return null;
   }
 
-  return textBlock(isUserMessage ? collapseDescribedImageBlocks(rawText) : rawText);
+  return textBlock(isUserMessage ? collapseAttachmentReferenceBlocks(rawText) : rawText);
 }
 
 function normalizeToolResultContent(content) {

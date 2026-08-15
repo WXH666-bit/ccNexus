@@ -272,3 +272,11 @@ export async function scanFiles(query: string, limit = 20) {
 export async function getFileTree(options: { path?: string; depth?: number; showDotfiles?: boolean; maxItems?: number }) {
   return await requireDesktopApi().listFiles(options);
 }
+
+export function getPathForFile(file: File): string {
+  try {
+    return window.ccNexusDesktop?.getPathForFile?.(file) ?? '';
+  } catch {
+    return '';
+  }
+}
