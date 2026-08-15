@@ -8065,7 +8065,7 @@ textarea:focus-visible,
 .usage-timeline-bars {
   position: relative;
   display: flex; align-items: flex-end; gap: 6px;
-  flex: 1; height: 194px; padding-bottom: 20px;
+  flex: 1; height: 194px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 }
 .usage-gridline {
@@ -8085,7 +8085,7 @@ textarea:focus-visible,
   margin-bottom: 2px;
 }
 .usage-day-label {
-  position: absolute; bottom: 2px;
+  position: absolute; bottom: -16px;
   font-size: 10px; color: var(--text-tertiary); white-space: nowrap;
 }
 .usage-day-column.empty .usage-day-label { opacity: 0.35; }

@@ -291,7 +291,7 @@ export default function UsageStatistics() {
 
   useEffect(() => {
     setSessionPage(1);
-  }, [dateRange, sessionSort]);
+  }, [dateRange, sessionSort, selectedDay]);
 
   const trend = (value?: number) => {
     if (!value) return '→ 0%';
