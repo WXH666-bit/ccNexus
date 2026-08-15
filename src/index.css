@@ -7974,3 +7974,26 @@ textarea:focus-visible,
   padding: 2px;
 }
 .history-delete-error button:hover { color: var(--accent-red); }
+
+/* ─── Queued message bubbles (streaming) ─────────────────────── */
+.queued-message-row {
+  opacity: 0.55;
+}
+
+.queued-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+}
+
+.queued-bubble {
+  border-style: dashed;
+}
+
+.queued-attachment-note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+}

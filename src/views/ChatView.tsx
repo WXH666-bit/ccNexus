@@ -1158,9 +1158,10 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
             <WelcomeScreen onSuggestion={handleSend} />
           ) : (
             <div className="chat-content-with-rail">
-              <MessageList 
-                messages={messages} 
+              <MessageList
+                messages={messages}
                 isStreaming={isStreaming}
+                queuedMessages={messageQueue}
                 searchHighlight={searchHighlight}
               />
               <MessageAnchorRail 
