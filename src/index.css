@@ -8158,3 +8158,44 @@ textarea:focus-visible,
   padding: 2px 8px; border-radius: 10px; cursor: pointer;
 }
 .usage-day-filter-chip:hover { color: var(--accent-red); border-color: var(--accent-red); }
+
+/* ─── Vision Assist ─────────────────────────────── */
+.vision-status-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px; margin: 0 12px 6px;
+  border-radius: 10px; font-size: 12px;
+}
+.vision-status-bar.working {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+.vision-status-bar.error {
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 8%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--accent-red) 30%, transparent);
+}
+.vision-status-bar .vision-status-message { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vision-status-bar button {
+  border: 1px solid var(--accent-red); background: transparent; color: var(--accent-red);
+  font-size: 11px; padding: 3px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.vision-status-bar button:hover { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.vision-status-bar button.ghost { border-color: var(--border-color); color: var(--text-secondary); }
+.vision-status-bar button.ghost:hover { background: var(--bg-hover); }
+.vision-spin { animation: vision-rotate 1s linear infinite; }
+@keyframes vision-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .vision-spin { animation: none; } }
+
+.message-image-block { position: relative; }
+.message-image-block .image-described-badge {
+  position: absolute; right: 6px; bottom: 6px;
+  padding: 2px 7px; border-radius: 8px;
+  font-size: 10px; color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border-color);
+  pointer-events: none;
+}
+
+.vision-test-ok { color: var(--accent-green); }
+.vision-test-error { color: var(--accent-red); }

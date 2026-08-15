@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Loader2 } from 'lucide-react';
 import ContextBar from './ContextBar';
 import InputEditable from './InputEditable';
 import CompletionDropdown, { type CompletionItem } from './CompletionDropdown';
@@ -20,11 +21,12 @@ import { createPromptEnhancementPreview } from '../../utils/promptEnhancer';
 import { useInputHistory } from './useInputHistory';
 import type { PermissionMode } from '../../types';
 import type { QueuedChatMessage } from '../../utils/abortWindowState.js';
+import { buildDescriptionBlock, describeImage, isVisionActive, loadVisionConfig } from '../../utils/visionAssist';
 
 interface ChatInputBoxProps {
   onSend: (
     text: string,
-    attachments: { type: string; data: string }[],
+    attachments: { type: string; data: string; described?: boolean }[],
     queue?: boolean,
     reasoningEffort?: string,
     agent?: string,
@@ -193,6 +195,7 @@ export default function ChatInputBox({
   const [alwaysThinking, setAlwaysThinkingState] = useState(() => localStorage.getItem('alwaysThinking') === 'true');
   const [longContextEnabled, setLongContextEnabledState] = useState(() => localStorage.getItem('longContextEnabled') !== 'false');
   const [promptEnhancement, setPromptEnhancement] = useState<PromptEnhancementState | null>(null);
+  const [visionState, setVisionState] = useState<{ status: 'idle' | 'working' | 'error'; done: number; total: number; message: string }>({ status: 'idle', done: 0, total: 0, message: '' });
   const editorRef = useRef<HTMLDivElement>(null);
   const promptEnhancementRef = useRef<PromptEnhancementState | null>(null);
   const activePromptEnhancementRequestIdRef = useRef<string | null>(null);
@@ -377,11 +380,35 @@ export default function ChatInputBox({
     });
   }, []);
 
-  const submit = useCallback((queue = false) => {
+  const submit = useCallback(async (queue = false) => {
     const trimmed = text.trim();
     if (!trimmed && attachments.length === 0) return;
+    if (visionState.status === 'working') return;
+
+    let finalText = trimmed;
+    let sendAttachments: { type: string; name: string; data: string; described?: boolean }[] = attachments;
+    const config = loadVisionConfig();
+
+    if (isVisionActive(config) && attachments.length > 0) {
+      setVisionState({ status: 'working', done: 0, total: attachments.length, message: '' });
+      try {
+        const descriptions: string[] = [];
+        for (let i = 0; i < attachments.length; i += 1) {
+          const description = await describeImage(config, attachments[i].data);
+          descriptions.push(description);
+          setVisionState({ status: 'working', done: i + 1, total: attachments.length, message: '' });
+        }
+        finalText = `${trimmed}\n\n${buildDescriptionBlock(attachments.map(a => a.name || ''), descriptions)}`;
+        sendAttachments = attachments.map(a => ({ ...a, described: true }));
+        setVisionState({ status: 'idle', done: 0, total: 0, message: '' });
+      } catch (error) {
+        setVisionState({ status: 'error', done: 0, total: attachments.length, message: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+    }
+
     recordInputHistory(text);
-    if (attachments.length === 0 && /^\/context(?:\s|$)/i.test(trimmed)) {
+    if (attachments.length === 0 && /^\/context(?:\s|$)/i.test(finalText)) {
       onContextUsage?.({
         model: effectiveModel,
         mode,
@@ -394,8 +421,8 @@ export default function ChatInputBox({
       return;
     }
     onSend(
-      trimmed,
-      attachments.map(attachment => ({ type: attachment.type, data: attachment.data })),
+      finalText,
+      sendAttachments.map(attachment => ({ type: attachment.type, data: attachment.data, described: attachment.described })),
       queue,
       reasoning,
       selectedAgent,
@@ -405,7 +432,7 @@ export default function ChatInputBox({
     );
     setText('');
     setAttachments([]);
-  }, [alwaysThinking, attachments, effectiveModel, longContextEnabled, model, onContextUsage, onSend, reasoning, recordInputHistory, selectedAgent, streaming, text]);
+  }, [alwaysThinking, attachments, effectiveModel, longContextEnabled, model, onContextUsage, onSend, reasoning, recordInputHistory, selectedAgent, streaming, text, visionState.status]);
 
   const selectCompletion = (item: CompletionItem) => {
     if (!activeTrigger) return;
@@ -422,6 +449,34 @@ export default function ChatInputBox({
         }
       }}
     >
+      {visionState.status === 'working' && (
+        <div className="vision-status-bar working">
+          <Loader2 size={13} className="vision-spin" /> 正在识别图片 ({visionState.done}/{visionState.total})…
+        </div>
+      )}
+      {visionState.status === 'error' && (
+        <div className="vision-status-bar error">
+          <span className="vision-status-message">视觉模型调用失败：{visionState.message}</span>
+          <button type="button" onClick={() => void submit(false)}>重试</button>
+          <button type="button" className="ghost" onClick={() => {
+            setVisionState({ status: 'idle', done: 0, total: 0, message: '' });
+            const trimmed = text.trim();
+            recordInputHistory(text);
+            onSend(
+              trimmed,
+              [],
+              false,
+              reasoning,
+              selectedAgent,
+              streaming,
+              alwaysThinking,
+              applyLongContextSuffix(model === 'default' ? 'claude-sonnet-4-6' : model, longContextEnabled),
+            );
+            setText('');
+            setAttachments([]);
+          }}>跳过图片发送</button>
+        </div>
+      )}
       <ContextBar
         attachments={attachments}
         percentage={usagePercentage}

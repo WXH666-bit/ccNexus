@@ -42,7 +42,7 @@ import { deriveStatusData } from '../utils/statusPanelData';
 import { useFileChangesManagement } from '../hooks/useFileChangesManagement';
 import type {
   ChatMessage, Session, StatusData, PermissionRequest, PermissionMode,
-  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse
+  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse, ImageBlock
 } from '../types';
 import { isPermissionMode } from '../types';
 
@@ -952,7 +952,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     navigate('/history');
   }, [currentSession, finishStreamingMessage, isStreaming, navigate, send]);
 
-  const handleSend = useCallback((text: string, attachments: { type: string; data: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
+  const handleSend = useCallback((text: string, attachments: { type: string; data: string; described?: boolean }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
     if (!text.trim() && attachments.length === 0) return;
 
     if (attachments.length === 0) {
@@ -1005,10 +1005,16 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       return;
     }
 
+    const imageBlocks: ImageBlock[] = attachments.map(attachment => ({
+      type: 'image',
+      src: attachment.data,
+      alt: 'Uploaded image',
+      described: attachment.described,
+    }));
     const userMsg: ChatMessage = {
       id: genId(),
       role: 'user',
-      content: [{ type: 'text', text: text.trim() }],
+      content: [{ type: 'text', text: text.trim() }, ...imageBlocks],
       timestamp: Date.now(),
       sessionId: currentSession?.id,
     };
@@ -1033,8 +1039,8 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       type: 'chat',
       text: text.trim(),
       sessionId: currentSession?.id,
-      images: attachments,
-      options: { 
+      images: attachments.filter(a => !a.described).map(a => ({ type: a.type, data: a.data })),
+      options: {
         mode, 
         model: modelOverride || model, 
         reasoning: reasoningEffort || reasoning,

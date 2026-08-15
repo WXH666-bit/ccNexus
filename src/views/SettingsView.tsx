@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Palette, Shield, Bot, Server, BarChart3, Globe, 
-  Code2, Zap, Settings as SettingsIcon, Sparkles, ChevronLeft
+import {
+  Palette, Shield, Bot, Server, BarChart3, Globe,
+  Code2, Zap, Settings as SettingsIcon, Sparkles, ChevronLeft, Eye
 } from 'lucide-react';
 import BasicConfigSection from '../components/settings/BasicConfigSection';
 import PermissionsSection from '../components/settings/PermissionsSection';
@@ -15,6 +15,7 @@ import UsageStatistics from '../components/settings/UsageStatistics';
 import EnvVarEditor from '../components/settings/EnvVarEditor';
 import AppearanceSection from '../components/settings/AppearanceSection';
 import PromptEnhancerSection from '../components/settings/PromptEnhancerSection';
+import VisionAssistSection from '../components/settings/VisionAssistSection';
 
 const sections = [
   { id: 'basic', labelKey: 'settings.sections.basic', icon: <Globe size={16} /> },
@@ -27,6 +28,7 @@ const sections = [
   { id: 'env', labelKey: 'settings.sections.env', icon: <SettingsIcon size={16} /> },
   { id: 'appearance', labelKey: 'settings.sections.appearance', icon: <Palette size={16} /> },
   { id: 'prompt', labelKey: 'settings.sections.prompt', icon: <Sparkles size={16} /> },
+  { id: 'vision', labelKey: 'settings.sections.vision', icon: <Eye size={16} /> },
 ];
 
 export default function SettingsView() {
@@ -56,6 +58,8 @@ export default function SettingsView() {
         return <AppearanceSection />;
       case 'prompt':
         return <PromptEnhancerSection />;
+      case 'vision':
+        return <VisionAssistSection />;
       default:
         return <BasicConfigSection />;
     }

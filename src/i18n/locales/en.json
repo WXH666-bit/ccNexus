@@ -108,7 +108,8 @@
       "usage": "Usage",
       "env": "Environment",
       "appearance": "Appearance",
-      "prompt": "Prompt Enhancer"
+      "prompt": "Prompt Enhancer",
+      "vision": "Vision Assist"
     },
     "basic": {
       "workDir": "Working Directory",

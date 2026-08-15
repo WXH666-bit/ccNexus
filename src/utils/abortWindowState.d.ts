@@ -13,7 +13,7 @@ export interface QueuedChatMessage {
   id: string;
   text: string;
   timestamp: number;
-  attachments: { type: string; data: string }[];
+  attachments: { type: string; data: string; described?: boolean }[];
   reasoningEffort?: string;
   agent?: string;
   streaming?: boolean;
@@ -31,11 +31,11 @@ export function shouldQueueChatMessage(args: {
   stopping: AbortWindowState | null;
 }): boolean;
 export function createQueuedChatMessage(message: Omit<QueuedChatMessage, 'attachments'> & {
-  attachments?: { type: string; data: string }[];
+  attachments?: { type: string; data: string; described?: boolean }[];
 }): QueuedChatMessage;
 export function queuedChatMessageToSendArgs(message: QueuedChatMessage): [
   string,
-  { type: string; data: string }[],
+  { type: string; data: string; described?: boolean }[],
   false,
   string | undefined,
   string | undefined,

@@ -108,7 +108,8 @@
       "usage": "用量统计",
       "env": "环境变量",
       "appearance": "外观",
-      "prompt": "提示词增强"
+      "prompt": "提示词增强",
+      "vision": "视觉辅助"
     },
     "basic": {
       "closeBehavior": "\u5173\u95ed\u7a97\u53e3\u65f6",

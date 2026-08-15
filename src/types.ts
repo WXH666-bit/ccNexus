@@ -51,6 +51,7 @@ export interface ImageBlock {
   src: string;
   mediaType?: string;
   alt?: string;
+  described?: boolean;
 }
 
 export interface AttachmentBlock {

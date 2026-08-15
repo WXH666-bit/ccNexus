@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, RotateCcw } from 'lucide-react';
-import type { ChatMessage, ContentBlock, SubAgentInfo, ToolResultBlock, ToolUseBlock } from '../types';
+import type { ChatMessage, ContentBlock, ImageBlock, SubAgentInfo, ToolResultBlock, ToolUseBlock } from '../types';
 import EditToolBlock from './toolBlocks/EditToolBlock';
 import BashToolBlock from './toolBlocks/BashToolBlock';
 import ReadToolBlock from './toolBlocks/ReadToolBlock';
@@ -149,6 +149,7 @@ export default function MessageItem({
     const highlightedText = searchHighlight?.query
       ? highlightText(escapedText, searchHighlight.query, isCurrentSearchMatch)
       : escapedText;
+    const imageBlocks = message.content.filter((block): block is ImageBlock => block.type === 'image');
 
     return (
       <div className={`message-row user-row ${isCurrentSearchMatch ? 'search-match' : ''}`} id={`msg-${message.id}`}>
@@ -162,6 +163,12 @@ export default function MessageItem({
           <div className="message-bubble user-bubble">
             <span className="message-text user-message-text" dangerouslySetInnerHTML={{ __html: highlightedText }} />
           </div>
+          {imageBlocks.map((block, idx) => (
+            <button key={`img-${idx}`} type="button" className={`message-image-block${block.described ? ' described' : ''}`} onClick={() => window.open(block.src, '_blank')} title="Open image">
+              <img src={block.src} alt={block.alt || 'Uploaded image'} />
+              {block.described && <span className="image-described-badge">已转述</span>}
+            </button>
+          ))}
         </div>
         {onRewind && (
           <button className="rewind-btn" onClick={() => onRewind(message.id)} title="Rewind to this message">
@@ -302,8 +309,9 @@ export default function MessageItem({
 
           if (block.type === 'image') {
             return (
-              <button key={idx} type="button" className="message-image-block" onClick={() => window.open(block.src, '_blank')} title="Open image">
+              <button key={idx} type="button" className={`message-image-block${block.described ? ' described' : ''}`} onClick={() => window.open(block.src, '_blank')} title="Open image">
                 <img src={block.src} alt={block.alt || 'Uploaded image'} />
+                {block.described && <span className="image-described-badge">已转述</span>}
               </button>
             );
           }
