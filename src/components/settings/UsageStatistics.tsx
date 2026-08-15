@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { BarChart3, ChevronLeft, ChevronRight, Folder, FolderOpen, LayoutDashboard, List, Sparkles, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import RefreshIcon from '../RefreshIcon';
@@ -152,6 +152,35 @@ function dateKeyStart(dateKey: string) {
   return new Date(year, month - 1, day).getTime();
 }
 
+function buildTimelineSlots(dailyUsage: UsageDay[], range: DateRange): UsageDay[] {
+  const byDate = new Map(dailyUsage.map((day) => [day.date, day]));
+  const slotCount = range === '7d' ? 7 : range === 'today' ? 1 : 30;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const slots: UsageDay[] = [];
+  for (let i = slotCount - 1; i >= 0; i -= 1) {
+    const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    slots.push(byDate.get(key) ?? {
+      date: key,
+      sessions: 0,
+      requestCount: 0,
+      usage: { ...EMPTY_USAGE },
+      cost: 0,
+    });
+  }
+  return slots;
+}
+
+function niceCeil(value: number) {
+  if (value <= 0) return 0;
+  const base = 10 ** Math.floor(Math.log10(value));
+  for (const m of [1, 2, 5, 10]) {
+    if (value <= m * base) return m * base;
+  }
+  return 10 * base;
+}
+
 function calculateCacheHitRate(usage: UsageTotals) {
   const denominator = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
   return denominator > 0 ? (usage.cacheReadTokens / denominator) * 100 : 0;
@@ -171,6 +200,8 @@ export default function UsageStatistics() {
   const [dateRange, setDateRange] = useState<DateRange>('today');
   const [sessionSort, setSessionSort] = useState<'cost' | 'time'>('cost');
   const [sessionPage, setSessionPage] = useState(1);
+  const [hoveredDay, setHoveredDay] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const loadStatistics = useCallback(async () => {
     setLoading(true);
@@ -216,6 +247,9 @@ export default function UsageStatistics() {
     return summary;
   }, [statistics]);
 
+  const cacheWriteUnknown =
+    selectedUsage.cacheWriteTokens === 0 && selectedUsage.cacheReadTokens > 0;
+
   const conversationUsage = useMemo(() => (
     subtractUsage(
       statistics?.totalUsage || EMPTY_USAGE,
@@ -236,15 +270,24 @@ export default function UsageStatistics() {
         : right.timestamp - left.timestamp);
   }, [dateRange, sessionSort, statistics]);
 
-  const filteredDays = useMemo(() => {
-    const cutoff = dateRangeStart(dateRange);
-    return (statistics?.dailyUsage || []).filter(day => dateKeyStart(day.date) >= cutoff);
-  }, [dateRange, statistics]);
+  const timelineDays = useMemo(
+    () => buildTimelineSlots(statistics?.dailyUsage || [], dateRange),
+    [statistics, dateRange],
+  );
+  const maxDailyTokens = Math.max(...timelineDays.map((day) => day.usage.totalTokens), 0);
+  const axisMax = niceCeil(maxDailyTokens);
 
+  const dayFilteredSessions = selectedDay
+    ? filteredSessions.filter((session) => {
+        const dayStart = dateKeyStart(selectedDay);
+        return Number.isFinite(dayStart)
+          && session.timestamp >= dayStart
+          && session.timestamp < dayStart + 24 * 60 * 60 * 1000;
+      })
+    : filteredSessions;
   const pageSize = 12;
-  const totalPages = Math.max(1, Math.ceil(filteredSessions.length / pageSize));
-  const visibleSessions = filteredSessions.slice((sessionPage - 1) * pageSize, sessionPage * pageSize);
-  const maxDailyCost = Math.max(...filteredDays.map(day => day.cost), 0);
+  const totalPages = Math.max(1, Math.ceil(dayFilteredSessions.length / pageSize));
+  const visibleSessions = dayFilteredSessions.slice((sessionPage - 1) * pageSize, sessionPage * pageSize);
 
   useEffect(() => {
     setSessionPage(1);
@@ -325,7 +368,15 @@ export default function UsageStatistics() {
                 <div className="usage-today-breakdown">
                   <div className="usage-today-metric"><span>输入</span><strong>{formatTokens(selectedUsage.inputTokens)}</strong></div>
                   <div className="usage-today-metric"><span>输出</span><strong>{formatTokens(selectedUsage.outputTokens)}</strong></div>
-                  <div className="usage-today-metric"><span>缓存创建</span><strong>{formatTokens(selectedUsage.cacheWriteTokens)}</strong></div>
+                  <div className="usage-today-metric">
+                    <span>缓存创建</span>
+                    <strong
+                      className={cacheWriteUnknown ? 'usage-write-unknown' : undefined}
+                      title={cacheWriteUnknown ? '当前端点未报告缓存写入（新缓存计入输入）' : undefined}
+                    >
+                      {cacheWriteUnknown ? '—' : formatTokens(selectedUsage.cacheWriteTokens)}
+                    </strong>
+                  </div>
                   <div className="usage-today-metric"><span>缓存读取</span><strong>{formatTokens(selectedUsage.cacheReadTokens)}</strong></div>
                   <div className="usage-today-metric usage-today-cache">
                     <div><span>正常对话缓存命中率</span><strong>{cacheHitRate.toFixed(1)}%</strong></div>
@@ -345,12 +396,15 @@ export default function UsageStatistics() {
               </div>
               <div className="usage-token-breakdown">
                 {([
-                  ['输入', selectedUsage.inputTokens, 'input'],
-                  ['输出', selectedUsage.outputTokens, 'output'],
-                  ['缓存写入', selectedUsage.cacheWriteTokens, 'cache-write'],
-                  ['缓存读取', selectedUsage.cacheReadTokens, 'cache-read'],
-                ] as const).map(([label, value, className]) => (
-                  <div key={className} className="usage-token-row"><div><span>{label}</span><strong>{formatTokens(value)}</strong></div><div className="usage-token-track"><span className={className} style={{ width: `${selectedUsage.totalTokens ? Math.min(100, (value / selectedUsage.totalTokens) * 100) : 0}%` }} /></div></div>
+                  ['输入', selectedUsage.inputTokens, 'input', false],
+                  ['输出', selectedUsage.outputTokens, 'output', false],
+                  ['缓存写入', cacheWriteUnknown ? 0 : selectedUsage.cacheWriteTokens, 'cache-write', cacheWriteUnknown],
+                  ['缓存读取', selectedUsage.cacheReadTokens, 'cache-read', false],
+                ] as const).map(([label, value, className, unknown]) => (
+                  <div key={label} className={`usage-token-row${unknown ? ' muted' : ''}`}>
+                    <div><span>{label}</span><strong>{unknown ? '—' : formatTokens(value)}</strong></div>
+                    <div className="usage-token-track"><span className={className} style={{ width: `${selectedUsage.totalTokens ? Math.min(100, (value / selectedUsage.totalTokens) * 100) : 0}%` }} /></div>
+                  </div>
                 ))}
               </div>
               <div className="usage-period-summary"><span>本周 {formatTokens(periods.week.totalTokens)}</span><span>本月 {formatTokens(periods.month.totalTokens)}</span></div>
@@ -368,7 +422,7 @@ export default function UsageStatistics() {
 
           {activeTab === 'sessions' && (
             <div className="usage-session-list">
-              <div className="usage-list-toolbar"><span>{filteredSessions.length} 个会话</span><div><button className={sessionSort === 'cost' ? 'active' : ''} onClick={() => setSessionSort('cost')}>按费用</button><button className={sessionSort === 'time' ? 'active' : ''} onClick={() => setSessionSort('time')}>按时间</button></div></div>
+              <div className="usage-list-toolbar"><span>{dayFilteredSessions.length} 个会话</span>{selectedDay && <button type="button" className="usage-day-filter-chip" onClick={() => setSelectedDay(null)}>{selectedDay} ×</button>}<div><button className={sessionSort === 'cost' ? 'active' : ''} onClick={() => setSessionSort('cost')}>按费用</button><button className={sessionSort === 'time' ? 'active' : ''} onClick={() => setSessionSort('time')}>按时间</button></div></div>
               {visibleSessions.map(session => <div key={session.sessionId} className="usage-session-row"><div><strong>{session.summary || session.sessionId}</strong><span>{formatDate(session.timestamp)} · {session.model} · {formatTokens(session.usage.totalTokens)} tokens</span></div><strong>{formatCost(session.cost)}</strong></div>)}
               {visibleSessions.length === 0 && <div className="empty-state"><p>当前时间范围暂无会话</p></div>}
               {totalPages > 1 && <div className="usage-pagination"><button onClick={() => setSessionPage(page => Math.max(1, page - 1))} disabled={sessionPage === 1} title="上一页"><ChevronLeft size={16} /></button><span>{sessionPage} / {totalPages}</span><button onClick={() => setSessionPage(page => Math.min(totalPages, page + 1))} disabled={sessionPage === totalPages} title="下一页"><ChevronRight size={16} /></button></div>}
@@ -376,7 +430,97 @@ export default function UsageStatistics() {
           )}
 
           {activeTab === 'timeline' && (
-            <div className="usage-timeline"><div className="usage-timeline-bars">{filteredDays.map(day => <div key={day.date} className="usage-day-column" title={`${day.date} · ${formatCost(day.cost)} · ${day.sessions} 个会话`}><div className="usage-day-bar" style={{ height: `${maxDailyCost > 0 ? Math.max(3, (day.cost / maxDailyCost) * 100) : 3}%` }} /><span>{day.date.slice(5)}</span></div>)}</div>{filteredDays.length === 0 && <div className="empty-state"><p>当前时间范围暂无数据</p></div>}</div>
+            <div className="usage-timeline">
+              {timelineDays.length <= 1 && (
+                <div className="usage-timeline-hint">
+                  <span>今日仅 1 天数据，柱状图建议看趋势</span>
+                  <button type="button" onClick={() => setDateRange('7d')}>查看近 7 天 →</button>
+                </div>
+              )}
+              {maxDailyTokens === 0 ? (
+                <div className="empty-state"><p>当前时间范围暂无数据</p></div>
+              ) : (
+                <div className="usage-timeline-chart">
+                  <div className="usage-timeline-yaxis">
+                    <span>{formatTokens(axisMax)}</span>
+                    <span>{formatTokens(axisMax * 0.75)}</span>
+                    <span>{formatTokens(axisMax * 0.5)}</span>
+                    <span>{formatTokens(axisMax * 0.25)}</span>
+                    <span>0</span>
+                  </div>
+                  <div className="usage-timeline-bars">
+                    {[75, 50, 25].map((p) => (
+                      <div key={p} className="usage-gridline" style={{ bottom: `${p}%` }} />
+                    ))}
+                    {timelineDays.map((day, idx) => {
+                      const total = day.usage.totalTokens;
+                      const hasData = total > 0;
+                      const segments: [string, number][] = hasData
+                        ? ([
+                            ['cache-read', day.usage.cacheReadTokens],
+                            ['input', day.usage.inputTokens],
+                            ['output', day.usage.outputTokens],
+                            ['cache-write', day.usage.cacheWriteTokens],
+                          ] as [string, number][]).filter(([, v]) => v > 0)
+                        : [];
+                      const showLabel =
+                        timelineDays.length <= 7 || idx % 5 === 0 || idx === timelineDays.length - 1;
+                      const popoverStyle: CSSProperties | undefined =
+                        idx === 0
+                          ? { left: 0, transform: 'none' }
+                          : idx === timelineDays.length - 1
+                            ? { left: 'auto', right: 0, transform: 'none' }
+                            : undefined;
+                      return (
+                        <div
+                          key={day.date}
+                          className={`usage-day-column${hasData ? '' : ' empty'}${selectedDay === day.date ? ' selected' : ''}`}
+                          onMouseEnter={() => setHoveredDay(day.date)}
+                          onMouseLeave={() => setHoveredDay(null)}
+                          onClick={() => { setSelectedDay(day.date); setActiveTab('sessions'); }}
+                        >
+                          {hoveredDay === day.date && hasData && (
+                            <div className="usage-day-popover" style={popoverStyle}>
+                              <div className="usage-day-popover-date">{day.date}</div>
+                              <div className="usage-day-popover-row">
+                                <span className="dot total" />总 Tokens<strong>{formatTokens(total)}</strong>
+                              </div>
+                              <div className="usage-day-popover-row">
+                                <span className="dot cache-read" />缓存读取<strong>{formatTokens(day.usage.cacheReadTokens)}</strong>
+                              </div>
+                              <div className="usage-day-popover-row">
+                                <span className="dot input" />输入<strong>{formatTokens(day.usage.inputTokens)}</strong>
+                              </div>
+                              <div className="usage-day-popover-row">
+                                <span className="dot output" />输出<strong>{formatTokens(day.usage.outputTokens)}</strong>
+                              </div>
+                              <div className="usage-day-popover-meta">
+                                {formatCost(day.cost)} · {day.requestCount || 0} 次请求 · {day.sessions} 个会话
+                              </div>
+                            </div>
+                          )}
+                          <div
+                            className="usage-day-bar-stack"
+                            style={{ height: `${hasData ? Math.max(2, (total / axisMax) * 100) : 0}%`, animationDelay: `${idx * 12}ms` }}
+                          >
+                            {segments.map(([seg, v]) => (
+                              <div key={seg} className={`seg ${seg}`} style={{ flexGrow: v }} />
+                            ))}
+                          </div>
+                          {showLabel && <span className="usage-day-label">{day.date.slice(5)}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="usage-timeline-legend">
+                <span><i className="dot input" />输入</span>
+                <span><i className="dot output" />输出</span>
+                <span><i className="dot cache-read" />缓存读取</span>
+                <span className="usage-timeline-note">柱高按 tokens 口径 · 点击柱子查看当天会话</span>
+              </div>
+            </div>
           )}
 
           {statistics.lastUpdated && <div className="usage-last-updated">最后更新：{formatDate(statistics.lastUpdated)}</div>}
