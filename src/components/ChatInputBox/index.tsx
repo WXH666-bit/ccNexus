@@ -33,6 +33,7 @@ interface ChatInputBoxProps {
     streaming?: boolean,
     alwaysThinking?: boolean,
     modelOverride?: string,
+    displayText?: string,
   ) => void;
   onContextUsage?: (request: ContextUsageRequest) => void;
   onStop: () => void;
@@ -429,6 +430,7 @@ export default function ChatInputBox({
       streaming,
       alwaysThinking,
       applyLongContextSuffix(model === 'default' ? 'claude-sonnet-4-6' : model, longContextEnabled),
+      trimmed,
     );
     setText('');
     setAttachments([]);

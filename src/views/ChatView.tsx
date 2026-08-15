@@ -952,7 +952,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     navigate('/history');
   }, [currentSession, finishStreamingMessage, isStreaming, navigate, send]);
 
-  const handleSend = useCallback((text: string, attachments: { type: string; data: string; described?: boolean }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string) => {
+  const handleSend = useCallback((text: string, attachments: { type: string; data: string; described?: boolean }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string, displayText?: string) => {
     if (!text.trim() && attachments.length === 0) return;
 
     if (attachments.length === 0) {
@@ -983,6 +983,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         streaming,
         alwaysThinking,
         modelOverride,
+        displayText,
       });
       setMessageQueue(prev => [...prev, queuedMsg]);
       return;
@@ -1000,6 +1001,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         streaming,
         alwaysThinking,
         modelOverride,
+        displayText,
       });
       setMessageQueue(prev => [...prev, queuedMsg]);
       return;
@@ -1014,7 +1016,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     const userMsg: ChatMessage = {
       id: genId(),
       role: 'user',
-      content: [{ type: 'text', text: text.trim() }, ...imageBlocks],
+      content: [{ type: 'text', text: (displayText ?? text).trim() }, ...imageBlocks],
       timestamp: Date.now(),
       sessionId: currentSession?.id,
     };

@@ -19,6 +19,7 @@ export interface QueuedChatMessage {
   streaming?: boolean;
   alwaysThinking?: boolean;
   modelOverride?: string;
+  displayText?: string;
 }
 
 export function beginAbortWindow(sessionId?: string | null): AbortWindowState;
@@ -41,5 +42,6 @@ export function queuedChatMessageToSendArgs(message: QueuedChatMessage): [
   string | undefined,
   boolean | undefined,
   boolean | undefined,
+  string | undefined,
   string | undefined,
 ];

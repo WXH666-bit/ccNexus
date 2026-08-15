@@ -52,6 +52,7 @@ test('queued messages preserve every option needed to replay the original send',
     streaming: false,
     alwaysThinking: true,
     modelOverride: 'claude-opus-4-6[1m]',
+    displayText: 'inspect image (typed)',
   });
 
   assert.deepEqual(queuedChatMessageToSendArgs(queued), [
@@ -63,5 +64,6 @@ test('queued messages preserve every option needed to replay the original send',
     false,
     true,
     'claude-opus-4-6[1m]',
+    'inspect image (typed)',
   ]);
 });

@@ -28,6 +28,23 @@ const FILTERED_NORMALIZE_TAGS = [
   '<local-command-stderr>',
 ];
 
+// 段头格式必须与 src/utils/visionAssist.ts 的 buildDescriptionBlock 保持同步。
+const DESCRIBED_IMAGE_BLOCK_HEADER_REGEX = /^\[图片 \d+(?: · [^\]]+)?\]$/;
+
+function collapseDescribedImageBlocks(text) {
+  const kept = [];
+  let inDescribedBlock = false;
+  for (const line of text.split('\n')) {
+    if (DESCRIBED_IMAGE_BLOCK_HEADER_REGEX.test(line.trim())) {
+      inDescribedBlock = true;
+      kept.push(line.trim());
+      continue;
+    }
+    if (!inDescribedBlock) kept.push(line);
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
 function containsAnyTag(text, tags) {
   return tags.some((tag) => text.includes(tag));
 }
@@ -92,7 +109,7 @@ function normalizeTextBlock(text, isUserMessage) {
     return null;
   }
 
-  return textBlock(rawText);
+  return textBlock(isUserMessage ? collapseDescribedImageBlocks(rawText) : rawText);
 }
 
 function normalizeToolResultContent(content) {

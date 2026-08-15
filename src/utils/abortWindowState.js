@@ -26,6 +26,7 @@ export function createQueuedChatMessage(message) {
     streaming: message.streaming,
     alwaysThinking: message.alwaysThinking,
     modelOverride: message.modelOverride,
+    displayText: message.displayText,
   };
 }
 
@@ -39,5 +40,6 @@ export function queuedChatMessageToSendArgs(message) {
     message.streaming,
     message.alwaysThinking,
     message.modelOverride,
+    message.displayText,
   ];
 }
