@@ -1150,13 +1150,13 @@ test('daemon heartbeat and status do not touch runtime lastUsedAt', async () => 
   assert.equal(after.result.runtime.lastUsedAt, lastUsedAt);
 });
 
-test('daemon keeps a freshly rebuilt runtime when the daemon is older than six hours', async () => {
+test('daemon keeps a freshly rebuilt runtime when the daemon is older than eight hours', async () => {
   const clock = createControlledClock(0);
   const harness = createDaemonHarness({
     clock,
     turnGates: [Promise.resolve(), Promise.resolve()],
   });
-  const sixHours = DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS;
+  const eightHours = DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS;
 
   harness.send({
     id: 'fresh-runtime-first',
@@ -1165,7 +1165,7 @@ test('daemon keeps a freshly rebuilt runtime when the daemon is older than six h
   });
   await waitForDone(harness.state.messages, 'fresh-runtime-first');
 
-  clock.setNow(sixHours + 1);
+  clock.setNow(eightHours + 1);
   harness.send({
     id: 'fresh-runtime-rebuild',
     method: 'query',
@@ -1185,10 +1185,10 @@ test('daemon keeps a freshly rebuilt runtime when the daemon is older than six h
   const status = await waitForDone(harness.state.messages, 'fresh-runtime-status');
   assert.equal(status.result.retireAfterTurn, false);
   assert.equal(status.result.runtime.closed, false);
-  assert.equal(status.result.runtime.createdAt, sixHours + 1);
+  assert.equal(status.result.runtime.createdAt, eightHours + 1);
 });
 
-test('daemon retires a current runtime at six hours when no blocker is active', async () => {
+test('daemon retires a current runtime at eight hours when no blocker is active', async () => {
   const clock = createControlledClock(0);
   const harness = createDaemonHarness({ clock, turnGates: [Promise.resolve()] });
 
@@ -1211,7 +1211,7 @@ test('daemon retires a current runtime at six hours when no blocker is active', 
   )));
 });
 
-test('daemon defers current-runtime six-hour retirement until the active turn finishes', async () => {
+test('daemon defers current-runtime eight-hour retirement until the active turn finishes', async () => {
   let releaseTurn;
   const turnGate = new Promise(resolve => { releaseTurn = resolve; });
   const clock = createControlledClock(0);
@@ -1248,7 +1248,7 @@ test('daemon defers current-runtime six-hour retirement until the active turn fi
   assert.equal(harness.state.closeCalls, 1);
 });
 
-test('daemon refuses an absolute retirement RPC before the current lifecycle target reaches six hours', async () => {
+test('daemon refuses an absolute retirement RPC before the current lifecycle target reaches eight hours', async () => {
   const clock = createControlledClock(0);
   const harness = createDaemonHarness({ clock, turnGates: [Promise.resolve()] });
 

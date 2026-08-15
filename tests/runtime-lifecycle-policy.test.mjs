@@ -10,7 +10,7 @@ import {
   isRuntimeRetirementBlocked,
 } from '../desktop/runtime/runtimeLifecyclePolicy.js';
 
-test('runtime retirement policy uses 30 minute idle and 6 hour absolute limits', () => {
+test('runtime retirement policy uses 2 hour idle and 8 hour absolute limits', () => {
   const startedAt = 1_000;
   const lastUsedAt = startedAt + 10;
 

@@ -270,9 +270,9 @@ test('host interrupt during retry acquisition does not shut down a shared replac
   await exerciseSharedAcquisitionCancellation('interrupt');
 });
 
-test('host does not retire before 30 minutes and retires at the boundary', async () => {
+test('host does not retire before 2 hours and retires at the boundary', async () => {
   resetFakes();
-  let now = 30 * 60 * 1000 - 1;
+  let now = 2 * 60 * 60 * 1000 - 1;
   const runtime = createDesktopRuntime({
     bridgeFactory: options => new FakeBridge(options),
     now: () => now,
@@ -290,7 +290,7 @@ test('host does not retire before 30 minutes and retires at the boundary', async
 
 test('host lifecycle scan forwards status timestamps without touching runtime activity', async () => {
   resetFakes();
-  const now = 30 * 60 * 1000;
+  const now = 2 * 60 * 60 * 1000;
   const runtime = createDesktopRuntime({
     bridgeFactory: options => new FakeBridge({
       ...options,
@@ -327,7 +327,7 @@ test('host lifecycle scan forwards status timestamps without touching runtime ac
 
 test('host empty-idle scan builds a daemon-only observation without runtime activity', async () => {
   resetFakes();
-  const now = 30 * 60 * 1000;
+  const now = 2 * 60 * 60 * 1000;
   const runtime = createDesktopRuntime({
     bridgeFactory: options => new FakeBridge({
       ...options,
@@ -360,10 +360,10 @@ test('host empty-idle scan builds a daemon-only observation without runtime acti
   await runtime.shutdown();
 });
 
-test('host waits for active six-hour daemon retirement before creating a new generation', async () => {
+test('host waits for active eight-hour daemon retirement before creating a new generation', async () => {
   resetFakes();
-  const sixHours = 6 * 60 * 60 * 1000;
-  let now = sixHours;
+  const eightHours = 8 * 60 * 60 * 1000;
+  let now = eightHours;
   const runtime = createDesktopRuntime({
     bridgeFactory: options => new FakeBridge({
       ...options,
@@ -414,7 +414,7 @@ test('host waits for active six-hour daemon retirement before creating a new gen
 
 test('host keeps accepted retirement waits independent across sessions', async () => {
   resetFakes();
-  const sixHours = 6 * 60 * 60 * 1000;
+  const eightHours = 8 * 60 * 60 * 1000;
   let runtime;
   let oldBridge;
   let aAcquisition;
@@ -447,7 +447,7 @@ test('host keeps accepted retirement waits independent across sessions', async (
   try {
     runtime.ensureSessionDaemon({ sessionId: 'session-a', title: 'Session A' });
     oldBridge = FakeBridge.instances[0];
-    await runtime.scanRuntimeLifecycle(sixHours);
+    await runtime.scanRuntimeLifecycle(eightHours);
 
     assert.deepEqual(oldBridge.retireCalls, ['absolute-lifetime']);
     assert.equal(oldBridge.lifecycleState, 'retiring');
@@ -517,7 +517,7 @@ test('host keeps accepted retirement waits independent across sessions', async (
 
 test('host keeps a bridge running when daemon refuses a stale idle retirement after work resumes', async () => {
   resetFakes();
-  const now = 30 * 60 * 1000;
+  const now = 2 * 60 * 60 * 1000;
   let workStarted = false;
   FakeBridge.retireBehavior = (bridge) => {
     workStarted = true;
@@ -879,7 +879,7 @@ test('host records retirement under the bridge owner after adoption overlaps the
   runtime.ensureSessionDaemon({ sessionId: 'pending-session', title: 'Pending' });
   const bridge = FakeBridge.instances[0];
 
-  const scanPromise = runtime.scanRuntimeLifecycle(30 * 60 * 1000);
+  const scanPromise = runtime.scanRuntimeLifecycle(2 * 60 * 60 * 1000);
   await waitForCondition(() => bridge.retireCalls.length === 1);
   runtime.adoptSessionDaemon({
     fromSessionId: 'pending-session',
@@ -913,7 +913,7 @@ test('host does not reinsert a retiring wait after the bridge exits before the r
   runtime.ensureSessionDaemon({ sessionId: 'early-exit-session', title: 'Early exit' });
   const oldBridge = FakeBridge.instances[0];
 
-  const scanPromise = runtime.scanRuntimeLifecycle(30 * 60 * 1000);
+  const scanPromise = runtime.scanRuntimeLifecycle(2 * 60 * 60 * 1000);
   await waitForCondition(() => oldBridge.retireCalls.length === 1);
   oldBridge.emitExit();
   releaseRetire({
@@ -969,13 +969,13 @@ test('host refusal from an old bridge preserves a newer bridge retirement reason
   });
   runtime.ensureSessionDaemon({ sessionId: 'old-session', title: 'Old' });
 
-  const oldScan = runtime.scanRuntimeLifecycle(6 * 60 * 60 * 1000);
+  const oldScan = runtime.scanRuntimeLifecycle(8 * 60 * 60 * 1000);
   await waitForCondition(() => oldBridge?.retireCalls.length === 1);
   runtime.removeSessionDaemon('old-session');
 
   runtime.ensureSessionDaemon({ sessionId: 'new-session', title: 'New' });
   const newBridge = FakeBridge.instances[1];
-  await runtime.scanRuntimeLifecycle(6 * 60 * 60 * 1000);
+  await runtime.scanRuntimeLifecycle(8 * 60 * 60 * 1000);
   runtime.adoptSessionDaemon({
     fromSessionId: 'new-session',
     toSessionId: 'old-session',
