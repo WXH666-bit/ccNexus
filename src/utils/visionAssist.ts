@@ -84,7 +84,8 @@ export async function describeImage(config: VisionAssistConfig, dataUrl: string,
 
 /** 测试连接：用 1x1 PNG 发一次最小请求 */
 export async function testVisionConnection(config: VisionAssistConfig): Promise<void> {
-  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  // 用一张 64x64 的纯色 PNG 做连通性测试（1x1 会被部分视觉模型以「尺寸不满足最小边长」拒绝）。
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAl0lEQVR4nO3QMREAIBDAsNeGNxyzg4wMdMje66x97s9GB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoDVAB2gN0AFaA3SA1gAdoD0xn6KG7fvLKAAAAABJRU5ErkJggg==';
   await describeImage({ ...config, prompt: '这是一个连通性测试，请直接回复 ok' }, png);
 }
 
