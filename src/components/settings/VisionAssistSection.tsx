@@ -121,7 +121,7 @@ export default function VisionAssistSection() {
 
           <div className="setting-group">
             <p className="setting-help">
-              💡 视觉转述仅在本机进行，不会重建对话查询，也不影响缓存前缀稳定性；带图消息文本更长，该轮缓存命中率可能略降，属正常现象。
+              💡 视觉转述仅在本机进行，不重建对话查询、不影响缓存前缀；转述会让带图消息的文本变长，属正常现象。
             </p>
           </div>
         </>
