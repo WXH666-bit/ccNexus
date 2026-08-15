@@ -483,16 +483,23 @@ export default function ChatInputBox({
           <button type="button" className="ghost" onClick={() => {
             setVisionState({ status: 'idle', done: 0, total: 0, message: '' });
             const trimmed = text.trim();
+            const fileAttachments = attachments
+              .filter(a => a.type === 'file')
+              .map(a => ({ ...a, described: true }));
+            const finalText = fileAttachments.length > 0
+              ? `${trimmed}\n\n${fileAttachments.map(a => `[文件 ${a.name}]\n${a.data}`).join('\n\n')}`
+              : trimmed;
             recordInputHistory(text);
             onSend(
-              trimmed,
-              [],
+              finalText,
+              fileAttachments.map(attachment => ({ type: attachment.type, data: attachment.data, described: attachment.described, name: attachment.name, mediaType: attachment.mediaType })),
               false,
               reasoning,
               selectedAgent,
               streaming,
               alwaysThinking,
               applyLongContextSuffix(model === 'default' ? 'claude-sonnet-4-6' : model, longContextEnabled),
+              trimmed,
             );
             setText('');
             setAttachments([]);
