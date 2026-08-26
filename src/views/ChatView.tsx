@@ -60,6 +60,8 @@ interface ChatViewProps {
   routeSessionId?: string;
 }
 
+type ChatDispatchResult = 'sent' | 'queued' | 'ignored';
+
 let msgIdCounter = 0;
 function genId() { return `msg-${Date.now()}-${++msgIdCounter}`; }
 
@@ -210,6 +212,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     return saved === 'true';
   });
   const [webResearchAgentItems, setWebResearchAgentItems] = useState<WebResearchAgentItem[]>([]);
+  const webResearchDecisionLocksRef = useRef(new Set<string>());
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => (
     localStorage.getItem('codexSidebarCollapsed') === 'true'
   ));
@@ -538,6 +541,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     setStatus({});
     setRuntimeLifecycle(null);
     setWebResearchAgentItems([]);
+    webResearchDecisionLocksRef.current.clear();
   }, []);
 
   const applySessionHistory = useCallback((history: { sessionId: string; messages: ChatMessage[] }) => {
@@ -1125,22 +1129,22 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     });
   }, []);
 
-  const handleSend = useCallback((text: string, attachments: { type: string; data: string; described?: boolean; name?: string; mediaType?: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string, displayText?: string, uiVisibility: 'visible' | 'hidden' = 'visible') => {
-    if (!text.trim() && attachments.length === 0) return;
+  const handleSend = useCallback((text: string, attachments: { type: string; data: string; described?: boolean; name?: string; mediaType?: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string, displayText?: string, uiVisibility: 'visible' | 'hidden' = 'visible'): ChatDispatchResult => {
+    if (!text.trim() && attachments.length === 0) return 'ignored';
 
     if (attachments.length === 0) {
       const command = text.trim().split(/\s+/)[0]?.toLowerCase();
       if (NEW_SESSION_COMMANDS.has(command)) {
         handleNewSession();
-        return;
+        return 'ignored';
       }
       if (RESUME_COMMANDS.has(command)) {
         handleOpenHistory();
-        return;
+        return 'ignored';
       }
       if (command === '/plan') {
         setMode('plan');
-        return;
+        return 'ignored';
       }
     }
 
@@ -1160,7 +1164,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         uiVisibility,
       });
       setMessageQueue(prev => [...prev, queuedMsg]);
-      return;
+      return 'queued';
     }
 
     // If AI is streaming but not queued, still add to queue
@@ -1179,7 +1183,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         uiVisibility,
       });
       setMessageQueue(prev => [...prev, queuedMsg]);
-      return;
+      return 'queued';
     }
 
     const imageBlocks: ImageBlock[] = attachments
@@ -1240,6 +1244,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         alwaysThinking,
       },
     });
+    return 'sent';
   }, [beginSessionTransition, currentSession, finishStreamingMessage, handleNewSession, handleOpenHistory, isStreaming, mode, model, navigate, reasoning, send, setMode, stopping]);
 
   // Process message queue when streaming completes
@@ -1304,7 +1309,8 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, [send]);
 
   const handleWebResearchDecision = useCallback((requestId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
-    const pendingItem = webResearchAgentItems.find(item => item.requestId === requestId);
+    const pendingItem = webResearchAgentItems.find(item => item.requestId === requestId && item.status === 'pending');
+    if (!pendingItem || webResearchDecisionLocksRef.current.has(requestId)) return;
     if (pendingItem?.autoAllowAt && Date.now() >= pendingItem.autoAllowAt) {
       setWebResearchAgentItems(current => current.map(item => (
         item.requestId === requestId
@@ -1313,6 +1319,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       )));
       return;
     }
+    webResearchDecisionLocksRef.current.add(requestId);
     send({
       type: 'permission_response',
       requestId,
@@ -1332,6 +1339,16 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         : item
     )));
   }, [send, webResearchAgentItems]);
+
+  useEffect(() => {
+    const activeRequestIds = new Set(webResearchAgentItems
+      .filter(item => item.status === 'pending' || item.status === 'searching')
+      .map(item => item.requestId)
+      .filter((requestId): requestId is string => Boolean(requestId)));
+    for (const requestId of webResearchDecisionLocksRef.current) {
+      if (!activeRequestIds.has(requestId)) webResearchDecisionLocksRef.current.delete(requestId);
+    }
+  }, [webResearchAgentItems]);
 
   useEffect(() => {
     const nextDeadline = webResearchAgentItems
@@ -1406,7 +1423,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, [handleWorkspaceChanged]);
 
   const handleSendResearch = useCallback((prompt: string, displayText: string) => {
-    handleSend(
+    return handleSend(
       prompt,
       [],
       false,

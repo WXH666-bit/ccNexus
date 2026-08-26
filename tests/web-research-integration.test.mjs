@@ -70,6 +70,48 @@ test('selected research evidence is an internal continuation and stays out of ch
   assert.match(history, /<ccnexus-internal-web-research>/);
 });
 
+test('research handoff is a one-shot decision with retry, reject, and queue feedback', () => {
+  const panel = read('src/components/WebResearchPanel.tsx');
+  const chatView = read('src/views/ChatView.tsx');
+
+  assert.match(panel, /status: 'sent' \| 'queued' \| 'rejected'/);
+  assert.match(panel, /researchDecisionRef\.current\?\.responseId === responseId/);
+  assert.match(panel, /outcome === 'queued'/);
+  assert.match(panel, /已加入 Agent 队列/);
+  assert.match(panel, /已交给 Agent/);
+  assert.match(panel, /拒绝/);
+  assert.match(panel, /重新搜索/);
+  assert.match(panel, /disabled=\{!selectedResults\.length \|\| decisionLocked\}/);
+  assert.match(panel, /setSelectedUrls\(new Set\(\)\)/);
+  assert.match(chatView, /return 'queued'/);
+  assert.match(chatView, /return 'sent'/);
+});
+
+test('research provider and unreadable-source failures use user-facing language', () => {
+  const main = read('desktop/main.js');
+  const panel = read('src/components/WebResearchPanel.tsx');
+
+  assert.match(main, /provider\.id === 'auto' \? '自动选择'/);
+  assert.match(panel, /自动选择可用搜索源，失败时回退到下一个搜索源/);
+  assert.match(panel, /该网站拒绝了正文读取（HTTP/);
+  assert.match(panel, /搜索摘要仍可使用/);
+  assert.match(panel, /contentErrorsByUrl/);
+  assert.match(panel, /重试读取/);
+  assert.match(panel, /浏览器打开/);
+  assert.doesNotMatch(panel, /setError\(fetchError instanceof Error/);
+  assert.match(panel, /setError\(webResearchErrorLabel\(searchError, 'search'\)\)/);
+  assert.match(panel, /webResearchErrorLabel\(item\.error, item\.toolName === 'WebFetch' \? 'content' : 'search'\)/);
+  assert.doesNotMatch(panel, /research-agent-error">\{item\.error\}/);
+});
+
+test('agent web approval decisions cannot be submitted twice', () => {
+  const chatView = read('src/views/ChatView.tsx');
+  assert.match(chatView, /webResearchDecisionLocksRef = useRef\(new Set<string>\(\)\)/);
+  assert.match(chatView, /webResearchDecisionLocksRef\.current\.has\(requestId\)/);
+  assert.match(chatView, /webResearchDecisionLocksRef\.current\.add\(requestId\)/);
+  assert.match(chatView, /item\.requestId === requestId && item\.status === 'pending'/);
+});
+
 test('research prompt is deterministic and keeps citations in source order', () => {
   const panel = read('src/components/WebResearchPanel.tsx');
   const builderStart = panel.indexOf('function buildResearchPrompt(');

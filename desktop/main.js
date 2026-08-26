@@ -273,7 +273,7 @@ function normalizeWebResearchState(state = {}) {
     ...state,
     providers: (state.providers || []).map(provider => ({
       ...provider,
-      label: provider.id === 'auto' ? '自动' : provider.label,
+      label: provider.id === 'auto' ? '自动选择' : provider.label,
     })),
     activity: (state.activity || []).map(normalizeWebResearchActivity),
   };

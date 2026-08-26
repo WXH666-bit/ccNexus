@@ -201,6 +201,29 @@ test('validates every redirect and enforces readable extraction and pagination',
   assert.equal(page.hasMore, true);
 });
 
+test('an HTTP 403 content response remains a source-level failure and is never cached', async () => {
+  const service = createWebResearchService({
+    dns: { async lookup() { return [{ address: '93.184.216.34', family: 4 }]; } },
+    fetch: async () => textResponse('Forbidden', {
+      status: 403,
+      headers: { 'content-type': 'text/plain' },
+    }),
+  });
+
+  await assert.rejects(
+    service.fetchContent({ url: 'https://example.com/protected', mode: 'readable' }),
+    error => {
+      assert.equal(error.status, 403);
+      assert.match(error.message, /Web content returned HTTP 403/);
+      return true;
+    },
+  );
+  assert.equal(service.getState().cache.entries, 0);
+  const activity = service.getActivities(1)[0];
+  assert.equal(activity.status, 'error');
+  assert.match(activity.error, /HTTP 403/);
+});
+
 test('returns cache hits and keeps the cache bounded', async () => {
   let calls = 0;
   let now = 1000;

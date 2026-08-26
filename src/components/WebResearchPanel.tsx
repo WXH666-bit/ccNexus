@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -42,9 +43,15 @@ interface Props {
   scopeKey: string;
   agentItems?: WebResearchAgentItem[];
   onOpenChange: (open: boolean) => void;
-  onSendToChat: (prompt: string, displayText: string) => void;
+  onSendToChat: (prompt: string, displayText: string) => 'sent' | 'queued' | 'ignored' | void;
   onAgentDecision?: (requestId: string, behavior: 'allow' | 'deny' | 'always_allow') => void;
 }
+
+type ResearchDecision = {
+  responseId: string;
+  status: 'sent' | 'queued' | 'rejected';
+  selectedCount: number;
+};
 
 const RECENCY_OPTIONS: Array<{ value: '' | WebResearchRecency; label: string }> = [
   { value: '', label: '不限时间' },
@@ -101,7 +108,38 @@ function agentStatusLabel(item: WebResearchAgentItem, now: number) {
   }
   if (item.status === 'completed') return item.results?.length ? `已返回 ${item.results.length} 个来源` : '已完成';
   if (item.status === 'denied') return '已拒绝';
-  return item.error || '请求失败';
+  if (item.status === 'error') return item.toolName === 'WebFetch' ? '正文读取失败' : '网络搜索失败';
+  return '请求失败';
+}
+
+function webResearchErrorLabel(error: unknown, kind: 'search' | 'content') {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const status = message.match(/HTTP\s+(\d{3})/iu)?.[1];
+  if (kind === 'search') {
+    if (/not configured/iu.test(message)) {
+      return '当前搜索源尚未配置。请切换到“自动选择”，或先完成对应搜索服务的配置。';
+    }
+    if (status === '401' || status === '403') {
+      return `搜索服务拒绝了请求（HTTP ${status}）。请切换搜索源，或检查对应服务配置。`;
+    }
+    if (status === '429') {
+      return '搜索服务暂时限制了请求频率（HTTP 429）。请稍后重试或切换搜索源。';
+    }
+    if (/timed out|timeout/iu.test(message)) {
+      return '连接搜索服务超时。请稍后重试或切换搜索源。';
+    }
+    return '暂时无法完成网页搜索。请重试或切换搜索源。';
+  }
+  if (status === '401' || status === '403') {
+    return `该网站拒绝了正文读取（HTTP ${status}）。搜索摘要仍可使用，也可以在浏览器中打开原文。`;
+  }
+  if (status === '429') {
+    return '该网站暂时限制了读取频率（HTTP 429）。搜索摘要仍可使用，稍后可重新尝试。';
+  }
+  if (/timed out|timeout/iu.test(message)) {
+    return '读取正文超时。搜索摘要仍可使用，也可以在浏览器中打开原文。';
+  }
+  return '暂时无法自动读取正文。搜索摘要仍可使用，也可以在浏览器中打开原文。';
 }
 
 const INTERNAL_WEB_RESEARCH_TAG = 'ccnexus-internal-web-research';
@@ -162,13 +200,16 @@ export default function WebResearchPanel({
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(() => new Set());
   const [activeResult, setActiveResult] = useState<WebResearchResult | null>(null);
   const [contentByUrl, setContentByUrl] = useState<Record<string, WebResearchContentResponse>>({});
+  const [contentErrorsByUrl, setContentErrorsByUrl] = useState<Record<string, string>>({});
   const [loadingContentUrl, setLoadingContentUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [researchDecision, setResearchDecision] = useState<ResearchDecision | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const activeRequestRef = useRef<string | null>(null);
   const appliedAgentResultRef = useRef('');
+  const researchDecisionRef = useRef<ResearchDecision | null>(null);
   const agentItemsRef = useRef(agentItems);
   agentItemsRef.current = agentItems;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -215,6 +256,9 @@ export default function WebResearchPanel({
     setSelectedUrls(new Set());
     setActiveResult(null);
     setContentByUrl({});
+    setContentErrorsByUrl({});
+    researchDecisionRef.current = null;
+    setResearchDecision(null);
     setError('');
   }, [cancelActive, scopeKey]);
 
@@ -292,6 +336,10 @@ export default function WebResearchPanel({
     });
     setSelectedUrls(new Set(results.map(item => item.url)));
     setActiveResult(null);
+    setContentByUrl({});
+    setContentErrorsByUrl({});
+    researchDecisionRef.current = null;
+    setResearchDecision(null);
     setShowActivity(false);
     setError('');
   }, [agentItems]);
@@ -308,6 +356,9 @@ export default function WebResearchPanel({
     setSelectedUrls(new Set());
     setActiveResult(null);
     setContentByUrl({});
+    setContentErrorsByUrl({});
+    researchDecisionRef.current = null;
+    setResearchDecision(null);
     try {
       const result = await searchWeb({
         requestId: id,
@@ -325,7 +376,7 @@ export default function WebResearchPanel({
       setSelectedUrls(new Set(result.results.map(item => item.url)));
     } catch (searchError) {
       if (activeRequestRef.current !== id) return;
-      setError(searchError instanceof Error ? searchError.message : String(searchError));
+      setError(webResearchErrorLabel(searchError, 'search'));
     } finally {
       if (activeRequestRef.current === id) {
         activeRequestRef.current = null;
@@ -337,9 +388,14 @@ export default function WebResearchPanel({
 
   const previewResult = useCallback(async (result: WebResearchResult) => {
     setActiveResult(result);
-    setError('');
     cancelActive();
     if (contentByUrl[result.url]) return;
+    setContentErrorsByUrl(current => {
+      if (!current[result.url]) return current;
+      const next = { ...current };
+      delete next[result.url];
+      return next;
+    });
     const id = requestId('web-fetch');
     activeRequestRef.current = id;
     setLoadingContentUrl(result.url);
@@ -349,7 +405,10 @@ export default function WebResearchPanel({
       setContentByUrl(current => ({ ...current, [result.url]: content }));
     } catch (fetchError) {
       if (activeRequestRef.current !== id) return;
-      setError(fetchError instanceof Error ? fetchError.message : String(fetchError));
+      setContentErrorsByUrl(current => ({
+        ...current,
+        [result.url]: webResearchErrorLabel(fetchError, 'content'),
+      }));
     } finally {
       if (activeRequestRef.current === id) {
         activeRequestRef.current = null;
@@ -360,20 +419,54 @@ export default function WebResearchPanel({
   }, [cancelActive, contentByUrl, refreshState]);
 
   const toggleSelected = useCallback((url: string) => {
+    if (researchDecisionRef.current?.responseId === response?.responseId) return;
     setSelectedUrls(current => {
       const next = new Set(current);
       if (next.has(url)) next.delete(url);
       else next.add(url);
       return next;
     });
-  }, []);
+  }, [response?.responseId]);
 
   const sendSelected = useCallback(() => {
     const searchedQuery = response?.query?.trim();
-    if (!selectedResults.length || !searchedQuery) return;
+    const responseId = response?.responseId;
+    if (!selectedResults.length || !searchedQuery || !responseId) return;
+    if (researchDecisionRef.current?.responseId === responseId) return;
+    const provisionalDecision: ResearchDecision = {
+      responseId,
+      status: 'sent',
+      selectedCount: selectedResults.length,
+    };
+    researchDecisionRef.current = provisionalDecision;
+    setResearchDecision(provisionalDecision);
     const prompt = buildResearchPrompt(searchedQuery, selectedResults, contentByUrl);
-    onSendToChat(prompt, `网页研究 · ${searchedQuery}`);
-  }, [contentByUrl, onSendToChat, response?.query, selectedResults]);
+    const outcome = onSendToChat(prompt, `网页研究 · ${searchedQuery}`);
+    if (outcome === 'ignored') {
+      researchDecisionRef.current = null;
+      setResearchDecision(null);
+      setError('Agent 当前无法接收这批资料，请稍后重试。');
+      return;
+    }
+    if (outcome === 'queued') {
+      const queuedDecision = { ...provisionalDecision, status: 'queued' as const };
+      researchDecisionRef.current = queuedDecision;
+      setResearchDecision(queuedDecision);
+    }
+  }, [contentByUrl, onSendToChat, response?.query, response?.responseId, selectedResults]);
+
+  const rejectResearch = useCallback(() => {
+    const responseId = response?.responseId;
+    if (!responseId || researchDecisionRef.current?.responseId === responseId) return;
+    const decision: ResearchDecision = {
+      responseId,
+      status: 'rejected',
+      selectedCount: selectedResults.length,
+    };
+    researchDecisionRef.current = decision;
+    setResearchDecision(decision);
+    setSelectedUrls(new Set());
+  }, [response?.responseId, selectedResults.length]);
 
   const copyCitations = useCallback(async () => {
     if (!selectedResults.length) return;
@@ -411,6 +504,9 @@ export default function WebResearchPanel({
   }
 
   const activeContent = activeResult ? contentByUrl[activeResult.url] : undefined;
+  const activeContentError = activeResult ? contentErrorsByUrl[activeResult.url] : undefined;
+  const activeDecision = researchDecision?.responseId === response?.responseId ? researchDecision : null;
+  const decisionLocked = activeDecision !== null;
 
   return (
     <aside className={`web-research-panel is-open ${embedded ? 'is-embedded' : ''}`} aria-label="网页研究">
@@ -463,9 +559,14 @@ export default function WebResearchPanel({
         <div className="research-search-controls">
           <label className="research-provider-select">
             <Sparkles size={13} />
-            <select value={provider} onChange={event => setProvider(event.target.value)} aria-label="搜索提供商">
+            <select
+              value={provider}
+              onChange={event => setProvider(event.target.value)}
+              aria-label="搜索提供商"
+              title={provider === 'auto' ? '自动选择可用搜索源，失败时回退到下一个搜索源' : `使用 ${providers.find(item => item.id === provider)?.label || provider} 搜索`}
+            >
               {providers.filter(item => item.available).map(item => (
-                <option key={item.id} value={item.id}>{item.label}</option>
+                <option key={item.id} value={item.id}>{item.id === 'auto' ? '自动选择' : item.label}</option>
               ))}
             </select>
             <ChevronDown size={12} />
@@ -533,7 +634,11 @@ export default function WebResearchPanel({
                   {item.toolName === 'WebFetch' && item.status === 'completed' && item.content && (
                     <pre className="research-agent-content">{item.content.slice(0, 1600)}</pre>
                   )}
-                  {item.status === 'error' && item.error && <span className="research-agent-error">{item.error}</span>}
+                  {item.status === 'error' && item.error && (
+                    <span className="research-agent-error">
+                      {webResearchErrorLabel(item.error, item.toolName === 'WebFetch' ? 'content' : 'search')}
+                    </span>
+                  )}
                 </div>
               </article>
             ))}
@@ -574,10 +679,9 @@ export default function WebResearchPanel({
               {loadingContentUrl === activeResult.url && (
                 <button type="button" onClick={cancelActive} title="停止读取正文" aria-label="停止读取正文"><Square size={13} fill="currentColor" /></button>
               )}
-              <button type="button" onClick={() => toggleSelected(activeResult.url)} className={selectedUrls.has(activeResult.url) ? 'active' : ''} title="选择来源" aria-label="选择来源" aria-pressed={selectedUrls.has(activeResult.url)}><Check size={15} /></button>
+              <button type="button" onClick={() => toggleSelected(activeResult.url)} className={selectedUrls.has(activeResult.url) ? 'active' : ''} title={decisionLocked ? '本轮研究已经处理' : '选择来源'} aria-label="选择来源" aria-pressed={selectedUrls.has(activeResult.url)} disabled={decisionLocked}><Check size={15} /></button>
             </div>
           </div>
-          {error && <div className="research-error" role="alert"><X size={14} /><span>{error}</span></div>}
           <article className="research-preview-content">
             <div className="research-preview-source">{sourceHost(activeResult.url)}</div>
             <h3>{activeResult.title}</h3>
@@ -592,6 +696,19 @@ export default function WebResearchPanel({
                 </div>
                 <pre>{activeContent.content}</pre>
               </>
+            ) : activeContentError ? (
+              <div className="research-content-fallback" role="status">
+                <ShieldX size={16} />
+                <div>
+                  <strong>无法自动读取正文</strong>
+                  <p>{activeContentError}</p>
+                  {activeResult.snippet && <blockquote>{activeResult.snippet}</blockquote>}
+                  <div>
+                    <button type="button" onClick={() => { void previewResult(activeResult); }}><RotateCcw size={13} />重试读取</button>
+                    <button type="button" onClick={() => { void openWebSource(activeResult.url); }}><ArrowUpRight size={13} />浏览器打开</button>
+                  </div>
+                </div>
+              </div>
             ) : (
               <p>{activeResult.snippet || '未能提取正文。'}</p>
             )}
@@ -633,7 +750,7 @@ export default function WebResearchPanel({
                     const selected = selectedUrls.has(result.url);
                     return (
                       <article key={`${result.url}-${index}`} className={`research-result-row ${selected ? 'is-selected' : ''}`}>
-                        <button type="button" className="research-result-check" onClick={() => toggleSelected(result.url)} aria-label={selected ? '取消选择来源' : '选择来源'} aria-pressed={selected}>
+                        <button type="button" className="research-result-check" onClick={() => toggleSelected(result.url)} aria-label={selected ? '取消选择来源' : '选择来源'} aria-pressed={selected} disabled={decisionLocked}>
                           {selected && <Check size={12} />}
                         </button>
                         <button type="button" className="research-result-main" onClick={() => { void previewResult(result); }}>
@@ -653,15 +770,31 @@ export default function WebResearchPanel({
       )}
 
       {!showActivity && response && response.results.length > 0 && !activeResult && (
-        <div className="research-action-bar">
-          <span>{selectedResults.length} 个已选</span>
-          <div>
+        <div className={`research-action-bar ${activeDecision ? `is-${activeDecision.status}` : ''}`}>
+          <div className="research-action-summary" role="status" aria-live="polite">
+            {activeDecision ? (
+              <>
+                {activeDecision.status === 'rejected' ? <X size={14} /> : <Check size={14} />}
+                <span>
+                  <strong>{activeDecision.status === 'queued' ? '已加入 Agent 队列' : activeDecision.status === 'sent' ? '已交给 Agent' : '已拒绝本轮资料'}</strong>
+                  <small>{activeDecision.status === 'queued' ? '当前回答结束后继续' : activeDecision.status === 'sent' ? `${activeDecision.selectedCount} 个来源正在处理` : '不会发送给 Agent'}</small>
+                </span>
+              </>
+            ) : <span>{selectedResults.length} 个已选</span>}
+          </div>
+          <div className="research-action-buttons">
             <button type="button" onClick={() => { void copyCitations(); }} disabled={!selectedResults.length} title="复制引用" aria-label="复制引用">
               {copied ? <Check size={14} /> : <Clipboard size={14} />}
             </button>
-            <button type="button" className="research-send-button" onClick={sendSelected} disabled={!selectedResults.length}>
-              <Send size={14} />
-              交给 Agent
+            <button type="button" className="research-reject-button" onClick={rejectResearch} disabled={decisionLocked}>
+              <X size={13} />拒绝
+            </button>
+            <button type="button" className="research-retry-button" onClick={() => { void performSearch(); }} disabled={loading}>
+              <RotateCcw size={13} />重新搜索
+            </button>
+            <button type="button" className={`research-send-button ${activeDecision ? 'is-complete' : ''}`} onClick={sendSelected} disabled={!selectedResults.length || decisionLocked}>
+              {activeDecision?.status === 'rejected' ? <X size={14} /> : activeDecision ? <Check size={14} /> : <Send size={14} />}
+              {activeDecision?.status === 'queued' ? '已排队' : activeDecision?.status === 'sent' ? '已交给 Agent' : activeDecision?.status === 'rejected' ? '已拒绝' : '交给 Agent'}
             </button>
           </div>
         </div>
