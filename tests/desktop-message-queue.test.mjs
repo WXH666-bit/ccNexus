@@ -59,6 +59,7 @@ test('marks terminal and blocking events as priority while coalescing stream del
   assert.equal(isPriorityDesktopMessage({ type: 'assistant' }), true);
   assert.equal(isPriorityDesktopMessage({ type: 'result' }), true);
   assert.equal(isPriorityDesktopMessage({ type: 'permission_request' }), true);
+  assert.equal(isPriorityDesktopMessage({ type: 'web_research' }), true);
   assert.equal(isPriorityDesktopMessage({ type: 'plan_approval' }), true);
   assert.equal(isPriorityDesktopMessage({ type: 'ask_user_question' }), true);
 });

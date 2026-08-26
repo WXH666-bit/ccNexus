@@ -51,7 +51,7 @@ test('chat header exposes a top-level desktop open project action', () => {
   assert.match(chat, /desktopApi\.openProject/);
   assert.match(chat, /handleWorkspaceChanged/);
   assert.doesNotMatch(chat, /setWorkspace\(project\.path\)/);
-  assert.match(chat, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\}/);
+  assert.match(chat, /<FileExplorer[\s\S]*onWorkspaceChange=\{handleWorkspaceChanged\}[\s\S]*showEditor=\{false\}/);
   assert.match(chat, /onOpenProject=\{handleOpenProject\}/);
 });
 

@@ -1,6 +1,13 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ChevronDown, Layers } from 'lucide-react';
+import {
+  FolderTree,
+  History,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  SquarePen,
+} from 'lucide-react';
 import ChatHeader from '../components/ChatHeader';
 import MessageList from '../components/MessageList';
 import ChatInputBox from '../components/ChatInputBox';
@@ -11,9 +18,11 @@ import WelcomeScreen from '../components/WelcomeScreen';
 import RewindDialog from '../components/RewindDialog';
 import PlanApprovalDialog from '../components/PlanApprovalDialog';
 import MessageAnchorRail from '../components/MessageAnchorRail';
-import FileExplorer from '../components/FileExplorer';
+import FileExplorer, { FileContentPanel, type FileEditorState } from '../components/FileExplorer';
 import GeneratingResponseIndicator from '../components/GeneratingResponseIndicator';
 import ContextUsageDialog, { type ContextUsageData } from '../components/ContextUsageDialog';
+import WebResearchPanel from '../components/WebResearchPanel';
+import RightWorkspaceSidebar, { type RightWorkspaceTab } from '../components/RightWorkspaceSidebar';
 import { useDesktopChat } from '../hooks/useDesktopChat';
 import {
   createStreamingBlockState,
@@ -38,11 +47,13 @@ import {
 } from '../utils/abortWindowState.js';
 import { getContextUsage as loadContextUsage, type ContextUsageRequest } from '../utils/desktopBridgeApi';
 import { getActiveSession, getSessions, loadSession, renameSession, setActiveSession } from '../utils/sessionBridgeApi';
+import { setResearchPanelOpen as updateResearchPanelWindow } from '../utils/webResearchApi';
 import { deriveStatusData } from '../utils/statusPanelData';
 import { useFileChangesManagement } from '../hooks/useFileChangesManagement';
 import type {
   ChatMessage, Session, StatusData, PermissionRequest, PermissionMode,
-  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse, ImageBlock, AttachmentBlock
+  PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse, ImageBlock, AttachmentBlock,
+  WebResearchAgentItem,
 } from '../types';
 import { isPermissionMode } from '../types';
 
@@ -61,6 +72,27 @@ function readStoredPreference(key: string, fallback: string) {
 const CONTEXT_USAGE_STORAGE_PREFIX = 'chatContextUsage:';
 const NEW_SESSION_COMMANDS = new Set(['/new', '/clear', '/reset']);
 const RESUME_COMMANDS = new Set(['/resume', '/continue']);
+const RECENT_SESSION_LIMIT = 5;
+
+function isWebResearchToolName(toolName: string): toolName is 'WebSearch' | 'WebFetch' {
+  return toolName === 'WebSearch' || toolName === 'WebFetch';
+}
+
+function mergeWebResearchItem(items: WebResearchAgentItem[], next: WebResearchAgentItem) {
+  const index = items.findIndex(item => (
+    (next.toolUseId && item.toolUseId === next.toolUseId)
+    || (next.requestId && item.requestId === next.requestId)
+  ));
+  if (index < 0) return [...items, next].slice(-12);
+  const existing = items[index];
+  const status = existing.status === 'pending' && next.status === 'searching' && next.approval !== 'timeout'
+    ? 'pending'
+    : existing.status === 'denied' && next.status === 'error'
+      ? 'denied'
+      : next.status;
+  const merged = { ...existing, ...next, status };
+  return items.map((item, itemIndex) => itemIndex === index ? merged : item).slice(-12);
+}
 
 function readStoredContextUsage(sessionId?: string) {
   if (!sessionId) return undefined;
@@ -105,6 +137,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const [runtimeLifecycle, setRuntimeLifecycle] = useState<{ classification: 'cold' | 'warm'; reason?: string } | null>(null);
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [fileOpenRequest, setFileOpenRequest] = useState<{ path: string; requestId: number } | null>(null);
+  const [fileEditorState, setFileEditorState] = useState<FileEditorState | null>(null);
 
   useEffect(() => {
     const handlePreferenceChange = () => {
@@ -131,15 +164,31 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const [messageQueue, setMessageQueue] = useState<QueuedChatMessage[]>([]);
   const queueProcessingRef = useRef(false);
 
-  // Status panel visibility
-  const [showStatusPanel, setShowStatusPanel] = useState(() => {
+  // One Codex-style right rail owns review, selected file content, and web activity.
+  const [rightSidebarTab, setRightSidebarTab] = useState<RightWorkspaceTab | null>(() => {
     const saved = localStorage.getItem('showStatusPanel');
-    return saved !== null ? saved === 'true' : true;
+    return saved !== null ? (saved === 'true' ? 'review' : null) : 'review';
   });
+  const showStatusPanel = rightSidebarTab === 'review';
+  const researchPanelOpen = rightSidebarTab === 'web';
+  const rightSidebarOpen = rightSidebarTab !== null;
+  const setShowStatusPanel = useCallback((visible: boolean) => {
+    setRightSidebarTab(current => visible ? 'review' : current === 'review' ? null : current);
+    localStorage.setItem('showStatusPanel', String(visible));
+  }, []);
+  const setResearchPanelOpen = useCallback((visible: boolean) => {
+    setRightSidebarTab(current => visible ? 'web' : current === 'web' ? null : current);
+    if (visible) localStorage.setItem('showStatusPanel', 'false');
+  }, []);
   const [showToolAnchors, setShowToolAnchors] = useState(() => {
     const saved = localStorage.getItem('showToolAnchors');
     return saved === 'true';
   });
+  const [researchLayoutMode, setResearchLayoutMode] = useState<'expanded' | 'overlay'>('expanded');
+  const [webResearchAgentItems, setWebResearchAgentItems] = useState<WebResearchAgentItem[]>([]);
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => (
+    localStorage.getItem('codexSidebarCollapsed') === 'true'
+  ));
 
   const streamingMsgRef = useRef<string | null>(null);
   const streamingBlocksRef = useRef(createStreamingBlockState());
@@ -345,10 +394,21 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, [currentSession, send]);
 
   const handleOpenFile = useCallback((filePath: string) => {
+    setRightSidebarTab('file');
+    localStorage.setItem('showStatusPanel', 'false');
     setFileOpenRequest(previous => ({
       path: filePath,
       requestId: (previous?.requestId || 0) + 1,
     }));
+  }, []);
+
+  const handleFileSelected = useCallback(() => {
+    setRightSidebarTab('file');
+    localStorage.setItem('showStatusPanel', 'false');
+  }, []);
+
+  const handleFileEditorStateChange = useCallback((next: FileEditorState) => {
+    setFileEditorState(next);
   }, []);
 
   const handleSubagentHistory = useCallback((key: string, history: SubagentHistoryResponse) => {
@@ -362,6 +422,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       send({
         type: 'permission_response',
         requestId: planApproval.requestId,
+        sessionId: activeSessionIdRef.current || undefined,
         behavior: 'allow',
         allow: true,
       });
@@ -384,6 +445,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       send({
         type: 'permission_response',
         requestId: planApproval.requestId,
+        sessionId: activeSessionIdRef.current || undefined,
         behavior: 'deny',
         allow: false,
       });
@@ -450,6 +512,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     setMessageQueue([]);
     setStatus({});
     setRuntimeLifecycle(null);
+    setWebResearchAgentItems([]);
   }, []);
 
   const applySessionHistory = useCallback((history: { sessionId: string; messages: ChatMessage[] }) => {
@@ -822,7 +885,51 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
           });
           break;
         }
+        if (isWebResearchToolName(msg.toolName)) {
+          const toolName = msg.toolName;
+          const query = typeof msg.input?.query === 'string' ? msg.input.query.trim() : undefined;
+          const url = typeof msg.input?.url === 'string' ? msg.input.url.trim() : undefined;
+          const toolUseId = msg.toolUseId?.trim() || undefined;
+          setPermission(null);
+          setResearchPanelOpen(true);
+          setWebResearchAgentItems(current => mergeWebResearchItem(current, {
+            id: toolUseId || msg.requestId,
+            requestId: msg.requestId,
+            toolUseId,
+            toolName,
+            input: msg.input || {},
+            query,
+            url,
+            status: 'pending',
+            autoAllowAt: msg.autoAllowAt,
+            updatedAt: Date.now(),
+          }));
+          break;
+        }
         setPermission({ permission_id: msg.requestId, tool_name: msg.toolName, input: msg.input });
+        break;
+      }
+      case 'web_research': {
+        const status = msg.phase === 'completed'
+          ? 'completed'
+          : msg.phase === 'error'
+            ? 'error'
+            : 'searching';
+        setResearchPanelOpen(true);
+        setWebResearchAgentItems(current => mergeWebResearchItem(current, {
+          id: msg.toolUseId,
+          toolUseId: msg.toolUseId,
+          toolName: msg.toolName,
+          input: msg.input || {},
+          query: msg.query,
+          url: msg.url,
+          status,
+          content: msg.content,
+          results: msg.results,
+          error: msg.error,
+          approval: msg.approval,
+          updatedAt: Date.now(),
+        }));
         break;
       }
       case 'session_history': {
@@ -951,6 +1058,41 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     }
     navigate('/history');
   }, [currentSession, finishStreamingMessage, isStreaming, navigate, send]);
+
+  const handleSelectSession = useCallback((session: Session) => {
+    const activeSessionId = currentSession?.id ?? activeSessionIdRef.current;
+    // A click on the already selected item is normally a no-op. If its
+    // history failed to load (or a route transition was interrupted), allow
+    // the click to retry the authoritative history load instead of leaving
+    // the chat blank.
+    if (session.id === activeSessionId) {
+      if (requestedHistorySessionRef.current === session.id) return;
+      if (isStreaming) {
+        send({ type: 'abort', sessionId: activeSessionId });
+        finishStreamingMessage();
+      }
+      requestSessionHistory(session.id);
+      return;
+    }
+    if (isStreaming && activeSessionId) {
+      send({ type: 'abort', sessionId: activeSessionId });
+      finishStreamingMessage();
+    }
+    beginSessionTransition(session.id, session);
+    rememberActiveSession(session.id);
+    // Let the URL-change effect issue the history request after navigation.
+    // Starting it here races the old urlSessionId captured by applySessionHistory
+    // and can discard a valid response for the clicked recent task.
+    navigate(`/chat/${encodeURIComponent(session.id)}`);
+  }, [beginSessionTransition, currentSession, finishStreamingMessage, isStreaming, navigate, rememberActiveSession, requestSessionHistory, send]);
+
+  const toggleLeftSidebar = useCallback(() => {
+    setLeftSidebarCollapsed(current => {
+      const next = !current;
+      localStorage.setItem('codexSidebarCollapsed', String(next));
+      return next;
+    });
+  }, []);
 
   const handleSend = useCallback((text: string, attachments: { type: string; data: string; described?: boolean; name?: string; mediaType?: string }[] = [], queue: boolean = false, reasoningEffort?: string, agent?: string, streaming?: boolean, alwaysThinking?: boolean, modelOverride?: string, displayText?: string) => {
     if (!text.trim() && attachments.length === 0) return;
@@ -1109,9 +1251,63 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, [currentSession, updateSessions]);
 
   const handlePermission = useCallback((permissionId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
-    send({ type: 'permission_response', requestId: permissionId, behavior, allow: behavior !== 'deny' });
+    send({
+      type: 'permission_response',
+      requestId: permissionId,
+      sessionId: activeSessionIdRef.current || undefined,
+      behavior,
+      allow: behavior !== 'deny',
+    });
     setPermission(null);
   }, [send]);
+
+  const handleWebResearchDecision = useCallback((requestId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
+    const pendingItem = webResearchAgentItems.find(item => item.requestId === requestId);
+    if (pendingItem?.autoAllowAt && Date.now() >= pendingItem.autoAllowAt) {
+      setWebResearchAgentItems(current => current.map(item => (
+        item.requestId === requestId
+          ? { ...item, status: 'searching', approval: 'timeout', updatedAt: Date.now() }
+          : item
+      )));
+      return;
+    }
+    send({
+      type: 'permission_response',
+      requestId,
+      sessionId: activeSessionIdRef.current || undefined,
+      behavior,
+      allow: behavior !== 'deny',
+    });
+    setWebResearchAgentItems(current => current.map(item => (
+      item.requestId === requestId
+        ? {
+            ...item,
+            status: behavior === 'deny' ? 'denied' : 'searching',
+            approval: 'manual',
+            autoAllowAt: undefined,
+            updatedAt: Date.now(),
+          }
+        : item
+    )));
+  }, [send, webResearchAgentItems]);
+
+  useEffect(() => {
+    const nextDeadline = webResearchAgentItems
+      .filter(item => item.status === 'pending' && item.autoAllowAt)
+      .reduce<number | null>((nearest, item) => (
+        nearest === null || item.autoAllowAt! < nearest ? item.autoAllowAt! : nearest
+      ), null);
+    if (nextDeadline === null) return;
+    const timer = window.setTimeout(() => {
+      const now = Date.now();
+      setWebResearchAgentItems(current => current.map(item => (
+        item.status === 'pending' && item.autoAllowAt && item.autoAllowAt <= now
+          ? { ...item, status: 'searching', approval: 'timeout', updatedAt: now }
+          : item
+      )));
+    }, Math.max(0, nextDeadline - Date.now()) + 25);
+    return () => window.clearTimeout(timer);
+  }, [webResearchAgentItems]);
 
   // Keep the bottom status panel derived from the active session messages.
   useEffect(() => {
@@ -1135,10 +1331,17 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     };
   }, [searchQuery, searchResults, currentSearchIdx]);
 
+  const recentSessions = useMemo(() => (
+    [...sessions].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, RECENT_SESSION_LIMIT)
+  ), [sessions]);
+
   const handleWorkspaceChanged = useCallback(() => {
     newSessionNavigationRef.current = false;
     beginSessionTransition(null);
     setFileOpenRequest(null);
+    setFileEditorState(null);
+    setRightSidebarTab(null);
+    localStorage.setItem('showStatusPanel', 'false');
     serverSessionNavigationRef.current = null;
     setCurrentSession(null);
     updateSessions([]);
@@ -1156,9 +1359,112 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     handleWorkspaceChanged();
   }, [handleWorkspaceChanged]);
 
+  const handleSendResearch = useCallback((prompt: string, displayText: string) => {
+    handleSend(
+      prompt,
+      [],
+      false,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      displayText,
+    );
+  }, [handleSend]);
+
+  const handleResearchPanelOpenChange = useCallback((nextOpen: boolean) => {
+    setResearchPanelOpen(nextOpen);
+  }, [setResearchPanelOpen]);
+
+  const handleRightSidebarTabChange = useCallback((tab: RightWorkspaceTab | null) => {
+    setRightSidebarTab(tab);
+    localStorage.setItem('showStatusPanel', String(tab === 'review'));
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    if (!isChatRoute) {
+      if (rightSidebarOpen) setRightSidebarTab(null);
+      void updateResearchPanelWindow(false).catch(() => {});
+      return () => { current = false; };
+    }
+
+    void updateResearchPanelWindow(rightSidebarOpen)
+      .then(result => {
+        if (current) setResearchLayoutMode(result?.mode === 'overlay' ? 'overlay' : 'expanded');
+      })
+      .catch(() => {
+        if (current) setResearchLayoutMode('expanded');
+      });
+    return () => { current = false; };
+  }, [isChatRoute, rightSidebarOpen]);
+
+  useEffect(() => () => {
+    void updateResearchPanelWindow(false).catch(() => {});
+  }, []);
+
   return (
-    <div className="chat-view">
-      <FileExplorer key={workspaceVersion} onWorkspaceChange={handleWorkspaceChanged} openFileRequest={fileOpenRequest} />
+    <div className={`chat-view research-layout-${researchLayoutMode} ${rightSidebarOpen ? 'research-panel-open' : ''}`}>
+      <div className={`codex-left-sidebar ${leftSidebarCollapsed ? 'is-collapsed' : ''}`} role="navigation" aria-label="任务与项目">
+        <div className="codex-sidebar-primary">
+          <button type="button" className="codex-new-task" onClick={handleNewSession} title="新建任务">
+            <SquarePen size={16} />
+            <span>新任务</span>
+          </button>
+          <button type="button" className="codex-sidebar-collapse" onClick={toggleLeftSidebar} title={leftSidebarCollapsed ? '展开侧栏' : '收起侧栏'} aria-label={leftSidebarCollapsed ? '展开侧栏' : '收起侧栏'}>
+            {leftSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        </div>
+        <div className="codex-sidebar-nav">
+          <button type="button" onClick={handleOpenHistory} title="任务历史">
+            <History size={15} />
+            <span>任务历史</span>
+          </button>
+          <button type="button" onClick={() => navigate('/settings')} title="设置">
+            <Settings size={15} />
+            <span>设置</span>
+          </button>
+          {leftSidebarCollapsed && (
+            <button type="button" onClick={toggleLeftSidebar} title="项目文件">
+              <FolderTree size={15} />
+            </button>
+          )}
+        </div>
+        <section className="codex-recent-tasks" aria-label="最近任务">
+          <div className="codex-sidebar-section-title">
+            <span>最近任务</span>
+            <span>{recentSessions.length}</span>
+          </div>
+          <div className="codex-recent-task-list">
+            {recentSessions.map(session => (
+              <button
+                type="button"
+                key={session.id}
+                className={session.id === currentSessionId ? 'is-active' : ''}
+                onClick={() => handleSelectSession(session)}
+                title={session.title}
+                aria-current={session.id === currentSessionId ? 'page' : undefined}
+              >
+                <span className="codex-task-dot" />
+                <span>{session.title || '未命名任务'}</span>
+              </button>
+            ))}
+            {recentSessions.length === 0 && <p>开始一个任务后会显示在这里</p>}
+          </div>
+        </section>
+        <div className="codex-sidebar-project">
+          <div className="codex-sidebar-section-title codex-project-title"><span>项目</span></div>
+          <FileExplorer
+            key={workspaceVersion}
+            onWorkspaceChange={handleWorkspaceChanged}
+            openFileRequest={fileOpenRequest}
+            showEditor={false}
+            onEditorStateChange={handleFileEditorStateChange}
+            onFileSelected={handleFileSelected}
+          />
+        </div>
+      </div>
       <div className="chat-pane">
         <ChatHeader
           sessionTitle={currentSession?.title || ''}
@@ -1176,7 +1482,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         />
         <div className="chat-main">
           {messages.length === 0 ? (
-            <WelcomeScreen onSuggestion={handleSend} />
+            <WelcomeScreen onSuggestion={handleSend} onResearch={() => handleResearchPanelOpenChange(true)} />
           ) : (
             <div className="chat-content-with-rail">
               <MessageList
@@ -1194,19 +1500,6 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
           )}
         </div>
         <GeneratingResponseIndicator isStreaming={isStreaming} />
-        {showStatusPanel && (
-          <StatusPanel
-            status={status}
-            onUndoFile={handleUndoFileRequest}
-            onOpenFile={handleOpenFile}
-            onDiscardAllFiles={handleDiscardAllFiles}
-            onKeepAllFiles={handleKeepAll}
-            subagentHistories={subagentHistories}
-            onSubagentHistory={handleSubagentHistory}
-            sessionId={currentSession?.id ?? urlSessionId ?? null}
-            isStreaming={isStreaming}
-          />
-        )}
         <ChatInputBox
           onSend={handleSend}
           onContextUsage={handleContextUsage}
@@ -1232,6 +1525,39 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
           sessionKey={currentSession?.id ?? urlSessionId ?? null}
         />
       </div>
+      <RightWorkspaceSidebar
+        activeTab={rightSidebarTab}
+        onTabChange={handleRightSidebarTabChange}
+        reviewCount={status.edits?.files?.length || 0}
+        pendingWebCount={webResearchAgentItems.filter(item => item.status === 'pending').length}
+        selectedFileName={fileEditorState?.selectedFile?.name}
+        reviewContent={(
+          <StatusPanel
+            variant="sidebar"
+            status={status}
+            onUndoFile={handleUndoFileRequest}
+            onOpenFile={handleOpenFile}
+            onDiscardAllFiles={handleDiscardAllFiles}
+            onKeepAllFiles={handleKeepAll}
+            subagentHistories={subagentHistories}
+            onSubagentHistory={handleSubagentHistory}
+            sessionId={currentSession?.id ?? urlSessionId ?? null}
+            isStreaming={isStreaming}
+          />
+        )}
+        fileContent={<FileContentPanel editor={fileEditorState} />}
+        webContent={(
+          <WebResearchPanel
+            embedded
+            open={researchPanelOpen}
+            scopeKey={`${workspaceVersion}:${currentSessionId || 'new-session'}`}
+            agentItems={webResearchAgentItems}
+            onOpenChange={handleResearchPanelOpenChange}
+            onSendToChat={handleSendResearch}
+            onAgentDecision={handleWebResearchDecision}
+          />
+        )}
+      />
       {permission && (
         <PermissionDialog
           permission={permission}

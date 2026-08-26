@@ -5,6 +5,8 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  net,
+  screen,
   session,
   shell,
   Tray,
@@ -27,6 +29,7 @@ import { createPromptEnhancementUsageStore } from './runtime/promptEnhancementUs
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 import { AppearancePreferences } from './runtime/appearancePreferences.js';
 import { McpStatusService } from './runtime/mcpStatusService.js';
+import { createWebResearchService } from './runtime/webResearchService.js';
 import {
   DEFAULT_WINDOW_CLOSE_BEHAVIOR,
   WINDOW_CLOSE_BEHAVIORS,
@@ -59,6 +62,10 @@ const appearancePreferences = new AppearancePreferences({
 const windowPreferences = new WindowPreferences({ stateFile: windowPreferencesFile });
 const localConfig = new LocalConfigService();
 const mcpStatus = new McpStatusService();
+const webResearch = createWebResearchService({
+  env: process.env,
+  fetch: (input, init) => net.fetch(input, { ...init, bypassCustomProtocolHandlers: true }),
+});
 const promptEnhancementUsageStore = createPromptEnhancementUsageStore({ homeDir: desktopHomeDir });
 const promptEnhancementService = createPromptEnhancementService({
   query: async (args) => await runtime.queryClaudeDisposable(args),
@@ -88,7 +95,13 @@ let tray = null;
 let isQuitting = false;
 let cleanupComplete = false;
 let cleanupPromise = null;
+let researchPanelWindowState = null;
 const TITLE_BAR_HEIGHT = 42;
+const BASE_WINDOW_WIDTH = 1280;
+const BASE_WINDOW_MIN_WIDTH = 960;
+const RESEARCH_RAIL_WIDTH = 48;
+const RESEARCH_PANEL_WIDTH = 430;
+const RESEARCH_PANEL_DELTA = RESEARCH_PANEL_WIDTH - RESEARCH_RAIL_WIDTH;
 const TITLE_BAR_THEMES = {
   dark: { color: '#1e1f22', symbolColor: '#9aa0a6' },
   light: { color: '#ffffff', symbolColor: '#5f6368' },
@@ -112,6 +125,70 @@ function applyWindowTheme(theme) {
   if (typeof mainWindow.setTitleBarOverlay === 'function') {
     mainWindow.setTitleBarOverlay({ ...palette, height: TITLE_BAR_HEIGHT });
   }
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+function setResearchPanelWindowOpen(open) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    researchPanelWindowState = null;
+    return { open: Boolean(open), mode: 'overlay', appliedWidth: 0 };
+  }
+
+  if (!open) {
+    const appliedWidth = researchPanelWindowState?.appliedWidth || 0;
+    const originalBounds = researchPanelWindowState?.originalBounds;
+    if (appliedWidth > 0 && originalBounds && !window.isMaximized() && !window.isFullScreen()) {
+      const display = screen.getDisplayMatching(originalBounds);
+      const workArea = display.workArea;
+      const width = clamp(originalBounds.width, BASE_WINDOW_MIN_WIDTH + RESEARCH_RAIL_WIDTH, workArea.width);
+      const height = clamp(originalBounds.height, 640, workArea.height);
+      const x = clamp(originalBounds.x, workArea.x, workArea.x + workArea.width - width);
+      const y = clamp(originalBounds.y, workArea.y, workArea.y + workArea.height - height);
+      window.setBounds({ x, y, width, height }, true);
+    }
+    researchPanelWindowState = null;
+    return { open: false, mode: 'expanded', appliedWidth: 0 };
+  }
+
+  if (researchPanelWindowState) {
+    return {
+      open: true,
+      mode: researchPanelWindowState.mode,
+      appliedWidth: researchPanelWindowState.appliedWidth,
+    };
+  }
+
+  if (window.isMaximized() || window.isFullScreen()) {
+    researchPanelWindowState = { mode: 'overlay', appliedWidth: 0 };
+    return { open: true, mode: 'overlay', appliedWidth: 0 };
+  }
+
+  const bounds = window.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const workArea = display.workArea;
+  const canPreserveWorkspace = bounds.width + RESEARCH_PANEL_DELTA <= workArea.width;
+  if (!canPreserveWorkspace) {
+    researchPanelWindowState = { mode: 'overlay', appliedWidth: 0 };
+    return { open: true, mode: 'overlay', appliedWidth: 0 };
+  }
+
+  const width = bounds.width + RESEARCH_PANEL_DELTA;
+  const x = clamp(
+    bounds.x - Math.floor(RESEARCH_PANEL_DELTA / 2),
+    workArea.x,
+    workArea.x + workArea.width - width,
+  );
+  window.setBounds({ ...bounds, x, width }, true);
+  researchPanelWindowState = {
+    mode: 'expanded',
+    appliedWidth: RESEARCH_PANEL_DELTA,
+    originalBounds: bounds,
+  };
+  return { open: true, mode: 'expanded', appliedWidth: RESEARCH_PANEL_DELTA };
 }
 
 function showMainWindow() {
@@ -157,9 +234,9 @@ async function createTray() {
 function createMainWindow(initialTheme = currentAppearance.theme) {
   const palette = initialTheme === 'light' ? TITLE_BAR_THEMES.light : TITLE_BAR_THEMES.dark;
   const window = new BrowserWindow({
-    width: 1280,
+    width: BASE_WINDOW_WIDTH + RESEARCH_RAIL_WIDTH,
     height: 900,
-    minWidth: 960,
+    minWidth: BASE_WINDOW_MIN_WIDTH + RESEARCH_RAIL_WIDTH,
     minHeight: 640,
     title: 'ccNexus',
     icon: appIconPath,
@@ -178,6 +255,7 @@ function createMainWindow(initialTheme = currentAppearance.theme) {
     },
   });
   mainWindow = window;
+  researchPanelWindowState = null;
   window.on('close', (event) => {
     if (!shouldMinimizeToTray({
       closeBehavior: currentWindowPreferences.closeBehavior,
@@ -189,7 +267,10 @@ function createMainWindow(initialTheme = currentAppearance.theme) {
     window.setSkipTaskbar?.(true);
   });
   window.on('closed', () => {
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow === window) {
+      mainWindow = null;
+      researchPanelWindowState = null;
+    }
   });
   applyWindowTheme(initialTheme);
 
@@ -209,6 +290,7 @@ function requestApplicationQuit() {
 async function cleanupApplication() {
   try { appUpdater.dispose(); } catch { /* ignore */ }
   try { await promptEnhancementService.dispose(); } catch { /* ignore */ }
+  try { await webResearch.dispose(); } catch { /* ignore */ }
   try { chatController.dispose(); } catch { /* ignore */ }
   try { await runtime.shutdown(); } catch (error) {
     console.error('[desktop] runtime shutdown failed:', error);
@@ -228,6 +310,43 @@ async function switchWorkspace(nextPath) {
     desktopSessions.setCwd(workspace.cwd);
   }
   return workspace;
+}
+
+async function refreshWebResearchEnvironment() {
+  try {
+    const providers = await localConfig.getProviders();
+    webResearch.env = { ...process.env, ...(providers.currentEnv || {}) };
+  } catch {
+    webResearch.env = process.env;
+  }
+}
+
+function normalizeWebResearchActivity(activity = {}) {
+  const success = activity.status === 'success';
+  return {
+    id: activity.requestId,
+    type: activity.operation === 'search' ? 'api' : 'fetch',
+    label: activity.label,
+    query: activity.operation === 'search' ? activity.label : undefined,
+    url: activity.operation === 'fetchContent' ? activity.url || activity.label : undefined,
+    provider: activity.provider,
+    startTime: activity.startedAt,
+    endTime: activity.finishedAt || undefined,
+    status: activity.status === 'running' ? null : success ? 200 : 0,
+    error: activity.error,
+    cacheHit: activity.cacheHit === true,
+  };
+}
+
+function normalizeWebResearchState(state = {}) {
+  return {
+    ...state,
+    providers: (state.providers || []).map(provider => ({
+      ...provider,
+      label: provider.id === 'auto' ? '自动' : provider.label,
+    })),
+    activity: (state.activity || []).map(normalizeWebResearchActivity),
+  };
 }
 
 ipcMain.handle('desktop:get-runtime-info', () => ({
@@ -291,6 +410,25 @@ ipcMain.handle('desktop:get-window-preferences', () => currentWindowPreferences)
 ipcMain.handle('desktop:set-window-preferences', async (_event, preferences = {}) => {
   currentWindowPreferences = await windowPreferences.update(preferences);
   return currentWindowPreferences;
+});
+
+ipcMain.handle('desktop:set-research-panel-open', (_event, args = {}) => (
+  setResearchPanelWindowOpen(args.open === true)
+));
+
+ipcMain.handle('desktop:open-external', async (_event, args = {}) => {
+  const rawUrl = typeof args.url === 'string' ? args.url.trim() : '';
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('Invalid external URL');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('Only credential-free HTTP(S) URLs can be opened');
+  }
+  await shell.openExternal(parsed.href);
+  return { opened: true };
 });
 
 ipcMain.handle('desktop:open-project', async () => {
@@ -506,6 +644,55 @@ ipcMain.handle('desktop:enhance-prompt', async (_event, args = {}) => (
 ));
 ipcMain.handle('desktop:cancel-prompt-enhancement', async (_event, args = {}) => ({
   cancelled: await promptEnhancementService.cancel(args.requestId),
+  requestId: args.requestId,
+}));
+
+ipcMain.handle('desktop:web-research-search', async (_event, args = {}) => {
+  await refreshWebResearchEnvironment();
+  const result = await webResearch.search(args);
+  const answer = result.answer || result.results.map((item, index) => (
+    `[${index + 1}] ${item.snippet || item.title}\n${item.url}`
+  )).join('\n\n');
+  return {
+    ...result,
+    query: String(args.query || '').trim(),
+    answer,
+    errors: (result.errors || []).map(error => ({
+      provider: error.provider,
+      error: error.message || String(error),
+    })),
+  };
+});
+
+ipcMain.handle('desktop:web-research-fetch', async (_event, args = {}) => {
+  const result = await webResearch.fetchContent(args);
+  const content = String(result.content || '');
+  return {
+    ...result,
+    content,
+    wordCount: content.trim() ? content.trim().split(/\s+/u).length : 0,
+    truncated: false,
+  };
+});
+
+ipcMain.handle('desktop:web-research-content', async (_event, args = {}) => {
+  const result = await webResearch.getContent(args);
+  const content = String(result.content || '');
+  return {
+    ...result,
+    content,
+    wordCount: content.trim() ? content.trim().split(/\s+/u).length : 0,
+    truncated: result.hasMore === true,
+  };
+});
+
+ipcMain.handle('desktop:web-research-state', async () => {
+  await refreshWebResearchEnvironment();
+  return normalizeWebResearchState(webResearch.getState());
+});
+
+ipcMain.handle('desktop:web-research-cancel', async (_event, args = {}) => ({
+  cancelled: await webResearch.cancel(args.requestId),
   requestId: args.requestId,
 }));
 

@@ -56,6 +56,21 @@ interface PromptEnhancementCancelResult {
   requestId: string;
 }
 
+interface WebResearchSearchArgs {
+  requestId: string;
+  query: string;
+  provider?: string;
+  numResults?: number;
+  recencyFilter?: 'day' | 'week' | 'month' | 'year';
+  domainFilter?: string[];
+}
+
+interface WebResearchContentArgs {
+  requestId: string;
+  url: string;
+  mode?: 'readable' | 'raw';
+}
+
 interface CcNexusDesktopApi {
   getRuntimeInfo: () => Promise<{
     appName: string;
@@ -194,6 +209,18 @@ interface CcNexusDesktopApi {
   }) => Promise<unknown>;
   enhancePrompt: (args: PromptEnhancementArgs) => Promise<PromptEnhancementResult>;
   cancelPromptEnhancement: (requestId: string) => Promise<PromptEnhancementCancelResult>;
+  searchWeb: (args: WebResearchSearchArgs) => Promise<unknown>;
+  fetchWebContent: (args: WebResearchContentArgs) => Promise<unknown>;
+  getWebResearchContent: (args: {
+    responseId: string;
+    offset?: number;
+    limit?: number;
+    findText?: string;
+  }) => Promise<unknown>;
+  getWebResearchState: () => Promise<unknown>;
+  cancelWebResearch: (requestId: string) => Promise<{ cancelled: boolean; requestId: string }>;
+  setResearchPanelOpen: (open: boolean) => Promise<{ open: boolean; mode: 'expanded' | 'overlay'; appliedWidth?: number }>;
+  openExternal: (url: string) => Promise<{ opened: boolean }>;
   stopProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;
   restartProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;
   sendChatCommand: (message: Record<string, unknown>) => void;

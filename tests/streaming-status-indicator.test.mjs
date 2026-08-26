@@ -13,9 +13,10 @@ const statusPanel = read('../src/components/StatusPanel.tsx');
 const contextBar = read('../src/components/ChatInputBox/ContextBar.tsx');
 const styles = read('../src/index.css');
 
-test('ChatView shows a ccgui-style generating response indicator above the status panel while streaming', () => {
+test('ChatView keeps the generating indicator above the composer while status review lives in the right sidebar', () => {
   assert.match(chatView, /<GeneratingResponseIndicator isStreaming=\{isStreaming\} \/>/);
-  assert.match(chatView, /<GeneratingResponseIndicator isStreaming=\{isStreaming\} \/>[\s\S]*\{showStatusPanel && \([\s\S]*<StatusPanel/);
+  assert.match(chatView, /<GeneratingResponseIndicator isStreaming=\{isStreaming\} \/>[\s\S]*<ChatInputBox/);
+  assert.match(chatView, /<RightWorkspaceSidebar[\s\S]*reviewContent=\{\([\s\S]*<StatusPanel[\s\S]*variant="sidebar"/);
   assert.match(indicator, /useElapsedStreamingSeconds/);
   assert.match(indicator, /className="generating-response-indicator"/);
   assert.match(indicator, /正在生成响应/);

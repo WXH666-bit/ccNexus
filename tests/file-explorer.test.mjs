@@ -10,15 +10,17 @@ function read(path) {
   return readFileSync(resolve(root, path), 'utf8');
 }
 
-test('ChatView mounts a collapsible PyCharm-style file explorer beside the chat pane', () => {
+test('ChatView keeps the project directory on the left and file content in the right sidebar', () => {
   const source = read('src/views/ChatView.tsx');
-  const styles = read('src/index.css');
+  const styles = read('src/codex.css');
 
-  assert.match(source, /import FileExplorer from '\.\.\/components\/FileExplorer';/);
-  assert.match(source, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\} openFileRequest=\{fileOpenRequest\} \/>/);
+  assert.match(source, /import FileExplorer, \{ FileContentPanel, type FileEditorState \} from '\.\.\/components\/FileExplorer';/);
+  assert.match(source, /<FileExplorer[\s\S]*showEditor=\{false\}[\s\S]*onEditorStateChange=\{handleFileEditorStateChange\}/);
+  assert.match(source, /fileContent=\{<FileContentPanel editor=\{fileEditorState\} \/>\}/);
+  assert.match(source, /<RightWorkspaceSidebar/);
   assert.match(source, /<div className="chat-pane">/);
-  assert.match(styles, /\.chat-view\s*\{[^}]*flex-direction:\s*row;/s);
-  assert.match(styles, /\.file-explorer\.collapsed\s*\{/s);
+  assert.match(styles, /\.codex-sidebar-project \.file-tree\s*\{[^}]*flex:\s*1 1 auto;/s);
+  assert.match(styles, /\.codex-right-panel \.file-content-panel\s*\{/s);
 });
 
 test('FileExplorer can load the project tree, open a file, edit it, and save changes', () => {
@@ -30,6 +32,8 @@ test('FileExplorer can load the project tree, open a file, edit it, and save cha
   assert.doesNotMatch(source, /fetch\(/);
   assert.match(source, /setDirty\([^)]* !== loadedContent\)/);
   assert.match(source, /className="file-editor-textarea"/);
+  assert.match(source, /export function FileContentPanel/);
+  assert.match(source, /fileReadRequestRef/);
 });
 
 test('FileExplorer notifies ChatView so workspace changes reload the current project history', () => {
@@ -39,7 +43,14 @@ test('FileExplorer notifies ChatView so workspace changes reload the current pro
   assert.match(explorer, /onWorkspaceChange/);
   assert.match(explorer, /onWorkspaceChange\?\.\(data\)/);
   assert.match(chat, /handleWorkspaceChanged/);
-  assert.match(chat, /<FileExplorer key=\{workspaceVersion\} onWorkspaceChange=\{handleWorkspaceChanged\} openFileRequest=\{fileOpenRequest\} \/>/);
+  assert.match(chat, /<FileExplorer[\s\S]*onWorkspaceChange=\{handleWorkspaceChanged\}[\s\S]*openFileRequest=\{fileOpenRequest\}/);
+});
+
+test('opening a reviewed file activates the right file editor and workspace changes clear it', () => {
+  const chat = read('src/views/ChatView.tsx');
+
+  assert.match(chat, /const handleOpenFile = useCallback\(\(filePath: string\) => \{\s*setRightSidebarTab\('file'\);[\s\S]*setFileOpenRequest/);
+  assert.match(chat, /const handleWorkspaceChanged = useCallback\(\(\) => \{[\s\S]*setFileEditorState\(null\);[\s\S]*setRightSidebarTab\(null\);/);
 });
 
 test('FileExplorer shows the real project tree instead of hiding common workspace folders', () => {

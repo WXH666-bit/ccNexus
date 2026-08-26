@@ -7,6 +7,7 @@ import {
   planApprovalEvent,
   sessionEvent,
   streamEvent,
+  webResearchEvent,
 } from '../../server/protocol.js';
 import { createAssistantTurn } from '../../server/assistantTurn.js';
 import { buildClaudeQueryOptions } from '../../server/queryOptions.js';
@@ -26,6 +27,156 @@ function createPendingId() {
 
 function normalizeError(error) {
   return error instanceof Error ? error.message : String(error || 'Unknown error');
+}
+
+const WEB_RESEARCH_TOOL_NAMES = new Set(['WebSearch', 'WebFetch']);
+export const WEB_RESEARCH_AUTO_ALLOW_TIMEOUT_MS = 120_000;
+
+function isWebResearchToolName(toolName) {
+  return typeof toolName === 'string' && WEB_RESEARCH_TOOL_NAMES.has(toolName);
+}
+
+function firstString(...values) {
+  return values.find(value => typeof value === 'string' && value.trim())?.trim() || undefined;
+}
+
+function readToolUseId(options = {}) {
+  return firstString(options.toolUseID, options.toolUseId, options.tool_use_id);
+}
+
+function readPermissionDescription(options = {}) {
+  return firstString(options.description, options.decisionReason, options.decision_reason);
+}
+
+function normalizeWebInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  return input;
+}
+
+function serializeWebContent(content) {
+  if (typeof content === 'string') return content;
+  if (content === undefined || content === null) return '';
+  try {
+    const serialized = JSON.stringify(content);
+    return typeof serialized === 'string' ? serialized : String(content);
+  } catch {
+    return String(content);
+  }
+}
+
+function parseWebContent(content) {
+  if (content && typeof content === 'object') return content;
+  if (typeof content !== 'string' || !content.trim()) return null;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+function toResultString(value) {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return text || undefined;
+}
+
+function normalizeHttpUrl(value) {
+  const url = toResultString(value);
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return { value: url, hostname: parsed.hostname || url };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWebResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const parsedUrl = normalizeHttpUrl(value.url || value.href || value.link || value.uri);
+  if (!parsedUrl) return null;
+  const url = parsedUrl.value;
+  const title = toResultString(value.title || value.name || value.heading) || parsedUrl.hostname;
+  const snippet = toResultString(
+    value.snippet || value.description || value.summary || value.text || value.excerpt,
+  );
+  const result = {};
+  result.url = url;
+  result.title = title;
+  if (snippet) result.snippet = snippet;
+  return result;
+}
+
+function collectWebResults(value, results = []) {
+  if (!value) return results;
+  if (Array.isArray(value)) {
+    for (const item of value) collectWebResults(item, results);
+    return results;
+  }
+  if (typeof value === 'string') {
+    const url = value.match(/https?:\/\/[^\s<>"')\]}]+/i)?.[0];
+    const result = normalizeWebResult({ url, snippet: value.trim() });
+    if (result) results.push(result);
+    return results;
+  }
+  if (typeof value !== 'object') return results;
+
+  const direct = normalizeWebResult(value);
+  if (direct) results.push(direct);
+
+  for (const key of ['content', 'results', 'items', 'hits', 'links']) {
+    if (value[key] !== undefined) collectWebResults(value[key], results);
+  }
+  return results;
+}
+
+function dedupeWebResults(results) {
+  const seen = new Set();
+  return results.filter((result) => {
+    const key = `${result.url || ''}\u0000${result.title || ''}\u0000${result.snippet || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function extractWebResearchDetails(toolName, input, rawContent) {
+  const content = serializeWebContent(rawContent);
+  const parsed = parseWebContent(rawContent);
+  const query = firstString(input?.query, parsed?.query);
+  let results = [];
+
+  if (toolName === 'WebSearch') {
+    results = collectWebResults(parsed?.results ?? parsed?.content ?? parsed);
+    if (results.length === 0 && content) {
+      results = collectWebResults(content);
+    }
+  } else if (toolName === 'WebFetch') {
+    const url = firstString(input?.url, parsed?.url);
+    const snippet = firstString(parsed?.result, parsed?.content, rawContent);
+    const result = normalizeWebResult({ url, snippet });
+    if (result) results = [result];
+  }
+
+  return {
+    content,
+    ...(query ? { query } : {}),
+    results: dedupeWebResults(results),
+    parsed,
+  };
+}
+
+function extractWebResearchError(details, rawContent) {
+  const parsedError = details.parsed && typeof details.parsed === 'object'
+    ? firstString(details.parsed.error, details.parsed.message, details.parsed.result)
+    : undefined;
+  return parsedError || details.content || 'Web research failed';
+}
+
+function messageBlocks(message, type) {
+  if (!Array.isArray(message?.content)) return [];
+  return message.content.filter(block => block?.type === type);
 }
 
 function createRuntimeProfile(options = {}) {
@@ -51,12 +202,20 @@ function readRuntimeLifecycle(query) {
   return lifecycle;
 }
 
-export function createDesktopChatController({ runtime, sessions, localConfig, workspaceFiles }) {
+export function createDesktopChatController({
+  runtime,
+  sessions,
+  localConfig,
+  workspaceFiles,
+  webPermissionTimeoutMs = WEB_RESEARCH_AUTO_ALLOW_TIMEOUT_MS,
+}) {
   let currentSessionId = null;
   let latestChatRequest = 0;
+  let currentUnboundRequestOrder = null;
   const ownedQueries = new Map();
   const latestRequestBySession = new Map();
   const pendingPermissions = new Map();
+  const webResearchToolUses = new Map();
   const pendingPlanApprovals = new Map();
   const pendingUserQuestions = new Map();
   const questionQueue = [];
@@ -89,6 +248,14 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
   }
 
   async function stopOwnedQuery(sessionId) {
+    const requestScope = sessionId
+      ? { sessionId }
+      : { ownerId: currentUnboundRequestOrder };
+    cancelPendingPermissions(requestScope, 'Permission request cancelled');
+    clearWebResearchToolUses(requestScope);
+    if (!sessionId && requestScope.ownerId === currentUnboundRequestOrder) {
+      currentUnboundRequestOrder = null;
+    }
     const query = ownedQueries.get(sessionId);
     if (!query) return false;
     cancelPlanApprovals(sessionId);
@@ -104,14 +271,118 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     sessionMessages.delete(sessionId);
     fileEditHistory.delete(sessionId);
     runtimeProfiles.delete(sessionId);
+    clearWebResearchToolUses({ sessionId });
     ownedQueries.delete(sessionId);
     runtime.removeSessionDaemon(sessionId);
   }
 
-  function requestPermissionFromRenderer(emit, toolName, input, options, sessionId) {
+  function rememberWebResearchToolUse(toolUseId, details = {}) {
+    if (!toolUseId || !isWebResearchToolName(details.toolName)) return null;
+    const previous = webResearchToolUses.get(toolUseId) || {};
+    const next = {
+      ...previous,
+      ...details,
+      toolUseId,
+      toolName: details.toolName || previous.toolName,
+      input: details.input !== undefined
+        ? normalizeWebInput(details.input)
+        : normalizeWebInput(previous.input),
+      sessionId: details.sessionId || previous.sessionId || null,
+      ownerId: details.ownerId ?? previous.ownerId ?? null,
+    };
+    webResearchToolUses.set(toolUseId, next);
+    return next;
+  }
+
+  function requestMatchesScope(request, scope = {}) {
+    if (scope.all === true) return true;
+    if (scope.sessionId) return request.sessionId === scope.sessionId;
+    return scope.ownerId !== null
+      && scope.ownerId !== undefined
+      && request.ownerId === scope.ownerId;
+  }
+
+  function clearWebResearchToolUses(scope = {}) {
+    for (const [toolUseId, call] of webResearchToolUses.entries()) {
+      if (requestMatchesScope(call, scope)) {
+        webResearchToolUses.delete(toolUseId);
+      }
+    }
+  }
+
+  function bindRequestOwnerToSession(ownerId, sessionId) {
+    if (ownerId === null || ownerId === undefined || !sessionId) return;
+    for (const pending of pendingPermissions.values()) {
+      if (pending.ownerId === ownerId && !pending.sessionId) pending.sessionId = sessionId;
+    }
+    for (const call of webResearchToolUses.values()) {
+      if (call.ownerId === ownerId && !call.sessionId) call.sessionId = sessionId;
+    }
+  }
+
+  function cancelPendingPermissions(scope, message, emitEvents = true) {
+    for (const [requestId, pending] of pendingPermissions.entries()) {
+      if (!requestMatchesScope(pending, scope)) continue;
+      pendingPermissions.delete(requestId);
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.resolve({ behavior: 'deny', message });
+      if (pending.toolUseId) webResearchToolUses.delete(pending.toolUseId);
+      if (emitEvents && isWebResearchToolName(pending.toolName) && pending.toolUseId) {
+        emitSafe(pending.emit, webResearchEvent({
+          phase: 'error',
+          sessionId: pending.sessionId,
+          toolUseId: pending.toolUseId,
+          toolName: pending.toolName,
+          input: pending.input,
+          error: message,
+        }));
+      }
+    }
+  }
+
+  function emitWebResearchStarted(emit, call) {
+    if (!call || call.started) return;
+    call.started = true;
+    emitSafe(emit, webResearchEvent({
+      phase: 'started',
+      sessionId: call.sessionId,
+      toolUseId: call.toolUseId,
+      toolName: call.toolName,
+      input: call.input,
+      ...(call.toolName === 'WebSearch' && firstString(call.input?.query)
+        ? { query: firstString(call.input.query) }
+        : {}),
+    }));
+  }
+
+  function requestPermissionFromRenderer(emit, toolName, input, options, sessionId, ownerId) {
     const requestId = createPendingId();
+    const toolUseId = readToolUseId(options);
+    const description = readPermissionDescription(options);
+    const isWebResearchRequest = isWebResearchToolName(toolName);
+    const permissionTimeoutMs = isWebResearchRequest
+      ? Math.max(0, Number(webPermissionTimeoutMs) || WEB_RESEARCH_AUTO_ALLOW_TIMEOUT_MS)
+      : 300_000;
+    const autoAllowAt = isWebResearchRequest ? Date.now() + permissionTimeoutMs : undefined;
+    if (isWebResearchRequest && toolUseId) {
+      rememberWebResearchToolUse(toolUseId, {
+        toolName,
+        input,
+        sessionId,
+        ownerId,
+      });
+    }
     return new Promise((resolve) => {
-      pendingPermissions.set(requestId, { resolve, toolName, input });
+      pendingPermissions.set(requestId, {
+        resolve,
+        emit,
+        toolName,
+        input,
+        sessionId,
+        ownerId,
+        toolUseId,
+        timer: null,
+      });
       emitSafe(emit, permissionRequestEvent({
         requestId,
         toolName,
@@ -119,18 +390,57 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         sessionId,
         title: options?.title || `Allow ${toolName}?`,
         displayName: options?.displayName || toolName,
+        description,
+        toolUseId,
+        autoAllowAt,
       }));
-      setTimeout(() => {
-        if (!pendingPermissions.has(requestId)) return;
+      const timer = setTimeout(() => {
+        const pending = pendingPermissions.get(requestId);
+        if (!pending) return;
         pendingPermissions.delete(requestId);
-        resolve({ behavior: 'deny', message: 'Permission request timed out' });
-      }, 300000);
+        if (isWebResearchRequest && pending.sessionId) {
+          resolve({ behavior: 'allow' });
+          if (toolUseId) {
+            const call = rememberWebResearchToolUse(toolUseId, {
+              toolName,
+              input,
+              sessionId: pending.sessionId,
+              ownerId,
+            });
+            emitSafe(emit, webResearchEvent({
+              phase: 'approved',
+              sessionId: call.sessionId,
+              toolUseId,
+              toolName: call.toolName,
+              input: call.input,
+              approval: 'timeout',
+            }));
+          }
+          return;
+        }
+        resolve({
+          behavior: 'deny',
+          message: isWebResearchRequest
+            ? 'Permission request is no longer attached to a session'
+            : 'Permission request timed out',
+        });
+      }, permissionTimeoutMs);
+      const pending = pendingPermissions.get(requestId);
+      if (pending) pending.timer = timer;
+      timer.unref?.();
     });
   }
 
-  function createPermissionHandler(emit, getSessionId) {
+  function createPermissionHandler(emit, getSessionId, ownerId) {
     const policy = createPermissionPolicy({
-      askUser: (toolName, input, options) => requestPermissionFromRenderer(emit, toolName, input, options, getSessionId?.()),
+      askUser: (toolName, input, options) => requestPermissionFromRenderer(
+        emit,
+        toolName,
+        input,
+        options,
+        getSessionId?.(),
+        ownerId,
+      ),
       askQuestion: (input, options) => requestUserQuestionFromRenderer(
         emit,
         input,
@@ -359,6 +669,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     const { text, images, sessionId, options: clientOptions } = message;
     let querySessionId = sessionId || null;
     const requestOrder = ++latestChatRequest;
+    if (!querySessionId) currentUnboundRequestOrder = requestOrder;
     currentSessionId = querySessionId;
     if (querySessionId) latestRequestBySession.set(querySessionId, requestOrder);
 
@@ -367,7 +678,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
       prompt += '\n\n[User attached images]';
     }
 
-    const canUseTool = createPermissionHandler(emit, () => querySessionId);
+    const canUseTool = createPermissionHandler(emit, () => querySessionId, requestOrder);
     const { currentEnv, providerMode } = await localConfig.getProviders();
     const queryEnv = { ...process.env, ...(currentEnv || {}) };
     const effectiveClientOptions = await buildClaudeClientOptions({
@@ -448,6 +759,8 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
           case 'system': {
             if (event.subtype === 'init') {
               querySessionId = event.session_id || querySessionId;
+              bindRequestOwnerToSession(requestOrder, querySessionId);
+              if (currentUnboundRequestOrder === requestOrder) currentUnboundRequestOrder = null;
               if (latestRequestBySession.has(querySessionId)
                 && latestRequestBySession.get(querySessionId) !== requestOrder) {
                 try { query.close(); } catch { /* ignore */ }
@@ -491,6 +804,18 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
             if (typeof event.message?.id === 'string' && event.message.id.trim()) {
               lastAssistantApiId = event.message.id.trim();
             }
+            for (const block of messageBlocks(event.message, 'tool_use')) {
+              if (!isWebResearchToolName(block.name)) continue;
+              const toolUseId = firstString(block.id, block.tool_use_id);
+              if (!toolUseId) continue;
+              const call = rememberWebResearchToolUse(toolUseId, {
+                toolName: block.name,
+                input: block.input,
+                sessionId: event.session_id || querySessionId,
+                ownerId: requestOrder,
+              });
+              emitWebResearchStarted(emit, call);
+            }
             break;
 
           case 'user':
@@ -501,6 +826,27 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
                 sessionId: event.session_id || querySessionId,
                 uuid: event.uuid,
               });
+            }
+            for (const block of messageBlocks(event.message, 'tool_result')) {
+              const toolUseId = firstString(block.tool_use_id, block.toolUseId);
+              const call = toolUseId ? webResearchToolUses.get(toolUseId) : null;
+              if (!call || !isWebResearchToolName(call.toolName)) continue;
+              const sessionId = event.session_id || querySessionId || call.sessionId;
+              const details = extractWebResearchDetails(call.toolName, call.input, block.content);
+              const isError = Boolean(block.is_error)
+                || Boolean(details.parsed && typeof details.parsed === 'object' && details.parsed.error);
+              emitSafe(emit, webResearchEvent({
+                phase: isError ? 'error' : 'completed',
+                sessionId,
+                toolUseId: call.toolUseId,
+                toolName: call.toolName,
+                input: call.input,
+                ...(details.query ? { query: details.query } : {}),
+                content: details.content,
+                results: details.results,
+                ...(isError ? { error: extractWebResearchError(details, block.content) } : {}),
+              }));
+              webResearchToolUses.delete(toolUseId);
             }
             break;
 
@@ -616,6 +962,7 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         : { type: 'error', message: messageText, sessionId: querySessionId });
       emitSafe(emit, { type: 'status', status: 'idle', sessionId: querySessionId });
     } finally {
+      if (currentUnboundRequestOrder === requestOrder) currentUnboundRequestOrder = null;
       if (querySessionId) unregisterActiveQuery(querySessionId, query);
     }
   }
@@ -678,7 +1025,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
         const { requestId, allow, behavior, message: responseMessage } = message;
         const pending = pendingPermissions.get(requestId);
         if (!pending) break;
+        if (!pending.sessionId || message.sessionId !== pending.sessionId) break;
         pendingPermissions.delete(requestId);
+        if (pending.timer) clearTimeout(pending.timer);
         const decision = behavior || (allow ? 'allow' : 'deny');
         pending.resolve(decision === 'deny'
           ? { behavior: 'deny', message: responseMessage || 'Denied by user' }
@@ -695,7 +1044,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
 
       case 'new_session': {
         const previousSessionId = currentSessionId;
-        if (previousSessionId) await stopOwnedQuery(previousSessionId);
+        if (previousSessionId || currentUnboundRequestOrder !== null) {
+          await stopOwnedQuery(previousSessionId);
+        }
         currentSessionId = null;
         emitSafe(emit, { type: 'status', status: 'idle' });
         break;
@@ -791,7 +1142,9 @@ export function createDesktopChatController({ runtime, sessions, localConfig, wo
     }
     ownedQueries.clear();
     latestRequestBySession.clear();
-    pendingPermissions.clear();
+    cancelPendingPermissions({ all: true }, 'Permission request cancelled', false);
+    webResearchToolUses.clear();
+    currentUnboundRequestOrder = null;
     cancelPlanApprovals();
     cancelQuestionParents();
   }

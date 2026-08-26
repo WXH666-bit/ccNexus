@@ -26,6 +26,26 @@ test('ChatView requests the latest session history after restoring the session l
   assert.doesNotMatch(source, /send\(\{\s*type:\s*'load_session',\s*sessionId\s*\}\)/s);
 });
 
+test('ChatView limits recent tasks to the five newest sessions and reports the visible count', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /const RECENT_SESSION_LIMIT = 5;/);
+  assert.match(source, /const recentSessions = useMemo\(\(\) => \([\s\S]*?\.sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)\.slice\(0, RECENT_SESSION_LIMIT\)/);
+  assert.match(source, /<span>\{recentSessions\.length\}<\/span>/);
+  assert.match(source, /recentSessions\.map\(session =>/);
+});
+
+test('recent task selection follows route-driven restore and directly retries a failed same-route load', () => {
+  const source = read('src/views/ChatView.tsx');
+  const handler = source.match(/const handleSelectSession = useCallback\(\(session: Session\) => \{[\s\S]*?\n  \}, \[[^\n]*\]\);/);
+
+  assert.ok(handler, 'expected recent task selection handler');
+  assert.match(handler[0], /if \(session\.id === activeSessionId\) \{[\s\S]*?requestSessionHistory\(session\.id\);[\s\S]*?return;/);
+  assert.match(handler[0], /beginSessionTransition\(session\.id, session\)/);
+  assert.match(handler[0], /navigate\(`\/chat\/\$\{encodeURIComponent\(session\.id\)\}`\)/);
+  assert.match(source, /if \(requestedHistorySessionRef\.current !== urlSessionId\) \{\s*requestSessionHistory\(urlSessionId\);/s);
+});
+
 test('ChatView prefers the persisted active session before falling back to the latest session', () => {
   const source = read('src/views/ChatView.tsx');
 

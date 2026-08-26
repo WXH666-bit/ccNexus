@@ -46,11 +46,52 @@ export function assistantEvent({
   };
 }
 
-export function permissionRequestEvent({ requestId, toolName, input, title, displayName, sessionId }) {
+export function permissionRequestEvent({
+  requestId,
+  toolName,
+  input,
+  title,
+  displayName,
+  description,
+  toolUseId,
+  sessionId,
+  autoAllowAt,
+}) {
   const event = { type: 'permission_request', requestId, toolName, input };
   if (title !== undefined) event.title = title;
   if (displayName !== undefined) event.displayName = displayName;
+  if (description !== undefined) event.description = description;
+  if (toolUseId !== undefined) event.toolUseId = toolUseId;
   if (sessionId !== undefined) event.sessionId = sessionId;
+  if (autoAllowAt !== undefined) event.autoAllowAt = autoAllowAt;
+  return event;
+}
+
+export function webResearchEvent({
+  phase,
+  sessionId,
+  toolUseId,
+  toolName,
+  input,
+  query,
+  content,
+  results,
+  error,
+  approval,
+}) {
+  const event = {
+    type: 'web_research',
+    phase,
+    toolUseId,
+    toolName,
+    input: input && typeof input === 'object' ? input : {},
+  };
+  if (sessionId !== undefined && sessionId !== null) event.sessionId = sessionId;
+  if (query !== undefined) event.query = query;
+  if (content !== undefined) event.content = content;
+  if (results !== undefined) event.results = results;
+  if (error !== undefined) event.error = error;
+  if (approval !== undefined) event.approval = approval;
   return event;
 }
 

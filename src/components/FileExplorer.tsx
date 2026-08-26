@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import RefreshIcon from './RefreshIcon';
 
-interface FileNode {
+export interface FileNode {
   name: string;
   path: string;
   isDirectory: boolean;
@@ -28,7 +28,7 @@ interface TreeResponse {
   rootName?: string;
 }
 
-interface FileResponse {
+export interface FileResponse {
   content: string | null;
   isImage?: boolean;
   isBinary?: boolean;
@@ -50,6 +50,22 @@ interface FileOpenRequest {
 interface FileExplorerProps {
   onWorkspaceChange?: (workspace: WorkspaceChange) => void;
   openFileRequest?: FileOpenRequest | null;
+  showEditor?: boolean;
+  onEditorStateChange?: (state: FileEditorState) => void;
+  onFileSelected?: (path: string) => void;
+}
+
+export interface FileEditorState {
+  selectedFile: FileNode | null;
+  fileMeta: FileResponse | null;
+  draft: string;
+  dirty: boolean;
+  fileError: string;
+  saving: boolean;
+  notice: string;
+  updateDraft: (value: string) => void;
+  saveFile: () => void;
+  closeFile: () => void;
 }
 
 const CODE_EXTS = new Set(['js', 'jsx', 'ts', 'tsx', 'json', 'css', 'html', 'md', 'mjs', 'cjs']);
@@ -122,7 +138,68 @@ function TreeNode({
   );
 }
 
-export default function FileExplorer({ onWorkspaceChange, openFileRequest }: FileExplorerProps) {
+export function FileContentPanel({ editor }: { editor: FileEditorState | null }) {
+  if (!editor?.selectedFile) {
+    return <div className="file-editor file-content-panel"><div className="file-editor-placeholder">从左侧目录选择文件查看或修改</div></div>;
+  }
+
+  const {
+    selectedFile,
+    fileMeta,
+    draft,
+    dirty,
+    fileError,
+    saving,
+    notice,
+    updateDraft,
+    saveFile,
+    closeFile,
+  } = editor;
+
+  return (
+    <div className="file-editor file-content-panel">
+      <div className="file-editor-header">
+        <div className="file-editor-title" title={selectedFile.path}>
+          <FileIcon node={selectedFile} />
+          <span>{selectedFile.name}</span>
+          {dirty && <em>已修改</em>}
+        </div>
+        <div className="file-editor-actions">
+          <button type="button" onClick={saveFile} disabled={!dirty || saving || fileMeta?.isBinary || fileMeta?.isImage} title="保存" aria-label="保存文件">
+            <Save size={14} />
+          </button>
+          <button type="button" onClick={closeFile} title="关闭" aria-label="关闭文件">
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+      {fileError && <div className="file-explorer-error">{fileError}</div>}
+      {notice && <div className="file-explorer-notice">{notice}</div>}
+      {fileMeta?.isImage && fileMeta.content && (
+        <div className="file-image-preview">
+          <img src={`data:${fileMeta.mimeType};base64,${fileMeta.content}`} alt={selectedFile.name} />
+        </div>
+      )}
+      {fileMeta?.isBinary && <div className="file-explorer-empty">二进制文件暂不支持编辑。</div>}
+      {!fileMeta?.isBinary && !fileMeta?.isImage && (
+        <textarea
+          className="file-editor-textarea"
+          spellCheck={false}
+          value={draft}
+          onChange={(event) => updateDraft(event.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function FileExplorer({
+  onWorkspaceChange,
+  openFileRequest,
+  showEditor = true,
+  onEditorStateChange,
+  onFileSelected,
+}: FileExplorerProps) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('fileExplorerCollapsed') === 'true');
   const [tree, setTree] = useState<FileNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['.']));
@@ -140,6 +217,7 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const lastOpenRequestRef = useRef(0);
+  const fileReadRequestRef = useRef(0);
 
   const setExplorerCollapsed = useCallback((next: boolean) => {
     setCollapsed(next);
@@ -185,6 +263,7 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
       if (!project || project.canceled || !project.path) return;
       const data = project;
 
+      fileReadRequestRef.current += 1;
       setSelectedFile(null);
       setFileMeta(null);
       setLoadedContent('');
@@ -211,6 +290,7 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
 
   const openFile = useCallback(async (node: FileNode) => {
     if (dirty && !window.confirm('当前文件有未保存修改，确定切换文件吗？')) return;
+    const readRequestId = ++fileReadRequestRef.current;
 
     setSelectedFile(node);
     setFileError('');
@@ -219,20 +299,23 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
     setLoadedContent('');
     setDraft('');
     setDirty(false);
+    onFileSelected?.(node.path);
 
     try {
       const desktopApi = window.ccNexusDesktop;
       if (!desktopApi?.readFile) throw new Error('ccNexus desktop bridge is unavailable');
       const data = await desktopApi.readFile(node.path) as FileResponse;
+      if (fileReadRequestRef.current !== readRequestId) return;
       setFileMeta(data);
       if (!data.isBinary && !data.isImage && typeof data.content === 'string') {
         setLoadedContent(data.content);
         setDraft(data.content);
       }
     } catch (err) {
+      if (fileReadRequestRef.current !== readRequestId) return;
       setFileError(err instanceof Error ? err.message : 'Failed to open file');
     }
-  }, [dirty]);
+  }, [dirty, onFileSelected]);
 
   useEffect(() => {
     if (!openFileRequest || openFileRequest.requestId <= lastOpenRequestRef.current) return;
@@ -280,6 +363,7 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
 
   const closeFile = useCallback(() => {
     if (dirty && !window.confirm('当前文件有未保存修改，确定关闭吗？')) return;
+    fileReadRequestRef.current += 1;
     setSelectedFile(null);
     setFileMeta(null);
     setLoadedContent('');
@@ -288,6 +372,23 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
     setFileError('');
     setNotice('');
   }, [dirty]);
+
+  const editorState = useMemo<FileEditorState>(() => ({
+    selectedFile,
+    fileMeta,
+    draft,
+    dirty,
+    fileError,
+    saving,
+    notice,
+    updateDraft,
+    saveFile: () => { void saveFile(); },
+    closeFile,
+  }), [closeFile, dirty, draft, fileError, fileMeta, notice, saveFile, saving, selectedFile, updateDraft]);
+
+  useEffect(() => {
+    onEditorStateChange?.(editorState);
+  }, [editorState, onEditorStateChange]);
 
   if (collapsed) {
     return (
@@ -346,45 +447,7 @@ export default function FileExplorer({ onWorkspaceChange, openFileRequest }: Fil
         )}
       </div>
 
-      <div className="file-editor">
-        {selectedFile ? (
-          <>
-            <div className="file-editor-header">
-              <div className="file-editor-title" title={selectedFile.path}>
-                <FileIcon node={selectedFile} />
-                <span>{selectedFile.name}</span>
-                {dirty && <em>已修改</em>}
-              </div>
-              <div className="file-editor-actions">
-                <button type="button" onClick={saveFile} disabled={!dirty || saving || fileMeta?.isBinary || fileMeta?.isImage} title="保存">
-                  <Save size={14} />
-                </button>
-                <button type="button" onClick={closeFile} title="关闭">
-                  <X size={14} />
-                </button>
-              </div>
-            </div>
-            {fileError && <div className="file-explorer-error">{fileError}</div>}
-            {notice && <div className="file-explorer-notice">{notice}</div>}
-            {fileMeta?.isImage && fileMeta.content && (
-              <div className="file-image-preview">
-                <img src={`data:${fileMeta.mimeType};base64,${fileMeta.content}`} alt={selectedFile.name} />
-              </div>
-            )}
-            {fileMeta?.isBinary && <div className="file-explorer-empty">二进制文件暂不支持编辑。</div>}
-            {!fileMeta?.isBinary && !fileMeta?.isImage && (
-              <textarea
-                className="file-editor-textarea"
-                spellCheck={false}
-                value={draft}
-                onChange={(event) => updateDraft(event.target.value)}
-              />
-            )}
-          </>
-        ) : (
-          <div className="file-editor-placeholder">选择文件查看或修改</div>
-        )}
-      </div>
+      {showEditor && <FileContentPanel editor={editorState} />}
     </aside>
   );
 }

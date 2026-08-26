@@ -39,6 +39,7 @@ interface Props {
   onSubagentHistory?: (key: string, history: SubagentHistoryResponse) => void;
   sessionId?: string | null;
   isStreaming?: boolean;
+  variant?: 'footer' | 'sidebar';
 }
 
 function normalizeTasks(status?: StatusData['tasks']): StatusTaskItem[] {
@@ -411,9 +412,10 @@ export default function StatusPanel({
   onSubagentHistory,
   sessionId,
   isStreaming = false,
+  variant = 'footer',
 }: Props) {
   const { t } = useTranslation();
-  const [openTab, setOpenTab] = useState<StatusTab | null>(null);
+  const [openTab, setOpenTab] = useState<StatusTab | null>(() => variant === 'sidebar' ? 'edits' : null);
   const panelRef = useRef<HTMLDivElement>(null);
   const tasks = useMemo(() => normalizeTasks(status.tasks), [status.tasks]);
   const subagents = status.subagents || [];
@@ -424,7 +426,7 @@ export default function StatusPanel({
   const runningSubagents = subagents.some(agent => agent.status === 'running');
 
   useEffect(() => {
-    if (!openTab) return;
+    if (!openTab || variant === 'sidebar') return;
     const handleOutsideClick = (event: MouseEvent) => {
       if (!panelRef.current?.contains(event.target as Node)) setOpenTab(null);
     };
@@ -437,12 +439,14 @@ export default function StatusPanel({
       document.removeEventListener('mousedown', handleOutsideClick);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [openTab]);
+  }, [openTab, variant]);
 
-  const toggleTab = (tab: StatusTab) => setOpenTab(current => current === tab ? null : tab);
+  const toggleTab = (tab: StatusTab) => setOpenTab(current => (
+    variant === 'sidebar' ? tab : current === tab ? null : tab
+  ));
 
   return (
-    <div className="status-panel" ref={panelRef}>
+    <div className={`status-panel ${variant === 'sidebar' ? 'status-panel-sidebar' : ''}`} ref={panelRef}>
       <div className="status-panel-tabs" role="tablist">
         <button type="button" role="tab" className={'status-panel-tab ' + (openTab === 'tasks' ? 'active' : '')} onClick={() => toggleTab('tasks')} aria-expanded={openTab === 'tasks'} aria-selected={openTab === 'tasks'}>
           <ListChecks size={15} /><span className="tab-label">{t('status.tasks')}</span><span className="tab-progress">{completedTasks}/{totalTasks}</span>
@@ -456,7 +460,7 @@ export default function StatusPanel({
       </div>
 
       {openTab ? (
-        <div className="status-panel-popover" role="dialog" aria-label={openTab}>
+        <div className="status-panel-popover" role={variant === 'sidebar' ? 'tabpanel' : 'dialog'} aria-label={openTab}>
           {openTab === 'tasks' ? <StatusTaskList tasks={tasks} /> : null}
           {openTab === 'subagents' ? <StatusSubagentList subagents={subagents} histories={subagentHistories} sessionId={sessionId} isStreaming={isStreaming} onHistory={onSubagentHistory} /> : null}
           {openTab === 'edits' ? <StatusFileChangesList files={files} onUndoFile={onUndoFile} onOpenFile={onOpenFile} onDiscardAllFiles={onDiscardAllFiles} onKeepAllFiles={onKeepAllFiles} /> : null}

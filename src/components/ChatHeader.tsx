@@ -79,10 +79,10 @@ export default function ChatHeader({
             <button className="header-btn icon-sm" onClick={() => setEditing(false)} title="取消"><X size={14} /></button>
           </div>
         ) : (
-          <span className="session-title" onClick={startEdit} title="点击编辑标题">
+          <button type="button" className="session-title" onClick={startEdit} title="点击编辑标题">
             {sessionTitle || '新会话'}
             <Pencil size={12} className="title-edit-icon" />
-          </span>
+          </button>
         )}
       </div>
       

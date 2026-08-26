@@ -61,6 +61,32 @@ export interface AttachmentBlock {
   path?: string;
 }
 
+export type WebResearchToolPhase = 'started' | 'approved' | 'completed' | 'error';
+
+export interface WebResearchToolResult {
+  title: string;
+  url: string;
+  snippet?: string;
+  publishedAt?: string;
+}
+
+export interface WebResearchAgentItem {
+  id: string;
+  requestId?: string;
+  toolUseId?: string;
+  toolName: 'WebSearch' | 'WebFetch';
+  input: Record<string, unknown>;
+  query?: string;
+  url?: string;
+  status: 'pending' | 'searching' | 'completed' | 'error' | 'denied';
+  content?: string;
+  results?: WebResearchToolResult[];
+  error?: string;
+  autoAllowAt?: number;
+  approval?: 'manual' | 'timeout';
+  updatedAt: number;
+}
+
 export interface TaskNotificationBlock {
   type: 'task_notification';
   icon: string;
@@ -141,7 +167,21 @@ export type DesktopChatEvent =
   | { type: 'tool_result'; sessionId?: string; uuid?: string; tool_use_id?: string; toolUseId?: string; content: string; is_error?: boolean }
   | { type: 'tool_progress'; sessionId?: string; toolName?: string; tool_name?: string; toolUseId?: string; tool_use_id?: string; elapsed?: number; status?: 'running' | 'completed' | 'error' }
   | { type: 'tool_use_summary'; sessionId?: string; summary?: string; precedingIds?: string[] }
-  | { type: 'permission_request'; sessionId?: string; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string }
+  | { type: 'permission_request'; sessionId?: string; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string; description?: string; toolUseId?: string; autoAllowAt?: number }
+  | {
+      type: 'web_research';
+      sessionId?: string;
+      phase: WebResearchToolPhase;
+      toolUseId: string;
+      toolName: 'WebSearch' | 'WebFetch';
+      input: Record<string, unknown>;
+      query?: string;
+      url?: string;
+      content?: string;
+      results?: WebResearchToolResult[];
+      error?: string;
+      approval?: 'manual' | 'timeout';
+    }
   | { type: 'status'; sessionId?: string; status: 'thinking' | 'idle'; reason?: 'abort-complete' }
   | { type: 'sdk_event'; sdkType?: string; sessionId?: string }
   | { type: 'error'; sessionId?: string; message: string; invalidSessionId?: string }

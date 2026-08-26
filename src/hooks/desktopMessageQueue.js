@@ -64,6 +64,7 @@ const PRIORITY_DESKTOP_MESSAGE_TYPES = new Set([
   'status',
   'error',
   'permission_request',
+  'web_research',
   'plan_approval',
   'ask_user_question',
   'mode_changed',
