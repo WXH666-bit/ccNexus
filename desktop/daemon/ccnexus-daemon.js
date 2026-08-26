@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import {
+  createPostToolUseHook,
   createPreToolUseHook,
   normalizePermissionMode,
 } from './permissionMode.js';
@@ -461,6 +462,47 @@ function touchRuntime(currentRuntime) {
   touchDaemon();
 }
 
+function requestWebResearchReview({ toolName, input, toolResponse, toolUseId, signal }) {
+  const requestId = `web-review-${activeRequestId}-${++permissionRequestCounter}`;
+  if (signal?.aborted) {
+    return Promise.resolve({ behavior: 'deny', message: 'Request aborted' });
+  }
+
+  return new Promise((resolve) => {
+    const settle = (decision) => {
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve(decision);
+    };
+    const onAbort = () => {
+      if (pendingPermissions.get(requestId) !== settle) return;
+      pendingPermissions.delete(requestId);
+      settle({ behavior: 'deny', message: 'Request aborted' });
+    };
+    pendingPermissions.set(requestId, settle);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    writeRawLine({
+      id: activeRequestId,
+      type: 'permission_request',
+      requestId,
+      toolName,
+      input,
+      options: {
+        toolUseID: toolUseId,
+        title: toolName === 'WebSearch' ? 'Review web search results' : 'Review fetched web content',
+        description: 'The Agent is waiting for this web result review before it can continue.',
+      },
+      review: {
+        stage: 'result',
+        toolResponse,
+      },
+    });
+  });
+}
+
 async function disposeRuntime(targetRuntime = runtime) {
   if (!targetRuntime || targetRuntime.closed) return;
   settleAllPlanApprovals('Runtime closed');
@@ -644,7 +686,9 @@ async function ensureRuntime(options = {}, runtimeDescriptor = {}) {
         source,
       });
     },
+    isolatedDenyAllTools: options.isolatedDenyAllTools === true,
   });
+  const webResearchReviewHook = createPostToolUseHook({ requestWebResearchReview });
   const query = sdkQuery({
     prompt: inputStream,
     options: {
@@ -654,6 +698,12 @@ async function ensureRuntime(options = {}, runtimeDescriptor = {}) {
         PreToolUse: [
           ...(Array.isArray(options.hooks?.PreToolUse) ? options.hooks.PreToolUse : []),
           { hooks: [planHook] },
+        ],
+        PostToolUse: [
+          ...(Array.isArray(options.hooks?.PostToolUse) ? options.hooks.PostToolUse : []),
+          ...(options.isolatedDenyAllTools === true
+            ? []
+            : [{ hooks: [webResearchReviewHook], timeout: 180 }]),
         ],
       },
       canUseTool: options.isolatedDenyAllTools === true ? denyIsolatedToolUse : canUseTool,

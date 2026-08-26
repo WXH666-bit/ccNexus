@@ -28,6 +28,25 @@ test('ChatView has a ccgui-style stream stall watchdog for missing result events
   assert.match(source, /finishStreamingMessage\(\)/);
 });
 
+test('ChatView treats permission waits and web review lifecycles as active turn state', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /const hasActiveWebResearch = webResearchAgentItems\.some/);
+  assert.match(source, /item\.status === 'pending' \|\| item\.status === 'searching'/);
+  assert.match(source, /const isStreamRecoverySuspended = Boolean\(permission \|\| planApproval \|\| askQuestion\) \|\| hasActiveWebResearch/);
+  assert.match(source, /isRecoverySuspended: streamRecoverySuspendedRef\.current/);
+  assert.match(source, /if \(!isTurnBusy && !stopping && messageQueue\.length > 0/);
+  assert.match(source, /shouldQueueChatMessage\(\{ isStreaming: isTurnBusy, stopping \}\)/);
+});
+
+test('session and workspace transitions abort a turn waiting on web review', () => {
+  const source = read('src/views/ChatView.tsx');
+
+  assert.match(source, /const handleNewSession = useCallback\(\(\) => \{\s*if \(isTurnBusy\) \{\s*send\(\{ type: 'abort'/s);
+  assert.match(source, /const handleSelectSession = useCallback[\s\S]*?if \(isTurnBusy\) \{\s*send\(\{ type: 'abort'/);
+  assert.match(source, /const handleWorkspaceChanged = useCallback\(\(\) => \{\s*if \(isTurnBusy\) \{\s*send\(\{ type: 'abort'/s);
+});
+
 test('ChatView consumes queued desktop chat events instead of only the latest packet', () => {
   const source = read('src/views/ChatView.tsx');
 

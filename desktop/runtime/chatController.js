@@ -86,10 +86,23 @@ function normalizeHttpUrl(value) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
     return { value: url, hostname: parsed.hostname || url };
   } catch {
     return null;
   }
+}
+
+function normalizeWebReviewOverride(value, fallbackInput = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!Array.isArray(value.results)) return null;
+  const query = firstString(fallbackInput.query, value.query);
+  if (!query) return null;
+  const results = value.results
+    .map(normalizeWebResult)
+    .filter(Boolean)
+    .slice(0, 20);
+  return { query: query.slice(0, 4_000), results };
 }
 
 function normalizeWebResult(value) {
@@ -368,6 +381,10 @@ export function createDesktopChatController({
       ? Math.max(0, Number(webPermissionTimeoutMs) || WEB_RESEARCH_AUTO_ALLOW_TIMEOUT_MS)
       : 300_000;
     const autoAllowAt = isWebResearchRequest ? Date.now() + permissionTimeoutMs : undefined;
+    const webReview = options?.webResearchReview;
+    const reviewDetails = isWebResearchRequest && webReview?.stage === 'result'
+      ? extractWebResearchDetails(toolName, input, webReview.toolResponse)
+      : null;
     if (isWebResearchRequest && toolUseId) {
       rememberWebResearchToolUse(toolUseId, {
         toolName,
@@ -385,6 +402,7 @@ export function createDesktopChatController({
         sessionId,
         ownerId,
         toolUseId,
+        reviewStage: webReview?.stage,
         timer: null,
       });
       emitSafe(emit, permissionRequestEvent({
@@ -397,6 +415,13 @@ export function createDesktopChatController({
         description,
         toolUseId,
         autoAllowAt,
+        ...(reviewDetails ? {
+          reviewStage: 'result',
+          results: reviewDetails.results,
+          ...(toolName === 'WebFetch' && reviewDetails.content
+            ? { content: reviewDetails.content.slice(0, 100_000) }
+            : {}),
+        } : {}),
       }));
       const timer = setTimeout(() => {
         const pending = pendingPermissions.get(requestId);
@@ -744,7 +769,10 @@ export function createDesktopChatController({
         prompt,
         options: queryOpts,
         rawModelId,
-        onPermissionRequest: (request) => canUseTool(request.toolName, request.input, request.options),
+        onPermissionRequest: (request) => canUseTool(request.toolName, request.input, {
+          ...request.options,
+          ...(request.review ? { webResearchReview: request.review } : {}),
+        }),
         onPlanApproval: (request) => requestPlanApprovalFromRenderer(emit, request, querySessionId),
       });
       runtimeLifecycle = readRuntimeLifecycle(query);
@@ -849,10 +877,11 @@ export function createDesktopChatController({
               if (!call || !isWebResearchToolName(call.toolName)) continue;
               const sessionId = event.session_id || querySessionId || call.sessionId;
               const details = extractWebResearchDetails(call.toolName, call.input, block.content);
+              const wasRejectedByUser = details.parsed?.rejectedByUser === true;
               const isError = Boolean(block.is_error)
                 || Boolean(details.parsed && typeof details.parsed === 'object' && details.parsed.error);
               emitSafe(emit, webResearchEvent({
-                phase: isError ? 'error' : 'completed',
+                phase: wasRejectedByUser ? 'denied' : isError ? 'error' : 'completed',
                 sessionId,
                 toolUseId: call.toolUseId,
                 toolName: call.toolName,
@@ -860,7 +889,7 @@ export function createDesktopChatController({
                 ...(details.query ? { query: details.query } : {}),
                 content: details.content,
                 results: details.results,
-                ...(isError ? { error: extractWebResearchError(details, block.content) } : {}),
+                ...(isError && !wasRejectedByUser ? { error: extractWebResearchError(details, block.content) } : {}),
               }));
               webResearchToolUses.delete(toolUseId);
             }
@@ -1052,9 +1081,17 @@ export function createDesktopChatController({
         pendingPermissions.delete(requestId);
         if (pending.timer) clearTimeout(pending.timer);
         const decision = behavior || (allow ? 'allow' : 'deny');
+        const webReviewOverride = decision !== 'deny'
+          && pending.reviewStage === 'result'
+          && pending.toolName === 'WebSearch'
+          ? normalizeWebReviewOverride(message.webReviewOverride, pending.input)
+          : null;
         pending.resolve(decision === 'deny'
           ? { behavior: 'deny', message: responseMessage || 'Denied by user' }
-          : { behavior: decision });
+          : {
+              behavior: decision,
+              ...(webReviewOverride ? { webReviewOverride } : {}),
+            });
         break;
       }
 

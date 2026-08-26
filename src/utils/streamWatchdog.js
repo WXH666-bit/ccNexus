@@ -3,10 +3,11 @@ export const STREAM_STALL_CHECK_INTERVAL_MS = 5_000;
 
 export function shouldRecoverStalledStream({
   isStreaming,
+  isRecoverySuspended = false,
   lastActivityAt,
   now,
   timeoutMs = STREAM_STALL_TIMEOUT_MS,
 }) {
-  if (!isStreaming) return false;
+  if (!isStreaming || isRecoverySuspended) return false;
   return now - lastActivityAt >= timeoutMs;
 }

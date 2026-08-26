@@ -19,6 +19,8 @@ export const SAFE_ALWAYS_ALLOW_TOOLS = new Set([
   'Sleep',
 ]);
 
+export const ALWAYS_REVIEW_TOOLS = new Set(['WebSearch', 'WebFetch']);
+
 function normalizeToolName(toolName) {
   return String(toolName || '').trim();
 }
@@ -45,7 +47,7 @@ export function createPermissionPolicy({ askUser, askQuestion }) {
       if (SAFE_ALWAYS_ALLOW_TOOLS.has(normalizedToolName)) {
         return { behavior: 'allow' };
       }
-      if (alwaysAllowedTools.has(normalizedToolName)) {
+      if (alwaysAllowedTools.has(normalizedToolName) && !ALWAYS_REVIEW_TOOLS.has(normalizedToolName)) {
         return { behavior: 'allow' };
       }
 
@@ -69,11 +71,16 @@ export function createPermissionPolicy({ askUser, askQuestion }) {
 
       const decision = await askUser(normalizedToolName, input, options);
       if (decision?.behavior === 'always_allow') {
-        alwaysAllowedTools.add(normalizedToolName);
+        if (!ALWAYS_REVIEW_TOOLS.has(normalizedToolName)) {
+          alwaysAllowedTools.add(normalizedToolName);
+        }
         return { behavior: 'allow' };
       }
       if (decision?.behavior === 'allow') {
-        return { behavior: 'allow' };
+        return {
+          behavior: 'allow',
+          ...(decision.webReviewOverride ? { webReviewOverride: decision.webReviewOverride } : {}),
+        };
       }
       return {
         behavior: 'deny',

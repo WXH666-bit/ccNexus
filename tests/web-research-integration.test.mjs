@@ -70,21 +70,87 @@ test('selected research evidence is an internal continuation and stays out of ch
   assert.match(history, /<ccnexus-internal-web-research>/);
 });
 
-test('research handoff is a one-shot decision with retry, reject, and queue feedback', () => {
+test('manual research handoff is a one-shot decision with retry, reject, and queue feedback', () => {
   const panel = read('src/components/WebResearchPanel.tsx');
   const chatView = read('src/views/ChatView.tsx');
 
-  assert.match(panel, /status: 'sent' \| 'queued' \| 'rejected'/);
+  assert.match(panel, /status: 'sent' \| 'queued' \| 'rejected' \| 'approved' \| 'consumed'/);
   assert.match(panel, /researchDecisionRef\.current\?\.responseId === responseId/);
   assert.match(panel, /outcome === 'queued'/);
   assert.match(panel, /已加入 Agent 队列/);
   assert.match(panel, /已交给 Agent/);
   assert.match(panel, /拒绝/);
   assert.match(panel, /重新搜索/);
-  assert.match(panel, /disabled=\{!selectedResults\.length \|\| decisionLocked\}/);
+  assert.match(panel, /disabled=\{decisionLocked \|\| \(isApprovalPreview \? !onAgentDecision : hasPendingAgentReview \|\| !selectedResults\.length\)\}/);
   assert.match(panel, /setSelectedUrls\(new Set\(\)\)/);
   assert.match(chatView, /return 'queued'/);
   assert.match(chatView, /return 'sent'/);
+});
+
+test('Agent WebSearch results are already consumed by the current turn and cannot trigger a second answer', () => {
+  const panel = read('src/components/WebResearchPanel.tsx');
+
+  assert.match(panel, /const responseId = `agent:\$\{completedSearch\.id\}`/);
+  assert.match(panel, /status: 'consumed'/);
+  assert.match(panel, /已用于本轮回答/);
+  assert.match(panel, /个来源已作为工具结果回传/);
+  assert.match(panel, /responseId\.startsWith\('agent:'\)/);
+  assert.match(panel, /activeDecision\?\.status !== 'consumed'/);
+  assert.match(panel, /activeDecision\?\.status === 'consumed' \? '已用于本轮'/);
+});
+
+test('Agent WebSearch output is held for post-search review before the same turn continues', () => {
+  const permissionMode = read('desktop/daemon/permissionMode.js');
+  const daemon = read('desktop/daemon/ccnexus-daemon.js');
+  const controller = read('desktop/runtime/chatController.js');
+  const panel = read('src/components/WebResearchPanel.tsx');
+
+  assert.match(permissionMode, /WEB_RESEARCH_TOOLS\.has\(input\.tool_name\)[\s\S]*?return allow\(\)/);
+  assert.match(permissionMode, /createPostToolUseHook/);
+  assert.match(permissionMode, /await requestWebResearchReview/);
+  assert.match(permissionMode, /updatedToolOutput/);
+  assert.match(daemon, /PostToolUse:[\s\S]*?webResearchReviewHook/);
+  assert.match(daemon, /review:\s*\{\s*stage: 'result',\s*toolResponse,/);
+  assert.match(controller, /webResearchReview: request\.review/);
+  assert.match(controller, /reviewStage: 'result'/);
+  assert.match(panel, /AGENT_APPROVAL_RESPONSE_PREFIX/);
+  assert.match(panel, /onAgentDecision\(approvalRequestId, 'allow', reviewOverride\)/);
+  assert.match(panel, /Agent 正在等待/);
+});
+
+test('pending Agent review cannot be bypassed by a manual search or hidden handoff', () => {
+  const panel = read('src/components/WebResearchPanel.tsx');
+
+  assert.match(panel, /const hasPendingAgentReview = useMemo\(/);
+  assert.match(panel, /if \(!normalizedQuery \|\| loading \|\| hasPendingAgentReview \|\| isApprovalPreview\) return;/);
+  assert.match(panel, /if \(hasPendingAgentReview \|\| !selectedResults\.length/);
+  assert.match(panel, /readOnly=\{agentReviewLocked\}/);
+  assert.match(panel, /disabled=\{!query\.trim\(\) \|\| agentReviewLocked\}/);
+  assert.match(panel, /if \(!agentReviewLocked\) void performSearch\(\);/);
+  assert.match(panel, /onSendToChat\(prompt, `网页研究 · \$\{searchedQuery\}`\)/);
+});
+
+test('cancelled Agent previews remain retryable and completed output stays request-scoped', () => {
+  const panel = read('src/components/WebResearchPanel.tsx');
+
+  assert.match(panel, /const cancelApprovalPreview = useCallback\(/);
+  assert.match(panel, /预览已停止，可点击“重试预览”继续。/);
+  assert.match(panel, /hasApprovalPreviewInFlight \? cancelApprovalPreview : cancelActive/);
+  assert.match(panel, /isActiveApprovalPreview && item\.toolName === 'WebSearch' && error/);
+  assert.match(panel, /const isApprovalPreview = Boolean\(approvalResponseRequestId\) && approvalDecision\?\.status !== 'rejected'/);
+  assert.match(panel, /currentAgentResultId !== completedSearch\.id/);
+  assert.match(panel, /currentApprovalResultId !== completedSearch\.requestId/);
+});
+
+test('WebFetch result review uses the same approval canvas as WebSearch', () => {
+  const panel = read('src/components/WebResearchPanel.tsx');
+
+  assert.match(panel, /item\.reviewStage === 'result'/);
+  assert.match(panel, /item\.toolName === 'WebFetch' && item\.reviewStage === 'result'/);
+  assert.match(panel, /nextPendingReview\.toolName === 'WebFetch' \? 'AI WebFetch' : 'AI WebSearch'/);
+  assert.match(panel, /isSearchReview \? \(/);
+  assert.match(panel, /item\.status === 'pending' && item\.reviewStage === 'result'/);
+  assert.match(panel, /const canRetryApprovalPreview = !approvalResponseRequestId/);
 });
 
 test('research provider and unreadable-source failures use user-facing language', () => {
@@ -157,7 +223,7 @@ test('research request cleanup cannot clear a newer request state', () => {
   assert.match(panel, /cancelActive\(\);\s*const id = requestId\('web-search'\)/);
   assert.match(panel, /finally \{\s*if \(activeRequestRef\.current === id\) \{\s*activeRequestRef\.current = null;\s*setLoading\(false\);/s);
   assert.match(panel, /finally \{\s*if \(activeRequestRef\.current === id\) \{\s*activeRequestRef\.current = null;\s*setLoadingContentUrl\(''\);/s);
-  assert.match(panel, /if \(!open\) \{\s*cancelActive\(\);/s);
+  assert.match(panel, /if \(!open\) \{\s*cancelApprovalPreview\(\);/s);
 });
 
 test('welcome research action opens the curator instead of sending a normal chat prompt', () => {
@@ -182,7 +248,7 @@ test('Claude web tools open the right panel and reuse the existing permission re
   assert.match(panel, /formatAutoAllowCountdown/);
   assert.match(chatView, /autoAllowAt: msg\.autoAllowAt/);
   assert.match(chatView, /approval: msg\.approval/);
-  assert.match(panel, /'always_allow'/);
+  assert.doesNotMatch(panel, />始终允许</);
   assert.match(panel, /item\.status === 'pending'/);
   assert.match(queue, /'web_research'/);
   assert.doesNotMatch(chatView, /联网搜索.*handleSend|search the web.*handleSend/i);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-import { createPreToolUseHook, normalizePermissionMode } from '../desktop/daemon/permissionMode.js';
+import { createPostToolUseHook, createPreToolUseHook, normalizePermissionMode } from '../desktop/daemon/permissionMode.js';
 import { buildRuntimeSignature, hasSameContextModel } from '../server/runtimeIdentity.js';
 import {
   DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS,
@@ -19,8 +19,8 @@ const daemonSource = readFileSync(new URL('../desktop/daemon/ccnexus-daemon.js',
     '',
   )
   .replace(
-    "import { createInterface } from 'node:readline';\nimport { createRequire } from 'node:module';\nimport { randomUUID } from 'node:crypto';\nimport {\n  createPreToolUseHook,\n  normalizePermissionMode,\n} from './permissionMode.js';\nimport {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';\n\nconst require = createRequire(import.meta.url);\nconst { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');",
-    "const { createInterface, sdkQuery, randomUUID, createPreToolUseHook, normalizePermissionMode, DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS, DEFAULT_RUNTIME_IDLE_TIMEOUT_MS, buildRuntimeSignature, hasSameContextModel, RUNTIME_CLEANUP_INTERVAL_MS, getRuntimeRetirementReason, isRuntimeRetirementBlocked } = globalThis.__daemonDeps;",
+    "import { createInterface } from 'node:readline';\nimport { createRequire } from 'node:module';\nimport { randomUUID } from 'node:crypto';\nimport {\n  createPostToolUseHook,\n  createPreToolUseHook,\n  normalizePermissionMode,\n} from './permissionMode.js';\nimport {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';\n\nconst require = createRequire(import.meta.url);\nconst { query: sdkQuery } = require('@anthropic-ai/claude-agent-sdk');",
+    "const { createInterface, sdkQuery, randomUUID, createPostToolUseHook, createPreToolUseHook, normalizePermissionMode, DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS, DEFAULT_RUNTIME_IDLE_TIMEOUT_MS, buildRuntimeSignature, hasSameContextModel, RUNTIME_CLEANUP_INTERVAL_MS, getRuntimeRetirementReason, isRuntimeRetirementBlocked } = globalThis.__daemonDeps;",
   )
   .replace(
     "import {\n  buildRuntimeSignature,\n  hasSameContextModel,\n} from '../../server/runtimeIdentity.js';",
@@ -470,6 +470,7 @@ test('desktop daemon reuses one SDK query across consecutive turns in the same s
     globalThis: {
       __daemonDeps: {
         randomUUID: () => 'test-plan-id',
+        createPostToolUseHook,
         createPreToolUseHook,
         normalizePermissionMode,
         DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS,
@@ -2023,6 +2024,7 @@ function createDaemonHarness({
     globalThis: {
       __daemonDeps: {
         randomUUID: () => 'test-plan-id',
+        createPostToolUseHook,
         createPreToolUseHook,
         normalizePermissionMode,
         DEFAULT_RUNTIME_ABSOLUTE_LIFETIME_MS,

@@ -53,6 +53,7 @@ import type {
   ChatMessage, Session, StatusData, PermissionRequest, PermissionMode,
   PlanApprovalRequest, AskUserQuestionRequest, SearchResult, SubAgentInfo, SubagentHistoryResponse, ImageBlock, AttachmentBlock,
   WebResearchAgentItem,
+  WebResearchReviewOverride,
 } from '../types';
 import { isPermissionMode } from '../types';
 
@@ -213,6 +214,11 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   });
   const [webResearchAgentItems, setWebResearchAgentItems] = useState<WebResearchAgentItem[]>([]);
   const webResearchDecisionLocksRef = useRef(new Set<string>());
+  const hasActiveWebResearch = webResearchAgentItems.some(item => (
+    item.status === 'pending' || item.status === 'searching'
+  ));
+  const isStreamRecoverySuspended = Boolean(permission || planApproval || askQuestion) || hasActiveWebResearch;
+  const isTurnBusy = isStreaming || isStreamRecoverySuspended;
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => (
     localStorage.getItem('codexSidebarCollapsed') === 'true'
   ));
@@ -221,6 +227,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   const streamingBlocksRef = useRef(createStreamingBlockState());
   const streamActivityAtRef = useRef(Date.now());
   const streamStallIntervalRef = useRef<number | null>(null);
+  const streamRecoverySuspendedRef = useRef(isStreamRecoverySuspended);
+  const streamRecoveryWasSuspendedRef = useRef(false);
+  streamRecoverySuspendedRef.current = isStreamRecoverySuspended;
   const requestedHistorySessionRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(urlSessionId ?? null);
   const historyRequestTokenRef = useRef(0);
@@ -641,12 +650,31 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         window.clearInterval(streamStallIntervalRef.current);
         streamStallIntervalRef.current = null;
       }
+      streamRecoveryWasSuspendedRef.current = false;
       return;
+    }
+
+    if (isStreamRecoverySuspended) {
+      if (streamStallIntervalRef.current !== null) {
+        window.clearInterval(streamStallIntervalRef.current);
+        streamStallIntervalRef.current = null;
+      }
+      streamRecoveryWasSuspendedRef.current = true;
+      return;
+    }
+
+    // A permission wait is expected silence, not a stalled stream. Restart the
+    // inactivity window when that gate/tool lifecycle releases so the queue
+    // cannot race the model's continuation.
+    if (streamRecoveryWasSuspendedRef.current) {
+      streamActivityAtRef.current = Date.now();
+      streamRecoveryWasSuspendedRef.current = false;
     }
 
     streamStallIntervalRef.current = window.setInterval(() => {
       if (shouldRecoverStalledStream({
         isStreaming: true,
+        isRecoverySuspended: streamRecoverySuspendedRef.current,
         lastActivityAt: streamActivityAtRef.current,
         now: Date.now(),
       })) {
@@ -660,7 +688,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         streamStallIntervalRef.current = null;
       }
     };
-  }, [finishStreamingMessage, isStreaming]);
+  }, [finishStreamingMessage, isStreamRecoverySuspended, isStreaming]);
 
   const refreshSessions = useCallback(async () => {
     const [event, activeSession] = await Promise.all([
@@ -937,6 +965,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
             url,
             status: 'pending',
             autoAllowAt: msg.autoAllowAt,
+            reviewStage: msg.reviewStage,
+            results: msg.results,
+            content: msg.content,
             updatedAt: Date.now(),
           }));
           break;
@@ -949,7 +980,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
           ? 'completed'
           : msg.phase === 'error'
             ? 'error'
-            : 'searching';
+            : msg.phase === 'denied'
+              ? 'denied'
+              : 'searching';
         setResearchPanelOpen(true);
         setWebResearchAgentItems(current => mergeWebResearchItem(current, {
           id: msg.toolUseId,
@@ -1076,23 +1109,23 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   }, [incomingMessages, urlSessionId, navigate, currentSession, finishStreamingMessage, applySessionList, applySessionHistory, markFileProcessed, rememberActiveSession, updateSessions]);
 
   const handleNewSession = useCallback(() => {
-    if (isStreaming && currentSession?.id) {
-      send({ type: 'abort', sessionId: currentSession.id });
+    if (isTurnBusy) {
+      send({ type: 'abort', sessionId: currentSession?.id ?? activeSessionIdRef.current });
     }
     newSessionNavigationRef.current = true;
     rememberActiveSession(null);
     beginSessionTransition(null);
     navigate('/chat', { replace: true });
     send({ type: 'new_session' });
-  }, [beginSessionTransition, currentSession, isStreaming, navigate, rememberActiveSession, send]);
+  }, [beginSessionTransition, currentSession, isTurnBusy, navigate, rememberActiveSession, send]);
 
   const handleOpenHistory = useCallback(() => {
-    if (isStreaming) {
-      send({ type: 'abort', sessionId: currentSession?.id });
+    if (isTurnBusy) {
+      send({ type: 'abort', sessionId: currentSession?.id ?? activeSessionIdRef.current });
       finishStreamingMessage();
     }
     navigate('/history');
-  }, [currentSession, finishStreamingMessage, isStreaming, navigate, send]);
+  }, [currentSession, finishStreamingMessage, isTurnBusy, navigate, send]);
 
   const handleSelectSession = useCallback((session: Session) => {
     const activeSessionId = currentSession?.id ?? activeSessionIdRef.current;
@@ -1102,14 +1135,14 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     // the chat blank.
     if (session.id === activeSessionId) {
       if (requestedHistorySessionRef.current === session.id) return;
-      if (isStreaming) {
+      if (isTurnBusy) {
         send({ type: 'abort', sessionId: activeSessionId });
         finishStreamingMessage();
       }
       requestSessionHistory(session.id);
       return;
     }
-    if (isStreaming && activeSessionId) {
+    if (isTurnBusy) {
       send({ type: 'abort', sessionId: activeSessionId });
       finishStreamingMessage();
     }
@@ -1119,7 +1152,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     // Starting it here races the old urlSessionId captured by applySessionHistory
     // and can discard a valid response for the clicked recent task.
     navigate(`/chat/${encodeURIComponent(session.id)}`);
-  }, [beginSessionTransition, currentSession, finishStreamingMessage, isStreaming, navigate, rememberActiveSession, requestSessionHistory, send]);
+  }, [beginSessionTransition, currentSession, finishStreamingMessage, isTurnBusy, navigate, rememberActiveSession, requestSessionHistory, send]);
 
   const toggleLeftSidebar = useCallback(() => {
     setLeftSidebarCollapsed(current => {
@@ -1149,7 +1182,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     }
 
     // If AI is streaming and queue is requested, add to queue
-    if (shouldQueueChatMessage({ isStreaming, stopping }) && queue) {
+    if (shouldQueueChatMessage({ isStreaming: isTurnBusy, stopping }) && queue) {
       const queuedMsg: QueuedChatMessage = createQueuedChatMessage({
         id: genId(),
         text: text.trim(),
@@ -1168,7 +1201,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     }
 
     // If AI is streaming but not queued, still add to queue
-    if (shouldQueueChatMessage({ isStreaming, stopping })) {
+    if (shouldQueueChatMessage({ isStreaming: isTurnBusy, stopping })) {
       const queuedMsg: QueuedChatMessage = createQueuedChatMessage({
         id: genId(),
         text: text.trim(),
@@ -1245,11 +1278,11 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       },
     });
     return 'sent';
-  }, [beginSessionTransition, currentSession, finishStreamingMessage, handleNewSession, handleOpenHistory, isStreaming, mode, model, navigate, reasoning, send, setMode, stopping]);
+  }, [beginSessionTransition, currentSession, finishStreamingMessage, handleNewSession, handleOpenHistory, isTurnBusy, mode, model, navigate, reasoning, send, setMode, stopping]);
 
   // Process message queue when streaming completes
   useEffect(() => {
-    if (!isStreaming && !stopping && messageQueue.length > 0 && !queueProcessingRef.current) {
+    if (!isTurnBusy && !stopping && messageQueue.length > 0 && !queueProcessingRef.current) {
       queueProcessingRef.current = true;
       const nextMsg = messageQueue[0];
       const scheduledEpoch = sessionTransitionEpochRef.current;
@@ -1265,7 +1298,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
         queueProcessingRef.current = false;
       }, 100);
     }
-  }, [isStreaming, stopping, messageQueue, handleSend]);
+  }, [isTurnBusy, stopping, messageQueue, handleSend]);
 
   // Queue management
   const removeFromQueue = useCallback((id: string) => {
@@ -1308,7 +1341,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     setPermission(null);
   }, [send]);
 
-  const handleWebResearchDecision = useCallback((requestId: string, behavior: 'allow' | 'deny' | 'always_allow') => {
+  const handleWebResearchDecision = useCallback((requestId: string, behavior: 'allow' | 'deny' | 'always_allow', reviewOverride?: WebResearchReviewOverride) => {
     const pendingItem = webResearchAgentItems.find(item => item.requestId === requestId && item.status === 'pending');
     if (!pendingItem || webResearchDecisionLocksRef.current.has(requestId)) return;
     if (pendingItem?.autoAllowAt && Date.now() >= pendingItem.autoAllowAt) {
@@ -1326,6 +1359,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
       sessionId: activeSessionIdRef.current || undefined,
       behavior,
       allow: behavior !== 'deny',
+      ...(reviewOverride ? { webReviewOverride: reviewOverride } : {}),
     });
     setWebResearchAgentItems(current => current.map(item => (
       item.requestId === requestId
@@ -1399,6 +1433,9 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
   ), [messageQueue]);
 
   const handleWorkspaceChanged = useCallback(() => {
+    if (isTurnBusy) {
+      send({ type: 'abort', sessionId: currentSession?.id ?? activeSessionIdRef.current });
+    }
     newSessionNavigationRef.current = false;
     beginSessionTransition(null);
     setFileOpenRequest(null);
@@ -1412,7 +1449,7 @@ export default function ChatView({ routeSessionId }: ChatViewProps) {
     send({ type: 'new_session' });
     navigate('/chat', { replace: true });
     void refreshSessions().catch(() => applySessionList([]));
-  }, [applySessionList, beginSessionTransition, navigate, refreshSessions, send, updateSessions]);
+  }, [applySessionList, beginSessionTransition, currentSession, isTurnBusy, navigate, refreshSessions, send, updateSessions]);
 
   const handleOpenProject = useCallback(async () => {
     const desktopApi = window.ccNexusDesktop;

@@ -37,3 +37,15 @@ test('does not recover when there is no active stream', () => {
     false,
   );
 });
+
+test('does not recover while the turn is intentionally waiting on an interaction', () => {
+  assert.equal(
+    shouldRecoverStalledStream({
+      isStreaming: true,
+      isRecoverySuspended: true,
+      lastActivityAt: 1_000,
+      now: 1_000 + STREAM_STALL_TIMEOUT_MS + 1,
+    }),
+    false,
+  );
+});

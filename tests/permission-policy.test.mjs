@@ -30,6 +30,33 @@ test('always_allow remembers the tool for later permission checks', async () => 
   assert.equal(asked, 1);
 });
 
+test('web research tools require a fresh result review even after always_allow', async () => {
+  let asked = 0;
+  const policy = createPermissionPolicy({
+    askUser: async () => {
+      asked += 1;
+      return { behavior: 'always_allow' };
+    },
+  });
+
+  assert.deepEqual(await policy.canUseTool('WebSearch', { query: 'first' }), { behavior: 'allow' });
+  assert.deepEqual(await policy.canUseTool('WebSearch', { query: 'second' }), { behavior: 'allow' });
+  assert.deepEqual(await policy.canUseTool('WebFetch', { url: 'https://example.com' }), { behavior: 'allow' });
+  assert.deepEqual(await policy.canUseTool('WebFetch', { url: 'https://example.org' }), { behavior: 'allow' });
+  assert.equal(asked, 4);
+});
+
+test('web review overrides survive the permission policy handoff', async () => {
+  const webReviewOverride = { query: 'ccNexus', results: [] };
+  const policy = createPermissionPolicy({
+    askUser: async () => ({ behavior: 'allow', webReviewOverride }),
+  });
+  assert.deepEqual(await policy.canUseTool('WebSearch', { query: 'ccNexus' }), {
+    behavior: 'allow',
+    webReviewOverride,
+  });
+});
+
 test('Write asks the user instead of being silently allowed or denied', async () => {
   let asked = 0;
   const policy = createPermissionPolicy({

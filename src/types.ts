@@ -61,13 +61,18 @@ export interface AttachmentBlock {
   path?: string;
 }
 
-export type WebResearchToolPhase = 'started' | 'approved' | 'completed' | 'error';
+export type WebResearchToolPhase = 'started' | 'approved' | 'completed' | 'error' | 'denied';
 
 export interface WebResearchToolResult {
   title: string;
   url: string;
   snippet?: string;
   publishedAt?: string;
+}
+
+export interface WebResearchReviewOverride {
+  query: string;
+  results: WebResearchToolResult[];
 }
 
 export interface WebResearchAgentItem {
@@ -84,6 +89,7 @@ export interface WebResearchAgentItem {
   error?: string;
   autoAllowAt?: number;
   approval?: 'manual' | 'timeout';
+  reviewStage?: 'result';
   updatedAt: number;
 }
 
@@ -169,7 +175,7 @@ export type DesktopChatEvent =
   | { type: 'tool_result'; sessionId?: string; uuid?: string; tool_use_id?: string; toolUseId?: string; content: string; is_error?: boolean }
   | { type: 'tool_progress'; sessionId?: string; toolName?: string; tool_name?: string; toolUseId?: string; tool_use_id?: string; elapsed?: number; status?: 'running' | 'completed' | 'error' }
   | { type: 'tool_use_summary'; sessionId?: string; summary?: string; precedingIds?: string[] }
-  | { type: 'permission_request'; sessionId?: string; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string; description?: string; toolUseId?: string; autoAllowAt?: number }
+  | { type: 'permission_request'; sessionId?: string; requestId: string; toolName: string; input: Record<string, unknown>; title?: string; displayName?: string; description?: string; toolUseId?: string; autoAllowAt?: number; reviewStage?: 'result'; results?: WebResearchToolResult[]; content?: string }
   | {
       type: 'web_research';
       sessionId?: string;

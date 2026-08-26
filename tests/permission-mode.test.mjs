@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createPostToolUseHook,
   createPreToolUseHook,
   normalizeAllowedPrompts,
   normalizePermissionMode,
@@ -131,4 +132,86 @@ test('unrelated tools pass through native permission handling', async () => {
     tool_name: 'Edit',
     tool_input: { file_path: 'src/example.ts' },
   }), { continue: true });
+});
+
+test('web tools execute before review regardless of the current SDK permission mode', async () => {
+  const hook = createPreToolUseHook({
+    modeState: { current: 'auto' },
+    requestPlanApproval: async () => ({ approved: true, targetMode: 'auto' }),
+    applyMode: async () => {},
+  });
+
+  const result = await hook({ tool_name: 'WebSearch', tool_input: { query: 'ccNexus' } });
+  assert.equal(result.hookSpecificOutput.permissionDecision, 'allow');
+});
+
+test('isolated prompt enhancement denies web tools before the review pipeline', async () => {
+  const hook = createPreToolUseHook({
+    modeState: { current: 'auto' },
+    requestPlanApproval: async () => ({ approved: true, targetMode: 'auto' }),
+    applyMode: async () => {},
+    isolatedDenyAllTools: true,
+  });
+
+  const result = await hook({ tool_name: 'WebSearch', tool_input: { query: 'do not run' } });
+  assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(result.hookSpecificOutput.permissionDecisionReason, /cannot use tools/);
+});
+
+test('web tool output waits for review and is replaced when rejected', async () => {
+  let resolveReview;
+  const hook = createPostToolUseHook({
+    requestWebResearchReview: () => new Promise(resolve => { resolveReview = resolve; }),
+  });
+  let settled = false;
+  const pending = hook({
+    tool_name: 'WebSearch',
+    tool_input: { query: 'ccNexus' },
+    tool_response: { results: [{ title: 'ccNexus', url: 'https://example.com' }] },
+  }, 'tool-use-1').then(result => {
+    settled = true;
+    return result;
+  });
+
+  await Promise.resolve();
+  assert.equal(settled, false);
+  resolveReview({ behavior: 'deny', message: 'Not approved' });
+  const result = await pending;
+  assert.equal(result.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.deepEqual(result.hookSpecificOutput.updatedToolOutput, {
+    error: 'Not approved',
+    rejectedByUser: true,
+  });
+});
+
+test('approved web tool output passes through unchanged', async () => {
+  const hook = createPostToolUseHook({
+    requestWebResearchReview: async () => ({ behavior: 'allow' }),
+  });
+  assert.deepEqual(await hook({
+    tool_name: 'WebSearch',
+    tool_input: { query: 'ccNexus' },
+    tool_response: { results: [] },
+  }, 'tool-use-2'), { continue: true });
+});
+
+test('a reviewed retry replaces the web output before it reaches the Agent', async () => {
+  const reviewOverride = {
+    query: 'ccNexus',
+    results: [{ title: 'Fresh result', url: 'https://example.com/fresh' }],
+  };
+  const hook = createPostToolUseHook({
+    requestWebResearchReview: async () => ({ behavior: 'allow', webReviewOverride: reviewOverride }),
+  });
+  assert.deepEqual(await hook({
+    tool_name: 'WebSearch',
+    tool_input: { query: 'ccNexus' },
+    tool_response: { results: [{ title: 'Old result', url: 'https://example.com/old' }] },
+  }, 'tool-use-3'), {
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      updatedToolOutput: reviewOverride,
+    },
+  });
 });

@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { WebResearchAgentItem } from '../types';
+import type { WebResearchAgentItem, WebResearchReviewOverride } from '../types';
 import {
   cancelWebResearch,
   fetchWebContent,
@@ -44,14 +44,38 @@ interface Props {
   agentItems?: WebResearchAgentItem[];
   onOpenChange: (open: boolean) => void;
   onSendToChat: (prompt: string, displayText: string) => 'sent' | 'queued' | 'ignored' | void;
-  onAgentDecision?: (requestId: string, behavior: 'allow' | 'deny' | 'always_allow') => void;
+  onAgentDecision?: (requestId: string, behavior: 'allow' | 'deny', reviewOverride?: WebResearchReviewOverride) => void;
 }
 
 type ResearchDecision = {
   responseId: string;
-  status: 'sent' | 'queued' | 'rejected';
+  status: 'sent' | 'queued' | 'rejected' | 'approved' | 'consumed';
   selectedCount: number;
 };
+
+const AGENT_APPROVAL_RESPONSE_PREFIX = 'approval:';
+
+function agentApprovalRequestId(responseId?: string) {
+  return responseId?.startsWith(AGENT_APPROVAL_RESPONSE_PREFIX)
+    ? responseId.slice(AGENT_APPROVAL_RESPONSE_PREFIX.length)
+    : '';
+}
+
+function researchDecisionCopy(decision: ResearchDecision) {
+  if (decision.status === 'queued') {
+    return { title: '已加入 Agent 队列', detail: '当前回答结束后继续' };
+  }
+  if (decision.status === 'sent') {
+    return { title: '已交给 Agent', detail: `${decision.selectedCount} 个来源正在处理` };
+  }
+  if (decision.status === 'approved') {
+    return { title: '已交给 Agent', detail: 'Agent 正在使用本轮搜索结果继续回答' };
+  }
+  if (decision.status === 'consumed') {
+    return { title: '已用于本轮回答', detail: `${decision.selectedCount} 个来源已作为工具结果回传` };
+  }
+  return { title: '已拒绝本轮资料', detail: '不会发送给 Agent' };
+}
 
 const RECENCY_OPTIONS: Array<{ value: '' | WebResearchRecency; label: string }> = [
   { value: '', label: '不限时间' },
@@ -78,6 +102,17 @@ function parseDomainFilter(value: string) {
   return value.split(/[\s,，]+/).map(item => item.trim()).filter(Boolean).slice(0, 20);
 }
 
+function agentSearchDomainFilter(item: WebResearchAgentItem, fallback: string) {
+  const allowed = Array.isArray(item.input.allowed_domains)
+    ? item.input.allowed_domains.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+    : [];
+  const blocked = Array.isArray(item.input.blocked_domains)
+    ? item.input.blocked_domains.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+    : [];
+  const requested = [...allowed, ...blocked.map(value => `-${value}`)];
+  return requested.length ? requested.slice(0, 20) : parseDomainFilter(fallback);
+}
+
 function formatDuration(entry: WebResearchActivityEntry) {
   if (!entry.endTime) return '进行中';
   const milliseconds = Math.max(0, entry.endTime - entry.startTime);
@@ -98,13 +133,25 @@ function formatAutoAllowCountdown(autoAllowAt: number, now: number) {
 
 function agentStatusLabel(item: WebResearchAgentItem, now: number) {
   if (item.status === 'pending') {
+    if (item.reviewStage === 'result') {
+      const sourceCount = item.results?.length || 0;
+      const countdown = item.autoAllowAt
+        ? ` · ${formatAutoAllowCountdown(item.autoAllowAt, now)} 后自动同意`
+        : '';
+      return `结果待确认 · ${sourceCount} 个来源${countdown}`;
+    }
     return item.autoAllowAt
       ? `等待同意 · ${formatAutoAllowCountdown(item.autoAllowAt, now)} 后自动允许`
       : '等待你的同意';
   }
   if (item.status === 'searching') {
+    if (item.approval) {
+      return item.approval === 'timeout'
+        ? '已自动同意 · 正在交给 Agent'
+        : '已同意 · 正在交给 Agent';
+    }
     const activity = item.toolName === 'WebFetch' ? 'AI 正在读取网页' : 'AI 正在搜索网络';
-    return item.approval === 'timeout' ? `已自动允许 · ${activity}` : activity;
+    return activity;
   }
   if (item.status === 'completed') return item.results?.length ? `已返回 ${item.results.length} 个来源` : '已完成';
   if (item.status === 'denied') return '已拒绝';
@@ -206,10 +253,13 @@ export default function WebResearchPanel({
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [researchDecision, setResearchDecision] = useState<ResearchDecision | null>(null);
+  const [approvalPreviewRequestId, setApprovalPreviewRequestId] = useState('');
   const [clockNow, setClockNow] = useState(() => Date.now());
   const activeRequestRef = useRef<string | null>(null);
   const appliedAgentResultRef = useRef('');
   const researchDecisionRef = useRef<ResearchDecision | null>(null);
+  const approvalOverrideResponseRef = useRef('');
+  const previewedApprovalRequestsRef = useRef(new Set<string>());
   const agentItemsRef = useRef(agentItems);
   agentItemsRef.current = agentItems;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -233,22 +283,40 @@ export default function WebResearchPanel({
     setLoadingContentUrl('');
   }, []);
 
-  const closePanel = useCallback(() => {
+  const cancelApprovalPreview = useCallback(() => {
+    const requestId = approvalPreviewRequestId;
+    const isPendingPreview = Boolean(
+      requestId
+      && loading
+      && agentItemsRef.current.some(item => item.requestId === requestId && item.status === 'pending'),
+    );
     cancelActive();
+    if (!isPendingPreview) return;
+    approvalOverrideResponseRef.current = '';
+    setResponse(current => (
+      agentApprovalRequestId(current?.responseId) === requestId ? current : null
+    ));
+    setSelectedUrls(new Set());
+    setActiveResult(null);
+    setError('预览已停止，可点击“重试预览”继续。');
+  }, [approvalPreviewRequestId, cancelActive, loading]);
+
+  const closePanel = useCallback(() => {
+    cancelApprovalPreview();
     onOpenChange(false);
     window.setTimeout(() => railButtonRef.current?.focus(), 0);
-  }, [cancelActive, onOpenChange]);
+  }, [cancelApprovalPreview, onOpenChange]);
 
   useEffect(() => {
     if (!open) {
-      cancelActive();
+      cancelApprovalPreview();
       return;
     }
     void refreshState();
     if (!agentItemsRef.current.some(item => item.status === 'pending' || item.status === 'searching')) {
       window.setTimeout(() => inputRef.current?.focus(), 160);
     }
-  }, [cancelActive, open, refreshState]);
+  }, [cancelApprovalPreview, open, refreshState]);
 
   useEffect(() => {
     cancelActive();
@@ -257,6 +325,10 @@ export default function WebResearchPanel({
     setActiveResult(null);
     setContentByUrl({});
     setContentErrorsByUrl({});
+    setApprovalPreviewRequestId('');
+    previewedApprovalRequestsRef.current.clear();
+    appliedAgentResultRef.current = '';
+    approvalOverrideResponseRef.current = '';
     researchDecisionRef.current = null;
     setResearchDecision(null);
     setError('');
@@ -293,12 +365,30 @@ export default function WebResearchPanel({
     (response?.results || []).filter(result => selectedUrls.has(result.url))
   ), [response, selectedUrls]);
 
+  const approvalResponseRequestId = agentApprovalRequestId(response?.responseId);
+  const approvalDecision = researchDecision?.responseId === response?.responseId ? researchDecision : null;
+  const isApprovalPreview = Boolean(approvalResponseRequestId) && approvalDecision?.status !== 'rejected';
+
   const visibleAgentItems = useMemo(() => (
     [...agentItems].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 4)
   ), [agentItems]);
   const pendingAgentCount = useMemo(() => (
     agentItems.filter(item => item.status === 'pending').length
   ), [agentItems]);
+  const hasPendingAgentReview = useMemo(() => (
+    agentItems.some(item => item.status === 'pending' && Boolean(item.requestId))
+  ), [agentItems]);
+  const activeApprovalPreviewItem = useMemo(() => (
+    approvalPreviewRequestId
+      ? agentItems.find(item => item.requestId === approvalPreviewRequestId)
+      : undefined
+  ), [agentItems, approvalPreviewRequestId]);
+  const hasApprovalPreviewInFlight = activeApprovalPreviewItem?.status === 'pending';
+  const activeApprovalItem = approvalResponseRequestId
+    ? agentItems.find(item => item.requestId === approvalResponseRequestId)
+    : undefined;
+  const canRetryApprovalPreview = !approvalResponseRequestId
+    || (activeApprovalItem?.toolName === 'WebSearch' && activeApprovalItem.status === 'pending');
 
   useEffect(() => {
     const hasCountdown = agentItems.some(item => item.status === 'pending' && item.autoAllowAt);
@@ -309,10 +399,26 @@ export default function WebResearchPanel({
   }, [agentItems]);
 
   useEffect(() => {
+    const hasActiveSearch = agentItems.some(item => (
+      item.status === 'pending' || item.status === 'searching'
+    ));
+    if (hasActiveSearch) return;
     const completedSearch = [...agentItems]
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .find(item => item.toolName === 'WebSearch' && item.status === 'completed');
+      .find(item => (
+        (item.toolName === 'WebSearch' || item.toolName === 'WebFetch')
+        && item.status === 'completed'
+      ));
     if (!completedSearch) return;
+    const currentResponseId = response?.responseId || '';
+    const currentAgentResultId = currentResponseId.startsWith('agent:')
+      ? currentResponseId.slice('agent:'.length)
+      : '';
+    const currentApprovalResultId = agentApprovalRequestId(currentResponseId);
+    if (currentResponseId && currentAgentResultId !== completedSearch.id
+        && currentApprovalResultId !== completedSearch.requestId) {
+      return;
+    }
     const applicationKey = `${completedSearch.id}:${completedSearch.updatedAt}`;
     if (appliedAgentResultRef.current === applicationKey) return;
     appliedAgentResultRef.current = applicationKey;
@@ -324,11 +430,18 @@ export default function WebResearchPanel({
       publishedAt: result.publishedAt,
       provider: 'AI WebSearch',
     }));
+    const responseId = `agent:${completedSearch.id}`;
+    const consumedDecision: ResearchDecision = {
+      responseId,
+      status: 'consumed',
+      selectedCount: results.length,
+    };
+    approvalOverrideResponseRef.current = '';
     setQuery(searchedQuery);
     setResponse({
-      responseId: `agent:${completedSearch.id}`,
+      responseId,
       query: searchedQuery,
-      provider: 'AI WebSearch',
+      provider: completedSearch.toolName === 'WebFetch' ? 'AI WebFetch' : 'AI WebSearch',
       answer: completedSearch.content || '',
       results,
       cacheHit: false,
@@ -338,15 +451,15 @@ export default function WebResearchPanel({
     setActiveResult(null);
     setContentByUrl({});
     setContentErrorsByUrl({});
-    researchDecisionRef.current = null;
-    setResearchDecision(null);
+    researchDecisionRef.current = consumedDecision;
+    setResearchDecision(consumedDecision);
     setShowActivity(false);
     setError('');
-  }, [agentItems]);
+  }, [agentItems, response?.responseId]);
 
   const performSearch = useCallback(async () => {
     const normalizedQuery = query.trim();
-    if (!normalizedQuery || loading) return;
+    if (!normalizedQuery || loading || hasPendingAgentReview || isApprovalPreview) return;
     cancelActive();
     const id = requestId('web-search');
     activeRequestRef.current = id;
@@ -357,6 +470,7 @@ export default function WebResearchPanel({
     setActiveResult(null);
     setContentByUrl({});
     setContentErrorsByUrl({});
+    approvalOverrideResponseRef.current = '';
     researchDecisionRef.current = null;
     setResearchDecision(null);
     try {
@@ -384,7 +498,155 @@ export default function WebResearchPanel({
       }
       void refreshState();
     }
-  }, [cancelActive, domainFilter, loading, numResults, provider, query, recency, refreshState]);
+  }, [cancelActive, domainFilter, hasPendingAgentReview, isApprovalPreview, loading, numResults, provider, query, recency, refreshState]);
+
+  const performApprovalPreview = useCallback(async (item: WebResearchAgentItem) => {
+    const pendingRequestId = item.requestId;
+    const normalizedQuery = item.query || String(item.input.query || '').trim();
+    if (item.toolName !== 'WebSearch' || item.status !== 'pending' || !pendingRequestId || !normalizedQuery || loading) return;
+    cancelActive();
+    const id = requestId('web-search-approval-preview');
+    activeRequestRef.current = id;
+    setApprovalPreviewRequestId(pendingRequestId);
+    setQuery(normalizedQuery);
+    setLoading(true);
+    setError('');
+    setResponse(null);
+    setSelectedUrls(new Set());
+    setActiveResult(null);
+    setContentByUrl({});
+    setContentErrorsByUrl({});
+    approvalOverrideResponseRef.current = '';
+    researchDecisionRef.current = null;
+    setResearchDecision(null);
+    try {
+      const result = await searchWeb({
+        requestId: id,
+        query: normalizedQuery,
+        provider,
+        numResults,
+        ...(recency ? { recencyFilter: recency } : {}),
+        domainFilter: agentSearchDomainFilter(item, domainFilter),
+      });
+      if (activeRequestRef.current !== id) return;
+      const latestItem = agentItemsRef.current.find(candidate => (
+        candidate.requestId === pendingRequestId && candidate.status === 'pending'
+      ));
+      if (!latestItem) return;
+      if (!result.results.length && result.errors?.length) {
+        throw new Error(result.errors.map(entry => `${entry.provider}: ${entry.error}`).join('；'));
+      }
+      setResponse({
+        ...result,
+        responseId: `${AGENT_APPROVAL_RESPONSE_PREFIX}${pendingRequestId}`,
+      });
+      approvalOverrideResponseRef.current = `${AGENT_APPROVAL_RESPONSE_PREFIX}${pendingRequestId}`;
+      setSelectedUrls(new Set(result.results.map(resultItem => resultItem.url)));
+    } catch (searchError) {
+      if (activeRequestRef.current !== id) return;
+      setError(webResearchErrorLabel(searchError, 'search'));
+    } finally {
+      if (activeRequestRef.current === id) {
+        activeRequestRef.current = null;
+        setLoading(false);
+      }
+      void refreshState();
+    }
+  }, [cancelActive, domainFilter, loading, numResults, provider, recency, refreshState]);
+
+  useEffect(() => {
+    if (!open || loading) return;
+    const currentPreviewItem = approvalPreviewRequestId
+      ? agentItems.find(item => item.requestId === approvalPreviewRequestId)
+      : undefined;
+    if (currentPreviewItem?.status === 'pending') return;
+    const nextPendingReview = [...agentItems]
+      .filter(item => (
+        (item.toolName === 'WebSearch' || (item.toolName === 'WebFetch' && item.reviewStage === 'result'))
+        && item.status === 'pending'
+        && item.requestId
+        && !previewedApprovalRequestsRef.current.has(item.requestId)
+      ))
+      .sort((a, b) => a.updatedAt - b.updatedAt)[0];
+    if (!nextPendingReview?.requestId) {
+      if (approvalPreviewRequestId) {
+        setApprovalPreviewRequestId('');
+      }
+      return;
+    }
+    previewedApprovalRequestsRef.current.add(nextPendingReview.requestId);
+    if (nextPendingReview.reviewStage === 'result') {
+      const searchedQuery = nextPendingReview.query
+        || String(nextPendingReview.input.query || nextPendingReview.input.url || '').trim();
+      const results = (nextPendingReview.results || []).map(result => ({
+        title: result.title,
+        url: result.url,
+        snippet: result.snippet || '',
+        publishedAt: result.publishedAt,
+        provider: nextPendingReview.toolName === 'WebFetch' ? 'AI WebFetch' : 'AI WebSearch',
+      }));
+      setApprovalPreviewRequestId(nextPendingReview.requestId);
+      setQuery(searchedQuery);
+      setResponse({
+        responseId: `${AGENT_APPROVAL_RESPONSE_PREFIX}${nextPendingReview.requestId}`,
+        query: searchedQuery,
+        provider: nextPendingReview.toolName === 'WebFetch' ? 'AI WebFetch' : 'AI WebSearch',
+        answer: nextPendingReview.content || '',
+        results,
+        cacheHit: false,
+        errors: [],
+      });
+      approvalOverrideResponseRef.current = '';
+      setSelectedUrls(new Set(results.map(result => result.url)));
+      setActiveResult(null);
+      setContentByUrl({});
+      setContentErrorsByUrl({});
+      researchDecisionRef.current = null;
+      setResearchDecision(null);
+      setShowActivity(false);
+      setError('');
+      return;
+    }
+    if (nextPendingReview.toolName === 'WebSearch') {
+      const searchedQuery = nextPendingReview.query || String(nextPendingReview.input.query || '').trim();
+      if (!searchedQuery) {
+        setApprovalPreviewRequestId(nextPendingReview.requestId);
+        setResponse(null);
+        setSelectedUrls(new Set());
+        setError('Agent 的搜索请求缺少搜索词，无法生成预览。请拒绝后重新提问。');
+        return;
+      }
+      void performApprovalPreview(nextPendingReview);
+    }
+  }, [agentItems, approvalPreviewRequestId, loading, open, performApprovalPreview]);
+
+  useEffect(() => {
+    const responseId = response?.responseId;
+    const approvalRequestId = agentApprovalRequestId(responseId);
+    if (!responseId || !approvalRequestId) return;
+    const approvalItem = agentItems.find(item => item.requestId === approvalRequestId);
+    if (!approvalItem) return;
+    if (approvalItem.status === 'searching' && researchDecisionRef.current?.responseId !== responseId) {
+      const decision: ResearchDecision = {
+        responseId,
+        status: 'approved',
+        selectedCount: response.results.length,
+      };
+      researchDecisionRef.current = decision;
+      setResearchDecision(decision);
+      return;
+    }
+    if (approvalItem.status === 'denied' && researchDecisionRef.current?.responseId !== responseId) {
+      const decision: ResearchDecision = {
+        responseId,
+        status: 'rejected',
+        selectedCount: response.results.length,
+      };
+      researchDecisionRef.current = decision;
+      setResearchDecision(decision);
+      setSelectedUrls(new Set());
+    }
+  }, [agentItems, response]);
 
   const previewResult = useCallback(async (result: WebResearchResult) => {
     setActiveResult(result);
@@ -419,6 +681,7 @@ export default function WebResearchPanel({
   }, [cancelActive, contentByUrl, refreshState]);
 
   const toggleSelected = useCallback((url: string) => {
+    if (agentApprovalRequestId(response?.responseId)) return;
     if (researchDecisionRef.current?.responseId === response?.responseId) return;
     setSelectedUrls(current => {
       const next = new Set(current);
@@ -431,7 +694,35 @@ export default function WebResearchPanel({
   const sendSelected = useCallback(() => {
     const searchedQuery = response?.query?.trim();
     const responseId = response?.responseId;
-    if (!selectedResults.length || !searchedQuery || !responseId) return;
+    const approvalRequestId = agentApprovalRequestId(responseId);
+    if (approvalRequestId) {
+      if (!onAgentDecision || researchDecisionRef.current?.responseId === responseId) return;
+      const pendingItem = agentItemsRef.current.find(item => (
+        item.requestId === approvalRequestId && item.status === 'pending'
+      ));
+      if (!pendingItem) return;
+      const decision: ResearchDecision = {
+        responseId: responseId!,
+        status: 'approved',
+        selectedCount: response?.results.length || 0,
+      };
+      researchDecisionRef.current = decision;
+      setResearchDecision(decision);
+      const reviewOverride: WebResearchReviewOverride | undefined = (
+        approvalOverrideResponseRef.current === responseId && response
+      ) ? {
+          query: response.query,
+          results: response.results.map(result => ({
+            title: result.title,
+            url: result.url,
+            snippet: result.snippet,
+            publishedAt: result.publishedAt,
+          })),
+        } : undefined;
+      onAgentDecision(approvalRequestId, 'allow', reviewOverride);
+      return;
+    }
+    if (hasPendingAgentReview || !selectedResults.length || !searchedQuery || !responseId || responseId.startsWith('agent:')) return;
     if (researchDecisionRef.current?.responseId === responseId) return;
     const provisionalDecision: ResearchDecision = {
       responseId,
@@ -453,20 +744,43 @@ export default function WebResearchPanel({
       researchDecisionRef.current = queuedDecision;
       setResearchDecision(queuedDecision);
     }
-  }, [contentByUrl, onSendToChat, response?.query, response?.responseId, selectedResults]);
+  }, [contentByUrl, hasPendingAgentReview, onAgentDecision, onSendToChat, response?.query, response?.responseId, response?.results.length, selectedResults]);
 
   const rejectResearch = useCallback(() => {
     const responseId = response?.responseId;
-    if (!responseId || researchDecisionRef.current?.responseId === responseId) return;
+    if (!responseId || responseId.startsWith('agent:') || researchDecisionRef.current?.responseId === responseId) return;
+    const approvalRequestId = agentApprovalRequestId(responseId);
     const decision: ResearchDecision = {
       responseId,
       status: 'rejected',
-      selectedCount: selectedResults.length,
+      selectedCount: approvalRequestId ? response.results.length : selectedResults.length,
     };
     researchDecisionRef.current = decision;
     setResearchDecision(decision);
     setSelectedUrls(new Set());
-  }, [response?.responseId, selectedResults.length]);
+    if (approvalRequestId) onAgentDecision?.(approvalRequestId, 'deny');
+  }, [onAgentDecision, response, selectedResults.length]);
+
+  const retryResearch = useCallback(() => {
+    const approvalRequestId = agentApprovalRequestId(response?.responseId);
+    if (approvalRequestId) {
+      const pendingItem = agentItemsRef.current.find(item => (
+        item.requestId === approvalRequestId && item.status === 'pending'
+      ));
+      if (pendingItem?.toolName === 'WebSearch') void performApprovalPreview(pendingItem);
+      return;
+    }
+    void performSearch();
+  }, [performApprovalPreview, performSearch, response?.responseId]);
+
+  const rejectAgentRequest = useCallback((item: WebResearchAgentItem) => {
+    if (!item.requestId || item.status !== 'pending') return;
+    if (item.requestId === approvalPreviewRequestId) {
+      cancelActive();
+      setError('');
+    }
+    onAgentDecision?.(item.requestId, 'deny');
+  }, [approvalPreviewRequestId, cancelActive, onAgentDecision]);
 
   const copyCitations = useCallback(async () => {
     if (!selectedResults.length) return;
@@ -507,6 +821,9 @@ export default function WebResearchPanel({
   const activeContentError = activeResult ? contentErrorsByUrl[activeResult.url] : undefined;
   const activeDecision = researchDecision?.responseId === response?.responseId ? researchDecision : null;
   const decisionLocked = activeDecision !== null;
+  const selectionLocked = decisionLocked || isApprovalPreview;
+  const agentReviewLocked = hasPendingAgentReview || isApprovalPreview;
+  const activeDecisionCopy = activeDecision ? researchDecisionCopy(activeDecision) : null;
 
   return (
     <aside className={`web-research-panel is-open ${embedded ? 'is-embedded' : ''}`} aria-label="网页研究">
@@ -539,18 +856,25 @@ export default function WebResearchPanel({
             onKeyDown={event => {
               if (event.key === 'Enter') {
                 event.preventDefault();
-                void performSearch();
+                if (!agentReviewLocked) void performSearch();
               }
             }}
             placeholder="搜索网页或粘贴问题…"
             aria-label="网页搜索词"
+            readOnly={agentReviewLocked}
           />
           {loading ? (
-            <button type="button" onClick={cancelActive} className="research-search-submit is-stop" aria-label="停止搜索" title="停止搜索">
+            <button
+              type="button"
+              onClick={hasApprovalPreviewInFlight ? cancelApprovalPreview : cancelActive}
+              className="research-search-submit is-stop"
+              aria-label={hasApprovalPreviewInFlight ? '停止搜索预览' : '停止搜索'}
+              title={hasApprovalPreviewInFlight ? '停止搜索预览' : '停止搜索'}
+            >
               <Square size={13} fill="currentColor" />
             </button>
           ) : (
-            <button type="button" onClick={() => { void performSearch(); }} className="research-search-submit" disabled={!query.trim()} aria-label="搜索网页" title="搜索网页">
+            <button type="button" onClick={() => { void performSearch(); }} className="research-search-submit" disabled={!query.trim() || agentReviewLocked} aria-label="搜索网页" title="搜索网页">
               <Search size={15} />
             </button>
           )}
@@ -610,7 +934,11 @@ export default function WebResearchPanel({
             <span>{agentItems.length}</span>
           </div>
           <div className="research-agent-list">
-            {visibleAgentItems.map(item => (
+            {visibleAgentItems.map(item => {
+              const isActiveApprovalPreview = item.requestId === approvalPreviewRequestId;
+              const hasReviewResults = item.reviewStage === 'result';
+              const isSearchReview = item.toolName === 'WebSearch' || hasReviewResults;
+              return (
               <article key={item.id} className={`research-agent-card is-${item.status}`}>
                 <div className="research-agent-card-icon" aria-hidden="true">
                   {item.status === 'pending' ? <ShieldCheck size={15} />
@@ -625,13 +953,33 @@ export default function WebResearchPanel({
                   </div>
                   <p title={agentItemLabel(item)}>{agentItemLabel(item)}</p>
                   {item.status === 'pending' && item.requestId && onAgentDecision && (
-                    <div className="research-agent-actions">
-                      <button type="button" className="is-deny" onClick={() => onAgentDecision(item.requestId!, 'deny')}>拒绝</button>
-                      <button type="button" onClick={() => onAgentDecision(item.requestId!, 'always_allow')}>始终允许</button>
-                      <button type="button" className="is-allow" onClick={() => onAgentDecision(item.requestId!, 'allow')}>允许</button>
-                    </div>
+                    isSearchReview ? (
+                      <div className="research-agent-gate">
+                        <span>
+                          {hasReviewResults
+                            && !(isActiveApprovalPreview && (loading || error))
+                            ? 'Agent 正在等待；请在下方审阅后交给 Agent。'
+                            : isActiveApprovalPreview && loading
+                              ? '正在生成可审阅的结果，Agent 仍在等待。'
+                              : isActiveApprovalPreview && error
+                                ? '预览失败。重试或拒绝后，Agent 才会继续。'
+                                : '等待生成搜索预览。'}
+                        </span>
+                        <div className="research-agent-actions">
+                          {isActiveApprovalPreview && item.toolName === 'WebSearch' && error && (
+                            <button type="button" onClick={() => { void performApprovalPreview(item); }}>重试预览</button>
+                          )}
+                          <button type="button" className="is-deny" onClick={() => rejectAgentRequest(item)}>拒绝</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="research-agent-actions">
+                        <button type="button" className="is-deny" onClick={() => rejectAgentRequest(item)}>拒绝</button>
+                        <button type="button" className="is-allow" onClick={() => onAgentDecision(item.requestId!, 'allow')}>交给 Agent</button>
+                      </div>
+                    )
                   )}
-                  {item.toolName === 'WebFetch' && item.status === 'completed' && item.content && (
+                  {item.toolName === 'WebFetch' && (item.status === 'completed' || (item.status === 'pending' && item.reviewStage === 'result')) && item.content && (
                     <pre className="research-agent-content">{item.content.slice(0, 1600)}</pre>
                   )}
                   {item.status === 'error' && item.error && (
@@ -641,7 +989,8 @@ export default function WebResearchPanel({
                   )}
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
@@ -679,7 +1028,7 @@ export default function WebResearchPanel({
               {loadingContentUrl === activeResult.url && (
                 <button type="button" onClick={cancelActive} title="停止读取正文" aria-label="停止读取正文"><Square size={13} fill="currentColor" /></button>
               )}
-              <button type="button" onClick={() => toggleSelected(activeResult.url)} className={selectedUrls.has(activeResult.url) ? 'active' : ''} title={decisionLocked ? '本轮研究已经处理' : '选择来源'} aria-label="选择来源" aria-pressed={selectedUrls.has(activeResult.url)} disabled={decisionLocked}><Check size={15} /></button>
+              <button type="button" onClick={() => toggleSelected(activeResult.url)} className={selectedUrls.has(activeResult.url) ? 'active' : ''} title={selectionLocked ? 'Agent 搜索预览不可修改' : '选择来源'} aria-label="选择来源" aria-pressed={selectedUrls.has(activeResult.url)} disabled={selectionLocked}><Check size={15} /></button>
             </div>
           </div>
           <article className="research-preview-content">
@@ -750,7 +1099,7 @@ export default function WebResearchPanel({
                     const selected = selectedUrls.has(result.url);
                     return (
                       <article key={`${result.url}-${index}`} className={`research-result-row ${selected ? 'is-selected' : ''}`}>
-                        <button type="button" className="research-result-check" onClick={() => toggleSelected(result.url)} aria-label={selected ? '取消选择来源' : '选择来源'} aria-pressed={selected} disabled={decisionLocked}>
+                        <button type="button" className="research-result-check" onClick={() => toggleSelected(result.url)} aria-label={selected ? '取消选择来源' : '选择来源'} aria-pressed={selected} disabled={selectionLocked}>
                           {selected && <Check size={12} />}
                         </button>
                         <button type="button" className="research-result-main" onClick={() => { void previewResult(result); }}>
@@ -769,32 +1118,43 @@ export default function WebResearchPanel({
         </div>
       )}
 
-      {!showActivity && response && response.results.length > 0 && !activeResult && (
+      {!showActivity && response && (response.results.length > 0 || isApprovalPreview) && !activeResult && (!hasPendingAgentReview || isApprovalPreview) && (
         <div className={`research-action-bar ${activeDecision ? `is-${activeDecision.status}` : ''}`}>
           <div className="research-action-summary" role="status" aria-live="polite">
             {activeDecision ? (
               <>
                 {activeDecision.status === 'rejected' ? <X size={14} /> : <Check size={14} />}
                 <span>
-                  <strong>{activeDecision.status === 'queued' ? '已加入 Agent 队列' : activeDecision.status === 'sent' ? '已交给 Agent' : '已拒绝本轮资料'}</strong>
-                  <small>{activeDecision.status === 'queued' ? '当前回答结束后继续' : activeDecision.status === 'sent' ? `${activeDecision.selectedCount} 个来源正在处理` : '不会发送给 Agent'}</small>
+                  <strong>{activeDecisionCopy?.title}</strong>
+                  <small>{activeDecisionCopy?.detail}</small>
                 </span>
               </>
+            ) : isApprovalPreview ? (
+              <span className="research-agent-waiting-summary">
+                <strong>Agent 正在等待</strong>
+                <small>{response.results.length} 个搜索来源 · 确认后才会继续回答</small>
+              </span>
             ) : <span>{selectedResults.length} 个已选</span>}
           </div>
           <div className="research-action-buttons">
             <button type="button" onClick={() => { void copyCitations(); }} disabled={!selectedResults.length} title="复制引用" aria-label="复制引用">
               {copied ? <Check size={14} /> : <Clipboard size={14} />}
             </button>
-            <button type="button" className="research-reject-button" onClick={rejectResearch} disabled={decisionLocked}>
-              <X size={13} />拒绝
-            </button>
-            <button type="button" className="research-retry-button" onClick={() => { void performSearch(); }} disabled={loading}>
-              <RotateCcw size={13} />重新搜索
-            </button>
-            <button type="button" className={`research-send-button ${activeDecision ? 'is-complete' : ''}`} onClick={sendSelected} disabled={!selectedResults.length || decisionLocked}>
+            {activeDecision?.status !== 'consumed' && (
+              <>
+                <button type="button" className="research-reject-button" onClick={rejectResearch} disabled={decisionLocked}>
+                  <X size={13} />拒绝
+                </button>
+                {canRetryApprovalPreview && (
+                  <button type="button" className="research-retry-button" onClick={retryResearch} disabled={decisionLocked || loading}>
+                    <RotateCcw size={13} />重新搜索
+                  </button>
+                )}
+              </>
+            )}
+            <button type="button" className={`research-send-button ${activeDecision ? 'is-complete' : ''}`} onClick={sendSelected} disabled={decisionLocked || (isApprovalPreview ? !onAgentDecision : hasPendingAgentReview || !selectedResults.length)}>
               {activeDecision?.status === 'rejected' ? <X size={14} /> : activeDecision ? <Check size={14} /> : <Send size={14} />}
-              {activeDecision?.status === 'queued' ? '已排队' : activeDecision?.status === 'sent' ? '已交给 Agent' : activeDecision?.status === 'rejected' ? '已拒绝' : '交给 Agent'}
+              {activeDecision?.status === 'queued' ? '已排队' : activeDecision?.status === 'sent' ? '已交给 Agent' : activeDecision?.status === 'approved' ? '已允许' : activeDecision?.status === 'rejected' ? '已拒绝' : activeDecision?.status === 'consumed' ? '已用于本轮' : '交给 Agent'}
             </button>
           </div>
         </div>

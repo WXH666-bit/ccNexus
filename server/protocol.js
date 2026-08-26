@@ -56,6 +56,9 @@ export function permissionRequestEvent({
   toolUseId,
   sessionId,
   autoAllowAt,
+  reviewStage,
+  results,
+  content,
 }) {
   const event = { type: 'permission_request', requestId, toolName, input };
   if (title !== undefined) event.title = title;
@@ -64,6 +67,9 @@ export function permissionRequestEvent({
   if (toolUseId !== undefined) event.toolUseId = toolUseId;
   if (sessionId !== undefined) event.sessionId = sessionId;
   if (autoAllowAt !== undefined) event.autoAllowAt = autoAllowAt;
+  if (reviewStage !== undefined) event.reviewStage = reviewStage;
+  if (results !== undefined) event.results = results;
+  if (content !== undefined) event.content = content;
   return event;
 }
 

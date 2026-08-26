@@ -237,6 +237,12 @@ test('chat controller observes exact WebSearch/WebFetch tool results without cha
   assert.equal(toolResults.length, 3);
   assert.equal(toolResults.find(event => event.tool_use_id === 'web-search-1').content.includes('ccNexus'), true);
   assert.equal(webEvents.some(event => event.toolUseId === 'code-search-1'), false);
+  const completedResearchIndex = emitted.findIndex(event => (
+    event.type === 'web_research' && event.phase === 'completed' && event.toolUseId === 'web-search-1'
+  ));
+  const finalAssistantIndex = emitted.findIndex(event => event.type === 'assistant');
+  assert.ok(completedResearchIndex >= 0);
+  assert.ok(finalAssistantIndex > completedResearchIndex, 'search tool result must reach the UI before the final answer');
 
   controller.dispose();
 });
@@ -317,6 +323,163 @@ test('WebSearch permission carries toolUseId and description through existing re
   controller.dispose();
 });
 
+test('post-search review exposes exact results and validates a retry override', async () => {
+  const emitted = [];
+  let permissionHandler;
+  let releaseQuery;
+  const queryGate = new Promise(resolve => { releaseQuery = resolve; });
+
+  async function* queryEvents() {
+    yield { type: 'system', subtype: 'init', session_id: 'review-session' };
+    await queryGate;
+    yield { type: 'result', session_id: 'review-session', subtype: 'success', is_error: false };
+  }
+
+  const runtime = {
+    queryClaude: async ({ onPermissionRequest }) => {
+      permissionHandler = onPermissionRequest;
+      return decorateStream(queryEvents(), 'review-session');
+    },
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const controller = createController(runtime, emitted);
+  const chatPromise = controller.handle({
+    type: 'chat',
+    text: 'search and review',
+    options: { model: 'default' },
+  }, event => emitted.push(event));
+
+  await waitFor(() => typeof permissionHandler === 'function');
+  const permissionPromise = permissionHandler({
+    toolName: 'WebSearch',
+    input: { query: 'ccNexus' },
+    options: { toolUseID: 'review-web-1' },
+    review: {
+      stage: 'result',
+      toolResponse: {
+        results: [{ title: 'Original', url: 'https://example.com/original', snippet: 'original result' }],
+      },
+    },
+  });
+  await waitFor(() => emitted.some(event => event.type === 'permission_request'));
+  const request = emitted.find(event => event.type === 'permission_request');
+  assert.equal(request.reviewStage, 'result');
+  assert.deepEqual(request.results, [{
+    title: 'Original',
+    url: 'https://example.com/original',
+    snippet: 'original result',
+  }]);
+
+  await controller.handle({
+    type: 'permission_response',
+    requestId: request.requestId,
+    sessionId: 'review-session',
+    behavior: 'allow',
+    webReviewOverride: {
+      query: 'renderer cannot replace the original query',
+      results: [
+        { title: 'Fresh', url: 'https://example.org/fresh', snippet: 'fresh result' },
+        { title: 'Credential URL', url: 'https://user:pass@example.org/private' },
+        { title: 'Local file', url: 'file:///secret.txt' },
+      ],
+    },
+  }, event => emitted.push(event));
+  assert.deepEqual(await permissionPromise, {
+    behavior: 'allow',
+    webReviewOverride: {
+      query: 'ccNexus',
+      results: [{ title: 'Fresh', url: 'https://example.org/fresh', snippet: 'fresh result' }],
+    },
+  });
+
+  releaseQuery();
+  await chatPromise;
+  controller.dispose();
+});
+
+test('post-search review blocks the same turn until approval and produces one final answer', async () => {
+  const emitted = [];
+  let queryCalls = 0;
+
+  const runtime = {
+    queryClaude: async ({ onPermissionRequest }) => {
+      queryCalls += 1;
+      async function* queryEvents() {
+        yield { type: 'system', subtype: 'init', session_id: 'single-answer-session' };
+        const decision = await onPermissionRequest({
+          toolName: 'WebSearch',
+          input: { query: 'ccNexus approval flow' },
+          options: { toolUseID: 'single-answer-web-1' },
+          review: {
+            stage: 'result',
+            toolResponse: {
+              results: [{
+                title: 'Reviewed result',
+                url: 'https://example.com/reviewed',
+                snippet: 'Only the approved turn may continue.',
+              }],
+            },
+          },
+        });
+        assert.deepEqual(decision, { behavior: 'allow' });
+        yield {
+          type: 'assistant',
+          uuid: 'single-final-assistant',
+          session_id: 'single-answer-session',
+          message: {
+            id: 'single-final-assistant',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Final answer after approval.' }],
+          },
+        };
+        yield {
+          type: 'result',
+          session_id: 'single-answer-session',
+          subtype: 'success',
+          is_error: false,
+        };
+      }
+      return decorateStream(queryEvents(), 'single-answer-session');
+    },
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const controller = createController(runtime, emitted);
+  const chatPromise = controller.handle({
+    type: 'chat',
+    text: 'Search, then wait for me',
+    options: { model: 'default' },
+  }, event => emitted.push(event));
+
+  await waitFor(() => emitted.some(event => event.type === 'permission_request'));
+  assert.equal(emitted.some(event => event.type === 'assistant'), false);
+  const request = emitted.find(event => event.type === 'permission_request');
+  assert.equal(request.reviewStage, 'result');
+
+  await controller.handle({
+    type: 'permission_response',
+    requestId: request.requestId,
+    sessionId: 'single-answer-session',
+    behavior: 'allow',
+  }, event => emitted.push(event));
+  await chatPromise;
+
+  assert.equal(queryCalls, 1, 'approval must not create a hidden second chat turn');
+  const finalAnswers = emitted.filter(event => (
+    event.type === 'assistant'
+    && event.message?.content?.some(block => block.type === 'text' && block.text === 'Final answer after approval.')
+  ));
+  assert.equal(finalAnswers.length, 1);
+  controller.dispose();
+});
+
 test('WebSearch waits two minutes in production and auto-allows only the pending request', async () => {
   assert.equal(WEB_RESEARCH_AUTO_ALLOW_TIMEOUT_MS, 120_000);
   const emitted = [];
@@ -354,11 +517,18 @@ test('WebSearch waits two minutes in production and auto-allows only the pending
     toolName: 'WebSearch',
     input: { query: 'current ccNexus news' },
     options: { toolUseID: 'auto-web-1' },
+    review: {
+      stage: 'result',
+      toolResponse: {
+        results: [{ title: 'Current result', url: 'https://example.com/current' }],
+      },
+    },
   });
   await waitFor(() => emitted.some(event => event.type === 'permission_request'));
 
   const request = emitted.find(event => event.type === 'permission_request');
   assert.ok(request.autoAllowAt >= startedAt + 15);
+  assert.equal(request.reviewStage, 'result');
   assert.deepEqual(await permissionPromise, { behavior: 'allow' });
   await waitFor(() => emitted.some(event => event.type === 'web_research' && event.phase === 'approved'));
   const approved = emitted.find(event => event.type === 'web_research' && event.phase === 'approved');
