@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
+  Code2,
   ChevronDown,
   ChevronRight,
+  Eye,
   FileCode2,
   FileText,
   Folder,
@@ -13,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import RefreshIcon from './RefreshIcon';
+import { renderMarkdown } from '../utils/markdown';
 
 export interface FileNode {
   name: string;
@@ -61,14 +64,17 @@ export interface FileEditorState {
   draft: string;
   dirty: boolean;
   fileError: string;
+  loadingFile: boolean;
   saving: boolean;
   notice: string;
   updateDraft: (value: string) => void;
   saveFile: () => void;
   closeFile: () => void;
+  openLinkedFile: (path: string) => void;
 }
 
-const CODE_EXTS = new Set(['js', 'jsx', 'ts', 'tsx', 'json', 'css', 'html', 'md', 'mjs', 'cjs']);
+const MARKDOWN_EXTS = new Set(['md', 'markdown']);
+const CODE_EXTS = new Set(['js', 'jsx', 'ts', 'tsx', 'json', 'css', 'html', 'md', 'markdown', 'mjs', 'cjs']);
 
 function extensionOf(name: string) {
   const match = /\.([^.]+)$/.exec(name);
@@ -78,6 +84,67 @@ function extensionOf(name: string) {
 function FileIcon({ node }: { node: FileNode }) {
   if (node.isDirectory) return <Folder size={15} />;
   return CODE_EXTS.has(extensionOf(node.name)) ? <FileCode2 size={15} /> : <FileText size={15} />;
+}
+
+function resolveWorkspaceRelativePath(currentPath: string, rawTarget: string) {
+  const targetWithoutFragment = rawTarget.split('#', 1)[0].split('?', 1)[0];
+  let decodedTarget = targetWithoutFragment;
+  try {
+    decodedTarget = decodeURIComponent(targetWithoutFragment);
+  } catch {
+    // Keep the literal path when a link contains malformed percent encoding.
+  }
+
+  const normalizedTarget = decodedTarget.replace(/\\/g, '/');
+  const segments = normalizedTarget.startsWith('/')
+    ? []
+    : currentPath.replace(/\\/g, '/').split('/').slice(0, -1).filter(Boolean);
+
+  for (const segment of normalizedTarget.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return segments.length > 0 ? segments.join('/') : null;
+}
+
+function renderMarkdownDocument(source: string) {
+  const rendered = renderMarkdown(source);
+  if (typeof DOMParser === 'undefined') return rendered;
+
+  const parsed = new DOMParser().parseFromString(rendered, 'text/html');
+  parsed.body.querySelectorAll('img').forEach(image => {
+    const imageSource = image.getAttribute('src')?.trim();
+    if (!imageSource) return;
+    image.removeAttribute('src');
+    image.setAttribute('data-markdown-src', imageSource);
+    image.setAttribute('loading', 'lazy');
+    image.setAttribute('decoding', 'async');
+  });
+  parsed.body.querySelectorAll('a').forEach(link => {
+    link.setAttribute('rel', 'noreferrer noopener');
+  });
+  return parsed.body.innerHTML;
+}
+
+function assignMarkdownHeadingIds(container: HTMLElement) {
+  const usedIds = new Map<string, number>();
+  container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6').forEach((heading, index) => {
+    if (heading.id) return;
+    const base = heading.textContent
+      ?.trim()
+      .toLowerCase()
+      .replace(/[^\w\u3400-\u9fff-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || `section-${index + 1}`;
+    const duplicateCount = usedIds.get(base) || 0;
+    usedIds.set(base, duplicateCount + 1);
+    heading.id = duplicateCount === 0 ? base : `${base}-${duplicateCount + 1}`;
+  });
 }
 
 function TreeNode({
@@ -139,6 +206,128 @@ function TreeNode({
 }
 
 export function FileContentPanel({ editor }: { editor: FileEditorState | null }) {
+  const selectedPath = editor?.selectedFile?.path || '';
+  const isMarkdown = MARKDOWN_EXTS.has(extensionOf(editor?.selectedFile?.name || ''));
+  const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview');
+  const [markdownError, setMarkdownError] = useState('');
+  const markdownPreviewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMarkdownMode(isMarkdown ? 'preview' : 'source');
+    setMarkdownError('');
+  }, [isMarkdown, selectedPath]);
+
+  const renderedMarkdown = useMemo(() => (
+    isMarkdown && markdownMode === 'preview'
+      ? renderMarkdownDocument(editor?.draft || '')
+      : ''
+  ), [editor?.draft, isMarkdown, markdownMode]);
+
+  useEffect(() => {
+    const container = markdownPreviewRef.current;
+    if (!container || !isMarkdown || markdownMode !== 'preview') return;
+
+    let active = true;
+    assignMarkdownHeadingIds(container);
+    const desktopApi = window.ccNexusDesktop;
+
+    container.querySelectorAll<HTMLImageElement>('img[data-markdown-src]').forEach(image => {
+      const rawSource = image.dataset.markdownSrc?.trim();
+      if (!rawSource) return;
+
+      if (rawSource.startsWith('data:image/')) {
+        image.src = rawSource;
+        return;
+      }
+
+      try {
+        const externalUrl = new URL(rawSource);
+        if (['http:', 'https:'].includes(externalUrl.protocol) && !externalUrl.username && !externalUrl.password) {
+          image.referrerPolicy = 'no-referrer';
+          image.src = externalUrl.href;
+          return;
+        }
+      } catch {
+        // Relative sources are resolved through the workspace IPC below.
+      }
+
+      const resolvedPath = resolveWorkspaceRelativePath(selectedPath, rawSource);
+      if (!resolvedPath || !desktopApi?.readFile) {
+        image.classList.add('is-unavailable');
+        return;
+      }
+
+      void desktopApi.readFile(resolvedPath)
+        .then(result => {
+          if (!active) return;
+          if (!result.isImage || !result.content || !result.mimeType?.startsWith('image/')) {
+            image.classList.add('is-unavailable');
+            return;
+          }
+          image.src = `data:${result.mimeType};base64,${result.content}`;
+        })
+        .catch(() => {
+          if (active) image.classList.add('is-unavailable');
+        });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isMarkdown, markdownMode, renderedMarkdown, selectedPath]);
+
+  const handleMarkdownClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const link = target.closest('a');
+    if (!link || !markdownPreviewRef.current?.contains(link)) return;
+
+    event.preventDefault();
+    const rawHref = link.getAttribute('href')?.trim();
+    if (!rawHref) return;
+
+    if (rawHref.startsWith('#')) {
+      let anchor = rawHref.slice(1);
+      try {
+        anchor = decodeURIComponent(anchor);
+      } catch {
+        // Use the literal fragment when decoding fails.
+      }
+      const heading = Array.from(markdownPreviewRef.current.querySelectorAll<HTMLElement>('[id]'))
+        .find(element => element.id === anchor);
+      heading?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    try {
+      const externalUrl = new URL(rawHref);
+      if (['http:', 'https:'].includes(externalUrl.protocol) && !externalUrl.username && !externalUrl.password) {
+        const desktopApi = window.ccNexusDesktop;
+        if (!desktopApi?.openExternal) {
+          setMarkdownError('外部链接只能在桌面应用中打开');
+          return;
+        }
+        setMarkdownError('');
+        void desktopApi.openExternal(externalUrl.href).catch(() => {
+          setMarkdownError('无法打开这个外部链接');
+        });
+        return;
+      }
+      setMarkdownError('仅支持打开安全的 HTTP(S) 外部链接');
+      return;
+    } catch {
+      // Relative links are opened inside the workspace below.
+    }
+
+    const resolvedPath = resolveWorkspaceRelativePath(selectedPath, rawHref);
+    if (!resolvedPath) {
+      setMarkdownError('这个链接超出了当前工作区');
+      return;
+    }
+    setMarkdownError('');
+    editor?.openLinkedFile(resolvedPath);
+  }, [editor, selectedPath]);
+
   if (!editor?.selectedFile) {
     return <div className="file-editor file-content-panel"><div className="file-editor-placeholder">从左侧目录选择文件查看或修改</div></div>;
   }
@@ -149,6 +338,7 @@ export function FileContentPanel({ editor }: { editor: FileEditorState | null })
     draft,
     dirty,
     fileError,
+    loadingFile,
     saving,
     notice,
     updateDraft,
@@ -164,24 +354,52 @@ export function FileContentPanel({ editor }: { editor: FileEditorState | null })
           <span>{selectedFile.name}</span>
           {dirty && <em>已修改</em>}
         </div>
-        <div className="file-editor-actions">
-          <button type="button" onClick={saveFile} disabled={!dirty || saving || fileMeta?.isBinary || fileMeta?.isImage} title="保存" aria-label="保存文件">
-            <Save size={14} />
-          </button>
-          <button type="button" onClick={closeFile} title="关闭" aria-label="关闭文件">
-            <X size={14} />
-          </button>
+        <div className="file-editor-header-tools">
+          {isMarkdown && !fileMeta?.isBinary && !fileMeta?.isImage && (
+            <div className="file-editor-mode-switch" role="tablist" aria-label="Markdown 查看模式">
+              <button type="button" role="tab" aria-selected={markdownMode === 'preview'} className={markdownMode === 'preview' ? 'is-active' : ''} onClick={() => setMarkdownMode('preview')} title="预览 Markdown">
+                <Eye size={13} /><span>预览</span>
+              </button>
+              <button type="button" role="tab" aria-selected={markdownMode === 'source'} className={markdownMode === 'source' ? 'is-active' : ''} onClick={() => setMarkdownMode('source')} title="编辑 Markdown">
+                <Code2 size={13} /><span>编辑</span>
+              </button>
+            </div>
+          )}
+          <div className="file-editor-actions">
+            <button type="button" onClick={saveFile} disabled={!dirty || saving || fileMeta?.isBinary || fileMeta?.isImage} title="保存" aria-label="保存文件">
+              <Save size={14} />
+            </button>
+            <button type="button" onClick={closeFile} title="关闭" aria-label="关闭文件">
+              <X size={14} />
+            </button>
+          </div>
         </div>
       </div>
       {fileError && <div className="file-explorer-error">{fileError}</div>}
       {notice && <div className="file-explorer-notice">{notice}</div>}
+      {markdownError && <div className="file-explorer-error">{markdownError}</div>}
+      {loadingFile && <div className="file-editor-loading">正在加载文件…</div>}
       {fileMeta?.isImage && fileMeta.content && (
         <div className="file-image-preview">
           <img src={`data:${fileMeta.mimeType};base64,${fileMeta.content}`} alt={selectedFile.name} />
         </div>
       )}
       {fileMeta?.isBinary && <div className="file-explorer-empty">二进制文件暂不支持编辑。</div>}
-      {!fileMeta?.isBinary && !fileMeta?.isImage && (
+      {!loadingFile && !fileMeta?.isBinary && !fileMeta?.isImage && isMarkdown && markdownMode === 'preview' && (
+        draft.trim() ? (
+          <div
+            ref={markdownPreviewRef}
+            className="file-markdown-preview markdown-body"
+            role="tabpanel"
+            aria-label="Markdown 预览"
+            onClick={handleMarkdownClick}
+            dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
+          />
+        ) : (
+          <div className="file-editor-placeholder file-markdown-empty">这个 Markdown 文件目前是空的。切换到编辑即可开始写入。</div>
+        )
+      )}
+      {!loadingFile && !fileMeta?.isBinary && !fileMeta?.isImage && (!isMarkdown || markdownMode === 'source') && (
         <textarea
           className="file-editor-textarea"
           spellCheck={false}
@@ -214,6 +432,7 @@ export default function FileExplorer({
   const [dirty, setDirty] = useState(false);
   const [fileMeta, setFileMeta] = useState<FileResponse | null>(null);
   const [fileError, setFileError] = useState('');
+  const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const lastOpenRequestRef = useRef(0);
@@ -269,6 +488,7 @@ export default function FileExplorer({
       setLoadedContent('');
       setDraft('');
       setDirty(false);
+      setLoadingFile(false);
       setExpanded(new Set(['.']));
       setCwd(data.cwd || project.path);
       setRootName(data.rootName || 'Project');
@@ -299,6 +519,7 @@ export default function FileExplorer({
     setLoadedContent('');
     setDraft('');
     setDirty(false);
+    setLoadingFile(true);
     onFileSelected?.(node.path);
 
     try {
@@ -314,8 +535,17 @@ export default function FileExplorer({
     } catch (err) {
       if (fileReadRequestRef.current !== readRequestId) return;
       setFileError(err instanceof Error ? err.message : 'Failed to open file');
+    } finally {
+      if (fileReadRequestRef.current === readRequestId) setLoadingFile(false);
     }
   }, [dirty, onFileSelected]);
+
+  const openLinkedFile = useCallback((filePath: string) => {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const name = normalizedPath.split('/').filter(Boolean).pop();
+    if (!name) return;
+    void openFile({ name, path: normalizedPath, isDirectory: false });
+  }, [openFile]);
 
   useEffect(() => {
     if (!openFileRequest || openFileRequest.requestId <= lastOpenRequestRef.current) return;
@@ -369,6 +599,7 @@ export default function FileExplorer({
     setLoadedContent('');
     setDraft('');
     setDirty(false);
+    setLoadingFile(false);
     setFileError('');
     setNotice('');
   }, [dirty]);
@@ -379,12 +610,14 @@ export default function FileExplorer({
     draft,
     dirty,
     fileError,
+    loadingFile,
     saving,
     notice,
     updateDraft,
     saveFile: () => { void saveFile(); },
     closeFile,
-  }), [closeFile, dirty, draft, fileError, fileMeta, notice, saveFile, saving, selectedFile, updateDraft]);
+    openLinkedFile,
+  }), [closeFile, dirty, draft, fileError, fileMeta, loadingFile, notice, openLinkedFile, saveFile, saving, selectedFile, updateDraft]);
 
   useEffect(() => {
     onEditorStateChange?.(editorState);

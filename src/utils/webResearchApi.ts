@@ -100,10 +100,6 @@ export async function cancelWebResearch(requestId: string) {
   return desktopApi().cancelWebResearch(requestId);
 }
 
-export async function setResearchPanelOpen(open: boolean) {
-  return desktopApi().setResearchPanelOpen(open);
-}
-
 export async function openWebSource(url: string) {
   return desktopApi().openExternal(url);
 }

@@ -36,6 +36,37 @@ test('FileExplorer can load the project tree, open a file, edit it, and save cha
   assert.match(source, /fileReadRequestRef/);
 });
 
+test('Markdown files open in a safe preview and retain an editable source mode', () => {
+  const source = read('src/components/FileExplorer.tsx');
+  const markdown = read('src/utils/markdown.ts');
+  const styles = read('src/index.css');
+
+  assert.match(source, /const MARKDOWN_EXTS = new Set\(\['md', 'markdown'\]\)/);
+  assert.match(source, /renderMarkdownDocument/);
+  assert.match(source, /renderMarkdown\(source\)/);
+  assert.match(markdown, /DOMPurify\.sanitize/);
+  assert.match(source, /role="tablist" aria-label="Markdown 查看模式"/);
+  assert.match(source, /<span>预览<\/span>/);
+  assert.match(source, /<span>编辑<\/span>/);
+  assert.match(source, /className="file-markdown-preview markdown-body"/);
+  assert.match(source, /dangerouslySetInnerHTML=\{\{ __html: renderedMarkdown \}\}/);
+  assert.match(source, /className="file-editor-textarea"/);
+  assert.match(source, /loadingFile && <div className="file-editor-loading">正在加载文件…<\/div>/);
+  assert.match(styles, /\.file-markdown-preview\.markdown-body\s*\{[^}]*overflow:\s*auto;/s);
+});
+
+test('Markdown preview resolves workspace assets and routes links through controlled desktop APIs', () => {
+  const source = read('src/components/FileExplorer.tsx');
+
+  assert.match(source, /resolveWorkspaceRelativePath/);
+  assert.match(source, /data-markdown-src/);
+  assert.match(source, /desktopApi\.readFile\(resolvedPath\)/);
+  assert.match(source, /desktopApi\.openExternal\(externalUrl\.href\)/);
+  assert.match(source, /仅支持打开安全的 HTTP\(S\) 外部链接/);
+  assert.match(source, /editor\?\.openLinkedFile\(resolvedPath\)/);
+  assert.match(source, /if \(segments\.length === 0\) return null/);
+});
+
 test('FileExplorer notifies ChatView so workspace changes reload the current project history', () => {
   const explorer = read('src/components/FileExplorer.tsx');
   const chat = read('src/views/ChatView.tsx');

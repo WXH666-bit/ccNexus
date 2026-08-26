@@ -37,6 +37,45 @@ test('desktop main and preload expose session history IPC', () => {
   assert.match(preload, /loadSession:/);
   assert.match(preload, /renameSession:/);
   assert.match(preload, /deleteSession:/);
+  assert.match(main, /messages:\s*visibleSessionMessages\(history\.messages\)/);
+});
+
+test('visible session projection hides internal handoffs and interruption artifacts', async () => {
+  const { visibleSessionMessages } = await import('../desktop/runtime/sessionService.js');
+  const visible = visibleSessionMessages([
+    { id: 'visible', role: 'user', content: [{ type: 'text', text: 'keep me' }] },
+    { id: 'hidden', role: 'user', uiVisibility: 'hidden', content: [{ type: 'text', text: 'private evidence' }] },
+    { id: 'interrupted', role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] },
+    { id: 'no-response', role: 'assistant', content: [{ type: 'text', text: 'No response requested.' }] },
+  ]);
+
+  assert.deepEqual(visible.map(message => message.id), ['visible']);
+});
+
+test('persisting a hidden research turn keeps the existing session title', async () => {
+  const { DesktopSessionService } = await import('../desktop/runtime/sessionService.js');
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'ccnexus-hidden-session-'));
+  const sessionsDir = path.join(homeDir, '.ccnexus', 'sessions');
+
+  try {
+    await mkdir(sessionsDir, { recursive: true });
+    await writeProjectIndex(sessionsDir, homeDir, [{ id: 's1', title: 'Original task', updatedAt: 10 }]);
+    await writeFile(path.join(sessionsDir, 's1.json'), '[]', 'utf8');
+    const service = new DesktopSessionService({ homeDir, cwd: homeDir });
+
+    await service.appendMessage('s1', {
+      id: 'hidden-research',
+      role: 'user',
+      uiVisibility: 'hidden',
+      content: [{ type: 'text', text: '<ccnexus-internal-web-research>private</ccnexus-internal-web-research>' }],
+      timestamp: 20,
+    });
+
+    assert.equal((await service.getSessions()).sessions[0].title, 'Original task');
+    assert.equal((await service.loadSession('s1')).messages[0].uiVisibility, 'hidden');
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
 });
 
 test('client session api uses desktop IPC without a browser fallback', () => {

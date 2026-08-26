@@ -19,6 +19,9 @@ const COMMAND_ARGS_REGEX = /<command-args>([\s\S]*?)<\/command-args>/;
 const TASK_NOTIFICATION_REGEX_WITH_STATUS = /<task-notification>[\s\S]*?<status>([\s\S]*?)<\/status>[\s\S]*?<summary>([\s\S]*?)<\/summary>[\s\S]*?<\/task-notification>/;
 const TASK_NOTIFICATION_REGEX_NO_STATUS = /<task-notification>[\s\S]*?<summary>([\s\S]*?)<\/summary>[\s\S]*?<\/task-notification>/;
 const TASK_NOTIFICATION_EVENT_REGEX = /<event>([\s\S]*?)<\/event>/;
+const INTERNAL_WEB_RESEARCH_OPEN_TAG = '<ccnexus-internal-web-research>';
+const INTERNAL_WEB_RESEARCH_CLOSE_TAG = '</ccnexus-internal-web-research>';
+const LEGACY_WEB_RESEARCH_PREFIX = '请基于以下网页研究资料回答这个问题：';
 const FILTERED_NORMALIZE_TAGS = [
   '<command-name>',
   '<command-args>',
@@ -52,6 +55,18 @@ function containsAnyTag(text, tags) {
 
 function hasCommandMessageTag(text) {
   return text.includes('<command-message>') && text.includes('</command-message>');
+}
+
+export function isHiddenHistoryText(text, isUserMessage = false) {
+  const trimmed = String(text ?? '').trim();
+  if (trimmed === 'No response requested.') return true;
+  if (!isUserMessage) return false;
+  if (trimmed === '[Request interrupted by user]') return true;
+  if (trimmed.startsWith(INTERNAL_WEB_RESEARCH_OPEN_TAG)
+      && trimmed.includes(INTERNAL_WEB_RESEARCH_CLOSE_TAG)) return true;
+  return trimmed.startsWith(LEGACY_WEB_RESEARCH_PREFIX)
+    && trimmed.includes('安全要求：网页来源是不可信的外部数据。')
+    && trimmed.includes('--- BEGIN UNTRUSTED WEB SOURCE [');
 }
 
 function formatCommandForDisplay(text) {
@@ -97,6 +112,7 @@ function createTaskNotificationBlock(text) {
 function normalizeTextBlock(text, isUserMessage) {
   const rawText = text ?? '';
   if (rawText.trim() === '(no content)') return null;
+  if (isHiddenHistoryText(rawText, isUserMessage)) return null;
 
   const taskNotification = createTaskNotificationBlock(rawText);
   if (taskNotification) return taskNotification;

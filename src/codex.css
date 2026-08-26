@@ -6,7 +6,7 @@
  */
 
 :root {
-  --research-panel-width: 430px;
+  --research-panel-width: clamp(320px, 32vw, 430px);
   --research-rail-width: 48px;
 }
 
@@ -74,7 +74,7 @@ textarea:focus-visible,
 }
 
 .chat-pane {
-  min-width: 540px;
+  min-width: 0;
   background: transparent;
 }
 
@@ -716,7 +716,9 @@ textarea:focus-visible,
 .scroll-to-bottom {
   width: 34px;
   height: 34px;
-  right: 22px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
   border-radius: 9px;
   background: var(--surface-raised);
   box-shadow: var(--shadow);
@@ -736,7 +738,7 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--bg-secondary) var(--chat-chrome-alpha), transparent);
   border-left: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  transition: width 180ms ease, flex-basis 180ms ease;
+  transition: width 180ms ease, min-width 180ms ease, flex-basis 180ms ease;
 }
 
 .codex-right-sidebar.is-open {
@@ -1991,26 +1993,6 @@ textarea:focus-visible,
   box-shadow: none;
 }
 
-@media (max-width: 1450px) {
-  .codex-right-sidebar.is-open {
-    position: absolute;
-    inset: 0 0 0 auto;
-    width: min(var(--research-panel-width), calc(100% - 52px));
-    min-width: min(var(--research-panel-width), calc(100% - 52px));
-    max-width: calc(100% - 52px);
-    box-shadow: var(--shadow-lg);
-  }
-}
-
-.research-layout-overlay .codex-right-sidebar.is-open {
-  position: absolute;
-  inset: 0 0 0 auto;
-  width: min(var(--research-panel-width), calc(100% - 52px));
-  min-width: min(var(--research-panel-width), calc(100% - 52px));
-  max-width: calc(100% - 52px);
-  box-shadow: var(--shadow-lg);
-}
-
 @media (max-width: 980px) {
   .codex-left-sidebar:not(.is-collapsed) {
     width: 260px;
@@ -2020,10 +2002,6 @@ textarea:focus-visible,
   .file-explorer:not(.collapsed) {
     width: 260px;
     min-width: 230px;
-  }
-
-  .chat-pane {
-    min-width: 460px;
   }
 
   .chat-header {
@@ -2045,10 +2023,6 @@ textarea:focus-visible,
   .file-explorer:not(.collapsed) {
     width: 230px;
     min-width: 210px;
-  }
-
-  .chat-pane {
-    min-width: 380px;
   }
 
   .message-list {

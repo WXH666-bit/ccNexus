@@ -6,7 +6,6 @@ import {
   Menu,
   nativeImage,
   net,
-  screen,
   session,
   shell,
   Tray,
@@ -24,7 +23,7 @@ import { configureUpdaterNetwork } from './update/updateNetwork.js';
 import { hideDefaultApplicationMenu } from './runtime/windowMenu.js';
 import { LocalConfigService } from './runtime/localConfigService.js';
 import { createPromptEnhancementService } from './runtime/promptEnhancementService.js';
-import { DesktopSessionService } from './runtime/sessionService.js';
+import { DesktopSessionService, visibleSessionMessages } from './runtime/sessionService.js';
 import { createPromptEnhancementUsageStore } from './runtime/promptEnhancementUsageStore.js';
 import { WorkspaceFileService } from './runtime/workspaceFiles.js';
 import { AppearancePreferences } from './runtime/appearancePreferences.js';
@@ -95,13 +94,10 @@ let tray = null;
 let isQuitting = false;
 let cleanupComplete = false;
 let cleanupPromise = null;
-let researchPanelWindowState = null;
 const TITLE_BAR_HEIGHT = 42;
 const BASE_WINDOW_WIDTH = 1280;
 const BASE_WINDOW_MIN_WIDTH = 960;
 const RESEARCH_RAIL_WIDTH = 48;
-const RESEARCH_PANEL_WIDTH = 430;
-const RESEARCH_PANEL_DELTA = RESEARCH_PANEL_WIDTH - RESEARCH_RAIL_WIDTH;
 const TITLE_BAR_THEMES = {
   dark: { color: '#1e1f22', symbolColor: '#9aa0a6' },
   light: { color: '#ffffff', symbolColor: '#5f6368' },
@@ -125,70 +121,6 @@ function applyWindowTheme(theme) {
   if (typeof mainWindow.setTitleBarOverlay === 'function') {
     mainWindow.setTitleBarOverlay({ ...palette, height: TITLE_BAR_HEIGHT });
   }
-}
-
-function clamp(value, minimum, maximum) {
-  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
-}
-
-function setResearchPanelWindowOpen(open) {
-  const window = mainWindow;
-  if (!window || window.isDestroyed()) {
-    researchPanelWindowState = null;
-    return { open: Boolean(open), mode: 'overlay', appliedWidth: 0 };
-  }
-
-  if (!open) {
-    const appliedWidth = researchPanelWindowState?.appliedWidth || 0;
-    const originalBounds = researchPanelWindowState?.originalBounds;
-    if (appliedWidth > 0 && originalBounds && !window.isMaximized() && !window.isFullScreen()) {
-      const display = screen.getDisplayMatching(originalBounds);
-      const workArea = display.workArea;
-      const width = clamp(originalBounds.width, BASE_WINDOW_MIN_WIDTH + RESEARCH_RAIL_WIDTH, workArea.width);
-      const height = clamp(originalBounds.height, 640, workArea.height);
-      const x = clamp(originalBounds.x, workArea.x, workArea.x + workArea.width - width);
-      const y = clamp(originalBounds.y, workArea.y, workArea.y + workArea.height - height);
-      window.setBounds({ x, y, width, height }, true);
-    }
-    researchPanelWindowState = null;
-    return { open: false, mode: 'expanded', appliedWidth: 0 };
-  }
-
-  if (researchPanelWindowState) {
-    return {
-      open: true,
-      mode: researchPanelWindowState.mode,
-      appliedWidth: researchPanelWindowState.appliedWidth,
-    };
-  }
-
-  if (window.isMaximized() || window.isFullScreen()) {
-    researchPanelWindowState = { mode: 'overlay', appliedWidth: 0 };
-    return { open: true, mode: 'overlay', appliedWidth: 0 };
-  }
-
-  const bounds = window.getBounds();
-  const display = screen.getDisplayMatching(bounds);
-  const workArea = display.workArea;
-  const canPreserveWorkspace = bounds.width + RESEARCH_PANEL_DELTA <= workArea.width;
-  if (!canPreserveWorkspace) {
-    researchPanelWindowState = { mode: 'overlay', appliedWidth: 0 };
-    return { open: true, mode: 'overlay', appliedWidth: 0 };
-  }
-
-  const width = bounds.width + RESEARCH_PANEL_DELTA;
-  const x = clamp(
-    bounds.x - Math.floor(RESEARCH_PANEL_DELTA / 2),
-    workArea.x,
-    workArea.x + workArea.width - width,
-  );
-  window.setBounds({ ...bounds, x, width }, true);
-  researchPanelWindowState = {
-    mode: 'expanded',
-    appliedWidth: RESEARCH_PANEL_DELTA,
-    originalBounds: bounds,
-  };
-  return { open: true, mode: 'expanded', appliedWidth: RESEARCH_PANEL_DELTA };
 }
 
 function showMainWindow() {
@@ -255,7 +187,6 @@ function createMainWindow(initialTheme = currentAppearance.theme) {
     },
   });
   mainWindow = window;
-  researchPanelWindowState = null;
   window.on('close', (event) => {
     if (!shouldMinimizeToTray({
       closeBehavior: currentWindowPreferences.closeBehavior,
@@ -269,7 +200,6 @@ function createMainWindow(initialTheme = currentAppearance.theme) {
   window.on('closed', () => {
     if (mainWindow === window) {
       mainWindow = null;
-      researchPanelWindowState = null;
     }
   });
   applyWindowTheme(initialTheme);
@@ -411,10 +341,6 @@ ipcMain.handle('desktop:set-window-preferences', async (_event, preferences = {}
   currentWindowPreferences = await windowPreferences.update(preferences);
   return currentWindowPreferences;
 });
-
-ipcMain.handle('desktop:set-research-panel-open', (_event, args = {}) => (
-  setResearchPanelWindowOpen(args.open === true)
-));
 
 ipcMain.handle('desktop:open-external', async (_event, args = {}) => {
   const rawUrl = typeof args.url === 'string' ? args.url.trim() : '';
@@ -619,7 +545,10 @@ ipcMain.handle('desktop:export-session', async (_event, args = {}) => {
     filters: [{ name: 'JSON', extensions: ['json'] }],
   });
   if (result.canceled || !result.filePath) return { canceled: true };
-  await fs.writeFile(result.filePath, JSON.stringify({ session, messages: history.messages || [] }, null, 2), 'utf8');
+  await fs.writeFile(result.filePath, JSON.stringify({
+    session,
+    messages: visibleSessionMessages(history.messages),
+  }, null, 2), 'utf8');
   return { canceled: false, path: result.filePath };
 });
 

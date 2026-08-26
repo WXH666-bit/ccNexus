@@ -20,6 +20,7 @@ export interface QueuedChatMessage {
   alwaysThinking?: boolean;
   modelOverride?: string;
   displayText?: string;
+  uiVisibility?: 'visible' | 'hidden';
 }
 
 export function beginAbortWindow(sessionId?: string | null): AbortWindowState;
@@ -44,4 +45,5 @@ export function queuedChatMessageToSendArgs(message: QueuedChatMessage): [
   boolean | undefined,
   string | undefined,
   string | undefined,
+  'visible' | 'hidden' | undefined,
 ];

@@ -27,6 +27,7 @@ export function createQueuedChatMessage(message) {
     alwaysThinking: message.alwaysThinking,
     modelOverride: message.modelOverride,
     displayText: message.displayText,
+    uiVisibility: message.uiVisibility,
   };
 }
 
@@ -41,5 +42,6 @@ export function queuedChatMessageToSendArgs(message) {
     message.alwaysThinking,
     message.modelOverride,
     message.displayText,
+    message.uiVisibility,
   ];
 }

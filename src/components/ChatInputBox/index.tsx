@@ -46,8 +46,6 @@ interface ChatInputBoxProps {
   setModel: (model: string) => void;
   reasoning: string;
   setReasoning: (reasoning: string) => void;
-  showStatusPanel: boolean;
-  setShowStatusPanel: (visible: boolean) => void;
   showToolAnchors: boolean;
   setShowToolAnchors: (visible: boolean) => void;
   onProviderSwitch?: () => void;
@@ -173,8 +171,6 @@ export default function ChatInputBox({
   setModel,
   reasoning,
   setReasoning,
-  showStatusPanel,
-  setShowStatusPanel,
   showToolAnchors,
   setShowToolAnchors,
   onProviderSwitch,
@@ -511,12 +507,6 @@ export default function ChatInputBox({
         percentage={usagePercentage}
         usedTokens={usageUsedTokens}
         maxTokens={usageMaxTokens}
-        showStatusPanel={showStatusPanel}
-        onToggleStatusPanel={() => {
-          const next = !showStatusPanel;
-          setShowStatusPanel(next);
-          localStorage.setItem('showStatusPanel', String(next));
-        }}
         onPickFiles={addFiles}
         onRemoveAttachment={index => setAttachments(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
         queue={queue}

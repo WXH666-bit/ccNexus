@@ -19,7 +19,7 @@ test('ChatView accepts restored history for the latest session when /chat has no
 test('ChatView requests the latest session history after restoring the session list', () => {
   const source = read('src/views/ChatView.tsx');
 
-  assert.match(source, /const latest = \[\.\.\.sessionList\]\.sort/);
+  assert.match(source, /const latest = \[\.\.\.visibleSessionList\]\.sort/);
   assert.match(source, /const nextSession = preferredSession \|\| latest/);
   assert.match(source, /requestSessionHistory\(nextSession\.id, fallbackSessionId\)/);
   assert.match(source, /loadSession\(sessionId\)/);
@@ -84,7 +84,7 @@ test('ChatView seeds context usage from restored history before the next live us
 
   assert.match(source, /estimateMessagesUsedTokens/);
   assert.match(source, /extractMessagesUsedTokens/);
-  assert.match(source, /setMessages\(history\.messages\);\s*setUsageUsedTokens\(extractMessagesUsedTokens\(history\.messages\) \?\? readStoredContextUsage\(history\.sessionId\) \?\? estimateMessagesUsedTokens\(history\.messages\)\);/s);
+  assert.match(source, /setMessages\(visibleChatMessages\(history\.messages\)\);\s*setUsageUsedTokens\(extractMessagesUsedTokens\(history\.messages\) \?\? readStoredContextUsage\(history\.sessionId\) \?\? estimateMessagesUsedTokens\(history\.messages\)\);/s);
   assert.match(source, /case 'rewind_complete': \{[\s\S]*setUsageUsedTokens\(extractMessagesUsedTokens\(msg\.messages\) \?\? estimateMessagesUsedTokens\(msg\.messages\)\);/);
   assert.match(source, /setMessages\(\[\]\);\s*setUsageUsedTokens\(undefined\);/s);
   assert.doesNotMatch(source, /setMessages\(\[\]\);\s*setUsageUsedTokens\(readStoredContextUsage\(urlSessionId\)\);/s);

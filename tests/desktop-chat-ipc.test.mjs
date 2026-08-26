@@ -181,6 +181,74 @@ test('desktop abort reports completion only after daemon cleanup resolves', asyn
   controller.dispose();
 });
 
+test('a user-initiated stop does not surface the SDK interruption as a chat error', async () => {
+  const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
+  let rejectPendingTurn;
+  let iteratorStep = 0;
+  const stream = {
+    daemonSessionId: 'interrupt-session',
+    [Symbol.asyncIterator]() { return this; },
+    next() {
+      if (iteratorStep++ === 0) {
+        return Promise.resolve({
+          value: { type: 'system', subtype: 'init', session_id: 'interrupt-session' },
+          done: false,
+        });
+      }
+      return new Promise((_resolve, reject) => { rejectPendingTurn = reject; });
+    },
+    interrupt: async () => {
+      rejectPendingTurn?.(new Error('[Request interrupted by user]'));
+    },
+    close: () => {},
+  };
+  const runtime = {
+    queryClaude: async () => stream,
+    adoptSessionDaemon: () => {},
+    ensureSessionDaemon: () => {},
+    registerChannel: () => {},
+    unregisterChannel: () => {},
+    removeSessionDaemon: () => {},
+  };
+  const sessions = {
+    loadSession: async () => ({ messages: [] }),
+    saveSession: async session => session,
+    appendMessage: async () => {},
+    deleteSession: async () => {},
+  };
+  const controller = createDesktopChatController({
+    runtime,
+    sessions,
+    localConfig: { getProviders: async () => ({ currentEnv: {} }) },
+    workspaceFiles: { getWorkspace: () => ({ cwd: 'D:/repo' }), safePath: () => null },
+  });
+  const chatEvents = [];
+  const chatTask = controller.handle({
+    type: 'chat',
+    sessionId: 'interrupt-session',
+    text: 'stop this turn',
+    options: { model: 'default' },
+  }, event => chatEvents.push(event));
+
+  const pendingStartedAt = Date.now();
+  while (!rejectPendingTurn && Date.now() - pendingStartedAt < 1000) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(typeof rejectPendingTurn, 'function');
+
+  const abortEvents = [];
+  await controller.handle({
+    type: 'abort',
+    sessionId: 'interrupt-session',
+  }, event => abortEvents.push(event));
+  await chatTask;
+
+  assert.equal(chatEvents.some(event => event.type === 'error'), false);
+  assert.equal(chatEvents.some(event => event.message === '[Request interrupted by user]'), false);
+  assert.equal(abortEvents.some(event => event.reason === 'abort-complete'), true);
+  controller.dispose();
+});
+
 test('desktop chat controller sends ccgui-style current provider env to the daemon query', async () => {
   const { createDesktopChatController } = await import('../desktop/runtime/chatController.js');
   let capturedEnv = null;

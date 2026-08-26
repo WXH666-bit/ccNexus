@@ -219,7 +219,6 @@ interface CcNexusDesktopApi {
   }) => Promise<unknown>;
   getWebResearchState: () => Promise<unknown>;
   cancelWebResearch: (requestId: string) => Promise<{ cancelled: boolean; requestId: string }>;
-  setResearchPanelOpen: (open: boolean) => Promise<{ open: boolean; mode: 'expanded' | 'overlay'; appliedWidth?: number }>;
   openExternal: (url: string) => Promise<{ opened: boolean }>;
   stopProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;
   restartProcess: (processRef: { pid: number; id?: string }) => Promise<unknown>;

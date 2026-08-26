@@ -39,10 +39,9 @@ test('status panel separates labels from counts and aligns three equal columns',
   assert.match(styles, /\.status-panel-tab \.tab-progress[\s\S]*font-variant-numeric:\s*tabular-nums;/s);
 });
 
-test('status panel toggle renders a direction icon in both states', () => {
-  assert.match(contextBar, /ChevronDown[\s\S]*ChevronUp/);
-  assert.match(contextBar, /status-panel-toggle-button/);
-  assert.match(contextBar, /showStatusPanel \? <ChevronDown size=\{16\} \/> : <ChevronUp size=\{16\} \/>/);
-  assert.match(contextBar, /aria-expanded=\{showStatusPanel\}/);
-  assert.match(styles, /\.status-panel-toggle-button\s*\{/);
+test('context bar omits controls that moved to the right workspace sidebar', () => {
+  assert.doesNotMatch(contextBar, /status-panel-toggle-button/);
+  assert.doesNotMatch(contextBar, /showStatusPanel|onToggleStatusPanel/);
+  assert.doesNotMatch(contextBar, /RotateCcw|title="回溯"/);
+  assert.doesNotMatch(styles, /\.status-panel-toggle-button\s*\{/);
 });

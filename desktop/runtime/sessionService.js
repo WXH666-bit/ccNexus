@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readClaudeSessionMessages } from '../../server/claudeHistory.js';
+import { isHiddenHistoryText, readClaudeSessionMessages } from '../../server/claudeHistory.js';
 import { claudeProjectSessionsDir, encodeClaudeProjectPath } from '../../server/claudeProjectPaths.js';
 import { createPromptEnhancementUsageStore } from './promptEnhancementUsageStore.js';
 
@@ -58,7 +58,7 @@ async function fileExists(filePath) {
 }
 
 function titleFromMessages(messages, fallbackTitle) {
-  const text = messages
+  const text = visibleSessionMessages(messages)
     .find((message) => message?.role === 'user')
     ?.content
     ?.find((block) => block?.type === 'text')
@@ -66,6 +66,23 @@ function titleFromMessages(messages, fallbackTitle) {
   return typeof text === 'string' && text.trim()
     ? text.trim().slice(0, 60)
     : fallbackTitle;
+}
+
+export function isHiddenSessionMessage(message) {
+  if (!message || typeof message !== 'object') return false;
+  if (message.uiVisibility === 'hidden') return true;
+  const content = typeof message.content === 'string'
+    ? [message.content]
+    : Array.isArray(message.content)
+      ? message.content
+        .filter(block => block?.type === 'text' && typeof block.text === 'string')
+        .map(block => block.text)
+      : [];
+  return content.some(text => isHiddenHistoryText(text, message.role === 'user'));
+}
+
+export function visibleSessionMessages(messages) {
+  return Array.isArray(messages) ? messages.filter(message => !isHiddenSessionMessage(message)) : [];
 }
 
 function tokenValue(value) {
@@ -1128,7 +1145,7 @@ export class DesktopSessionService {
     await fs.writeFile(sessionFile(this.sessionsDir, sessionId), JSON.stringify(messages, null, 2), 'utf8');
     await this.saveSession({
       id: sessionId,
-      title: message.role === 'user' && Array.isArray(message.content)
+      title: message.role === 'user' && message.uiVisibility !== 'hidden' && Array.isArray(message.content)
         ? (message.content.find((block) => block?.type === 'text')?.text || '').slice(0, 60)
         : undefined,
       updatedAt: nextMessage.timestamp,

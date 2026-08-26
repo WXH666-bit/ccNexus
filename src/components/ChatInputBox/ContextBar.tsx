@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Paperclip, RotateCcw, X } from 'lucide-react';
+import { Paperclip, X } from 'lucide-react';
 import TokenIndicator from './TokenIndicator';
 import QueueOrb from '../QueueOrb';
 import type { QueuedChatMessage } from '../../utils/abortWindowState.js';
@@ -14,8 +14,6 @@ interface Props {
   percentage: number;
   usedTokens?: number;
   maxTokens?: number;
-  showStatusPanel: boolean;
-  onToggleStatusPanel: () => void;
   onPickFiles: (files: FileList) => void;
   onRemoveAttachment: (index: number) => void;
   queue: QueuedChatMessage[];
@@ -29,8 +27,6 @@ export default function ContextBar({
   percentage,
   usedTokens,
   maxTokens,
-  showStatusPanel,
-  onToggleStatusPanel,
   onPickFiles,
   onRemoveAttachment,
   queue,
@@ -81,25 +77,6 @@ export default function ContextBar({
           </button>
         </span>
       ))}
-
-      <div className="context-tools-right">
-        <button
-          type="button"
-          className={`context-tool-btn status-panel-toggle-button ${showStatusPanel ? 'expanded' : 'collapsed'}`}
-          onClick={event => {
-            event.stopPropagation();
-            onToggleStatusPanel();
-          }}
-          aria-label={showStatusPanel ? '收起状态面板' : '展开状态面板'}
-          aria-expanded={showStatusPanel}
-          title={showStatusPanel ? '收起状态面板' : '展开状态面板'}
-        >
-          {showStatusPanel ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-        </button>
-        <button type="button" className="context-tool-btn" title="回溯">
-          <RotateCcw size={15} />
-        </button>
-      </div>
     </div>
   );
 }

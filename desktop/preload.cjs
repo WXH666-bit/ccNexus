@@ -72,7 +72,6 @@ contextBridge.exposeInMainWorld('ccNexusDesktop', {
   getWebResearchContent: (args) => ipcRenderer.invoke('desktop:web-research-content', args),
   getWebResearchState: () => ipcRenderer.invoke('desktop:web-research-state'),
   cancelWebResearch: (requestId) => ipcRenderer.invoke('desktop:web-research-cancel', { requestId }),
-  setResearchPanelOpen: (open) => ipcRenderer.invoke('desktop:set-research-panel-open', { open }),
   openExternal: (url) => ipcRenderer.invoke('desktop:open-external', { url }),
   stopProcess: (processRef) => ipcRenderer.invoke('desktop:stop-process', processRef),
   restartProcess: (processRef) => ipcRenderer.invoke('desktop:restart-process', processRef),

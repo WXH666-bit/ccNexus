@@ -301,6 +301,11 @@ test('cancelling a smooth scroll monitor prevents every late completion path', (
 
 test('manual scroll-to-bottom keeps the smooth interaction', () => {
   const messageList = read('src/components/MessageList.tsx');
+  const styles = read('src/index.css');
 
   assert.match(messageList, /scrollToBottom\('smooth'\)/);
+  assert.match(messageList, /className="message-list-shell"[\s\S]*className="message-list"[\s\S]*className="scroll-to-bottom"/);
+  assert.match(styles, /\.message-list-shell\s*\{[^}]*position:\s*relative;/s);
+  assert.match(styles, /\.scroll-to-bottom\s*\{[^}]*position:\s*absolute;[^}]*left:\s*50%;[^}]*right:\s*auto;/s);
+  assert.doesNotMatch(styles, /\.scroll-to-bottom\s*\{[^}]*position:\s*fixed;/s);
 });

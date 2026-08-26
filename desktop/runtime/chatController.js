@@ -224,6 +224,7 @@ export function createDesktopChatController({
   const sessionMessages = new Map();
   const fileEditHistory = new Map();
   const runtimeProfiles = new Map();
+  const expectedQueryInterrupts = new WeakSet();
 
   function emitSafe(emit, payload) {
     try {
@@ -260,6 +261,9 @@ export function createDesktopChatController({
     if (!query) return false;
     cancelPlanApprovals(sessionId);
     cancelQuestionParents(sessionId);
+    if ((typeof query === 'object' && query !== null) || typeof query === 'function') {
+      expectedQueryInterrupts.add(query);
+    }
     try { await query.interrupt(); } catch { /* ignore */ }
     try { query.close(); } catch { /* ignore */ }
     unregisterActiveQuery(sessionId, query);
@@ -623,7 +627,7 @@ export function createDesktopChatController({
     return messages;
   }
 
-  async function recordUserMessage(sessionId, prompt) {
+  async function recordUserMessage(sessionId, prompt, { uiVisibility } = {}) {
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -631,6 +635,7 @@ export function createDesktopChatController({
       sessionId,
       timestamp: Date.now(),
     };
+    if (uiVisibility === 'hidden') userMessage.uiVisibility = 'hidden';
     await sessions.appendMessage(sessionId, userMessage);
     sessionMessages.delete(sessionId);
     await loadMessages(sessionId);
@@ -666,8 +671,16 @@ export function createDesktopChatController({
   }
 
   async function handleChat(message, emit) {
-    const { text, images, sessionId, options: clientOptions } = message;
-    let querySessionId = sessionId || null;
+    const {
+      text,
+      images,
+      sessionId,
+      options: clientOptions,
+      displayText,
+      uiVisibility,
+    } = message;
+    const requestedSessionId = sessionId || null;
+    let querySessionId = requestedSessionId;
     const requestOrder = ++latestChatRequest;
     if (!querySessionId) currentUnboundRequestOrder = requestOrder;
     currentSessionId = querySessionId;
@@ -677,6 +690,9 @@ export function createDesktopChatController({
     if (Array.isArray(images) && images.length) {
       prompt += '\n\n[User attached images]';
     }
+    const requestTitle = promptTitle(
+      uiVisibility === 'hidden' ? displayText || '网页研究' : prompt,
+    );
 
     const canUseTool = createPermissionHandler(emit, () => querySessionId, requestOrder);
     const { currentEnv, providerMode } = await localConfig.getProviders();
@@ -724,7 +740,7 @@ export function createDesktopChatController({
     try {
       query = await runtime.queryClaude({
         sessionId: querySessionId || `pending-${requestOrder}`,
-        title: promptTitle(prompt),
+        title: requestTitle,
         prompt,
         options: queryOpts,
         rawModelId,
@@ -773,13 +789,13 @@ export function createDesktopChatController({
               runtime.adoptSessionDaemon({
                 fromSessionId: query.daemonSessionId,
                 toSessionId: querySessionId,
-                title: promptTitle(prompt),
+                title: requestTitle,
               });
-              runtime.ensureSessionDaemon({ sessionId: querySessionId, title: promptTitle(prompt) });
+              runtime.ensureSessionDaemon({ sessionId: querySessionId, title: requestTitle });
               registerActiveQuery(querySessionId, query);
               const savedSession = await sessions.saveSession({
                 id: querySessionId,
-                title: promptTitle(prompt),
+                ...(uiVisibility === 'hidden' && requestedSessionId ? {} : { title: requestTitle }),
                 updatedAt: Date.now(),
               });
               if (typeof workspaceFiles.setActiveSessionId === 'function') {
@@ -787,7 +803,7 @@ export function createDesktopChatController({
               }
               emitSafe(emit, sessionEvent(querySessionId, savedSession));
               reportRuntimeLifecycle(querySessionId);
-              await recordUserMessage(querySessionId, prompt);
+              await recordUserMessage(querySessionId, prompt, { uiVisibility });
             }
             emitSafe(emit, { type: 'system', subtype: event.subtype, sessionId: event.session_id || querySessionId });
             break;
@@ -949,17 +965,24 @@ export function createDesktopChatController({
         }
       }
     } catch (error) {
-      const messageText = normalizeError(error);
-      let invalidSessionId = null;
-      if (querySessionId && isMissingClaudeConversationError(messageText)) {
-        await sessions.deleteSession(querySessionId);
-        forgetSessionState(querySessionId);
-        if (currentSessionId === querySessionId) currentSessionId = null;
-        invalidSessionId = querySessionId;
+      const expectedInterrupt = Boolean(
+        query
+        && (((typeof query === 'object' && query !== null) || typeof query === 'function'))
+        && expectedQueryInterrupts.has(query),
+      );
+      if (!expectedInterrupt) {
+        const messageText = normalizeError(error);
+        let invalidSessionId = null;
+        if (querySessionId && isMissingClaudeConversationError(messageText)) {
+          await sessions.deleteSession(querySessionId);
+          forgetSessionState(querySessionId);
+          if (currentSessionId === querySessionId) currentSessionId = null;
+          invalidSessionId = querySessionId;
+        }
+        emitSafe(emit, invalidSessionId
+          ? staleSessionErrorEvent(messageText, invalidSessionId)
+          : { type: 'error', message: messageText, sessionId: querySessionId });
       }
-      emitSafe(emit, invalidSessionId
-        ? staleSessionErrorEvent(messageText, invalidSessionId)
-        : { type: 'error', message: messageText, sessionId: querySessionId });
       emitSafe(emit, { type: 'status', status: 'idle', sessionId: querySessionId });
     } finally {
       if (currentUnboundRequestOrder === requestOrder) currentUnboundRequestOrder = null;

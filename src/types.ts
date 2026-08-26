@@ -144,6 +144,8 @@ export interface ChatMessage {
   turns?: number;
   runtimeClassification?: 'cold' | 'warm';
   runtimeRetirementReason?: string;
+  /** Internal continuation turns stay in model context but never render as chat bubbles. */
+  uiVisibility?: 'visible' | 'hidden';
 }
 
 // ─── Session ─────────────────────────────────────────────────────
